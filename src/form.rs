@@ -448,7 +448,10 @@ pub fn run_form(
             }
 
             let hint = if let Some(err) = &error {
-                Span::styled(format!("  ✗ {}", err), Style::default().fg(theme.danger.get()))
+                Span::styled(
+                    format!("  ✗ {}", err),
+                    Style::default().fg(theme.danger.get()),
+                )
             } else {
                 Span::styled(
                     "  ↑↓ Tab navigate  ← → Space toggle  Enter save  Esc cancel",

@@ -124,14 +124,26 @@ mod tests {
     fn mwi_waiting_yes() {
         let param = "Messages-Waiting: yes\r\nVoice-Message: 3/0";
         let event = AppEvent::from(event_msg("BEVENT_MWI_NOTIFY", param, json!({})));
-        assert!(matches!(event, AppEvent::VoicemailStatus { waiting: true, new_count: 3 }));
+        assert!(matches!(
+            event,
+            AppEvent::VoicemailStatus {
+                waiting: true,
+                new_count: 3
+            }
+        ));
     }
 
     #[test]
     fn mwi_waiting_no() {
         let param = "Messages-Waiting: no\r\nVoice-Message: 0/0";
         let event = AppEvent::from(event_msg("BEVENT_MWI_NOTIFY", param, json!({})));
-        assert!(matches!(event, AppEvent::VoicemailStatus { waiting: false, new_count: 0 }));
+        assert!(matches!(
+            event,
+            AppEvent::VoicemailStatus {
+                waiting: false,
+                new_count: 0
+            }
+        ));
     }
 
     // ── event mapping ──────────────────────────────────────────────────────────
@@ -140,17 +152,17 @@ mod tests {
     fn register_ok_event() {
         let extra = json!({"accountaor": "sip:bob@example.com"});
         let event = AppEvent::from(event_msg("BEVENT_REGISTER_OK", "", extra));
-        assert!(matches!(event, AppEvent::RegisterOk { account } if account == "sip:bob@example.com"));
+        assert!(
+            matches!(event, AppEvent::RegisterOk { account } if account == "sip:bob@example.com")
+        );
     }
 
     #[test]
     fn call_incoming_event() {
         let extra = json!({"id": "call-1", "peeruri": "sip:carol@example.com"});
         let event = AppEvent::from(event_msg("BEVENT_CALL_INCOMING", "", extra));
-        assert!(
-            matches!(event, AppEvent::CallIncoming { call_id, number }
-                if call_id == "call-1" && number == "sip:carol@example.com")
-        );
+        assert!(matches!(event, AppEvent::CallIncoming { call_id, number }
+                if call_id == "call-1" && number == "sip:carol@example.com"));
     }
 
     #[test]
