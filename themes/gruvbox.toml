@@ -1,0 +1,12 @@
+# Gruvbox Dark
+# https://github.com/morhetz/gruvbox
+#
+# Copy the [theme] block into ~/.config/ringo/ringo.toml
+
+[theme]
+accent    = "#83a598"   # aqua
+subtle    = "#928374"   # gray
+success   = "#b8bb26"   # green
+danger    = "#fb4934"   # red
+attention = "#fabd2f"   # yellow
+transfer  = "#d3869b"   # purple

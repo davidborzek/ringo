@@ -1,0 +1,12 @@
+# Nord
+# https://www.nordtheme.com
+#
+# Copy the [theme] block into ~/.config/ringo/ringo.toml
+
+[theme]
+accent    = "#88c0d0"   # nord8 (frost)
+subtle    = "#4c566a"   # nord3
+success   = "#a3be8c"   # nord14 (green)
+danger    = "#bf616a"   # nord11 (red)
+attention = "#ebcb8b"   # nord13 (yellow)
+transfer  = "#b48ead"   # nord15 (purple)

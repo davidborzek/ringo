@@ -1,0 +1,33 @@
+#!/bin/sh
+# ringo-rofi — pick a ringo profile via rofi and launch it in a new terminal
+#
+# Usage: ringo-rofi
+# Bind to a key in your WM config, e.g. (sway/i3):
+#   bindsym $mod+p exec ringo-rofi
+#
+# Requires: ringo, rofi, and a terminal set via $TERMINAL
+# (or one of: kitty, alacritty, foot, wezterm, xterm)
+
+set -e
+
+profile=$(ringo list --plain | rofi -dmenu -i -p "ringo")
+[ -z "$profile" ] && exit 0
+
+# Resolve terminal
+if [ -n "$TERMINAL" ]; then
+    exec "$TERMINAL" -e ringo start "$profile"
+fi
+
+for term in kitty alacritty foot xterm urxvt st; do
+    if command -v "$term" > /dev/null 2>&1; then
+        exec "$term" -e ringo start "$profile"
+    fi
+done
+
+# wezterm uses a different syntax
+if command -v wezterm > /dev/null 2>&1; then
+    exec wezterm start -- ringo start "$profile"
+fi
+
+echo "ringo-rofi: no terminal emulator found. Set \$TERMINAL." >&2
+exit 1

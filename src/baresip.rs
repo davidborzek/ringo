@@ -1,0 +1,131 @@
+use anyhow::{Context, Result, bail};
+use std::{
+    fs,
+    net::TcpListener,
+    path::Path,
+    process::{Command, Stdio},
+    thread,
+    time::Duration,
+};
+
+use crate::profile;
+
+pub fn start(name: Option<String>, notify: bool) -> Result<()> {
+    let mut current = match name {
+        Some(n) => n,
+        None => profile::pick_profile()?,
+    };
+
+    loop {
+        match start_one(&current, notify)? {
+            Some(next) => current = next,
+            None => return Ok(()),
+        }
+    }
+}
+
+fn start_one(name: &str, notify: bool) -> Result<Option<String>> {
+    let dir = profile::profile_dir(name)?;
+    if !dir.join("profile.toml").exists() {
+        bail!("Profile '{}' not found.", name);
+    }
+
+    let prof = profile::load(name)?;
+    let port = pick_free_port()?;
+
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let tmp_dir = std::path::PathBuf::from(format!("/tmp/ringo-{}-{}", name, ts));
+    copy_profile_dir(&dir, &tmp_dir)?;
+
+    let config = profile::generate_config_content(&prof, port)?;
+    fs::write(tmp_dir.join("config"), config).context("Failed to write config into temp dir")?;
+
+    let log_path = tmp_dir.join("baresip.log");
+    let log_file = fs::File::create(&log_path).context("Failed to create baresip.log")?;
+    let log_file2 = log_file.try_clone()?;
+
+    let mut child = Command::new("baresip")
+        .arg("-f")
+        .arg(&tmp_dir)
+        .stdout(Stdio::from(log_file))
+        .stderr(Stdio::from(log_file2))
+        .spawn()
+        .context("Failed to start baresip. Is it installed and in PATH?")?;
+
+    if let Err(e) = wait_for_port(port, Duration::from_secs(5)) {
+        let _ = child.kill();
+        let _ = child.wait();
+        let _ = fs::remove_dir_all(&tmp_dir);
+        return Err(e);
+    }
+
+    let aor = prof.aor();
+    let call_history_path = dir.join("call_history");
+    let effective_notify = notify && prof.notify;
+    let theme = crate::config::load().theme;
+    let next = crate::tui::run(
+        name.to_string(),
+        aor,
+        port,
+        Some(log_path),
+        Some(call_history_path),
+        effective_notify,
+        theme,
+    );
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(&tmp_dir);
+
+    next
+}
+
+/// Copy all files from `src` to `dst`, following symlinks, skipping `uuid`.
+fn copy_profile_dir(src: &Path, dst: &Path) -> Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let fname = entry.file_name();
+
+        if fname == "uuid" {
+            continue;
+        }
+
+        let meta = match fs::metadata(entry.path()) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        if meta.is_file() {
+            fs::copy(entry.path(), dst.join(&fname))
+                .with_context(|| format!("Failed to copy {:?}", entry.path()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Ask the OS for a free ephemeral port by binding to port 0.
+fn pick_free_port() -> Result<u16> {
+    let listener = TcpListener::bind("127.0.0.1:0").context("Failed to bind for port discovery")?;
+    Ok(listener.local_addr()?.port())
+}
+
+/// Poll TCP port until it accepts a connection or timeout elapses.
+fn wait_for_port(port: u16, timeout: Duration) -> Result<()> {
+    let start = std::time::Instant::now();
+    loop {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            return Ok(());
+        }
+        if start.elapsed() >= timeout {
+            anyhow::bail!(
+                "Timed out waiting for baresip ctrl_tcp on port {}.\n\
+                 Check ~/.baresip/config or the profile config for errors.",
+                port
+            );
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+}

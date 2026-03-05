@@ -1,0 +1,12 @@
+# Catppuccin Mocha
+# https://github.com/catppuccin/catppuccin
+#
+# Copy the [theme] block into ~/.config/ringo/ringo.toml
+
+[theme]
+accent    = "#89b4fa"   # blue
+subtle    = "#585b70"   # surface2
+success   = "#a6e3a1"   # green
+danger    = "#f38ba8"   # red
+attention = "#f9e2af"   # yellow
+transfer  = "#cba6f7"   # mauve

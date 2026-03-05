@@ -1,0 +1,12 @@
+# Tokyo Night
+# https://github.com/enkia/tokyo-night-vscode-theme
+#
+# Copy the [theme] block into ~/.config/ringo/ringo.toml
+
+[theme]
+accent    = "#7aa2f7"   # blue
+subtle    = "#565f89"   # comment
+success   = "#9ece6a"   # green
+danger    = "#f7768e"   # red
+attention = "#e0af68"   # yellow
+transfer  = "#bb9af7"   # purple

@@ -1,0 +1,43 @@
+#!/bin/sh
+# ringo-tmux — pick profiles via fzf and open each in a tmux pane
+#
+# Usage: ringo-tmux
+# Requires: ringo, tmux, fzf
+
+set -e
+
+# Dependency checks
+for cmd in tmux fzf ringo; do
+    command -v "$cmd" > /dev/null 2>&1 || { echo "ringo-tmux: '$cmd' not found" >&2; exit 1; }
+done
+
+# Profile selection via fzf multi-select
+profiles=$(ringo list --plain | fzf --multi --prompt="ringo profiles > " --header="Tab to select, Enter to confirm")
+[ -z "$profiles" ] && exit 0
+
+SESSION="ringo"
+first=1
+
+echo "$profiles" | while IFS= read -r profile; do
+    if [ "$first" = "1" ]; then
+        # Create new session (detached) with first profile, or new window if session exists
+        if tmux has-session -t "$SESSION" 2>/dev/null; then
+            tmux new-window -t "$SESSION" -n "$profile" "ringo start '$profile'"
+        else
+            tmux new-session -d -s "$SESSION" -n "$profile" "ringo start '$profile'"
+        fi
+        first=0
+    else
+        tmux split-window -t "$SESSION" "ringo start '$profile'"
+    fi
+done
+
+# Even layout
+tmux select-layout -t "$SESSION" tiled
+
+# Attach or switch
+if [ -n "$TMUX" ]; then
+    tmux switch-client -t "$SESSION"
+else
+    tmux attach-session -t "$SESSION"
+fi

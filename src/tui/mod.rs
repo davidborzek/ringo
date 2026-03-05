@@ -1,0 +1,151 @@
+mod app;
+mod call;
+mod call_history;
+mod dial;
+mod handler;
+pub mod ui;
+
+mod keys;
+mod transfer;
+
+pub use crate::event::AppEvent;
+pub use app::{
+    App, CallDirection, CallHistoryEntry, CallState, InputMode, RegStatus, TransferMode,
+};
+
+use anyhow::Result;
+use crossterm::event::{self as ct_event, Event};
+use ratatui::{Terminal, backend::CrosstermBackend};
+use std::{io, path::PathBuf, sync::mpsc};
+use tokio::{net::TcpStream, sync::mpsc as tokio_mpsc};
+
+use crate::{
+    client,
+    phone::{BaresipPhone, Phone},
+};
+
+// ─── Main entry point ─────────────────────────────────────────────────────────
+
+pub fn run(
+    profile_name: String,
+    account_aor: String,
+    port: u16,
+    baresip_log_path: Option<PathBuf>,
+    call_history_path: Option<PathBuf>,
+    notify: bool,
+    theme: crate::config::Theme,
+) -> Result<Option<String>> {
+    let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
+    let (cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(32);
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    // Connect to baresip ctrl_tcp
+    let stream = rt.block_on(TcpStream::connect(("127.0.0.1", port)))?;
+    let (read_half, write_half) = stream.into_split();
+
+    let phone = BaresipPhone::new(cmd_tx);
+
+    // TCP reader task: baresip → msg_tx (converts BaresipMessage → AppEvent)
+    rt.spawn(async move {
+        let mut reader = read_half;
+        loop {
+            match client::read_message(&mut reader).await {
+                Ok(msg) => {
+                    if msg_tx.send(AppEvent::from(msg)).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // TCP writer task: cmd_rx → baresip
+    rt.spawn(async move {
+        let mut writer = write_half;
+        let mut rx = cmd_rx;
+        while let Some((cmd, params)) = rx.recv().await {
+            if client::write_command(&mut writer, &cmd, &params)
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+
+    // Set up terminal
+    crossterm::terminal::enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut app = App::new(
+        profile_name,
+        account_aor,
+        baresip_log_path,
+        call_history_path,
+        notify,
+        Box::new(phone),
+        theme,
+    );
+    let render_result = render_loop(&mut terminal, &mut app, &msg_rx);
+
+    // Restore terminal unconditionally
+    let _ = crossterm::terminal::disable_raw_mode();
+    let _ = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::LeaveAlternateScreen
+    );
+
+    // Drop runtime without waiting for blocked TCP tasks
+    rt.shutdown_background();
+
+    render_result?;
+
+    if app.switch_to {
+        match crate::profile::pick_profile() {
+            Ok(name) => return Ok(Some(name)),
+            Err(_) => {}
+        }
+    }
+
+    Ok(None)
+}
+
+// ─── Render loop ──────────────────────────────────────────────────────────────
+
+fn render_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    msg_rx: &mpsc::Receiver<AppEvent>,
+) -> Result<()> {
+    use std::time::Duration;
+    loop {
+        app.tick = app.tick.wrapping_add(1);
+        // Refresh baresip log every ~500ms (30 ticks × 16ms) when visible
+        if app.log.show_baresip && app.tick % 30 == 0 {
+            app.refresh_baresip_log();
+        }
+
+        terminal.draw(|frame| ui::render(frame, app))?;
+
+        if ct_event::poll(Duration::from_millis(16))? {
+            if let Event::Key(key) = ct_event::read()? {
+                app.handle_key(key);
+                if app.quit {
+                    break;
+                }
+            }
+        }
+
+        while let Ok(event) = msg_rx.try_recv() {
+            app.handle_message(event);
+        }
+    }
+    Ok(())
+}

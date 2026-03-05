@@ -1,0 +1,30 @@
+[package]
+name = "ringo"
+version = "0.1.0"
+edition = "2024"
+description = "A terminal SIP softphone built on baresip"
+license = "MIT"
+authors = ["David Borzek <mail@davidborzek.de>"]
+repository = "https://github.com/davidborzek/ringo"
+keywords = ["sip", "voip", "baresip", "tui", "phone"]
+categories = ["command-line-utilities"]
+rust-version = "1.85"
+
+[lib]
+name = "ringo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ringo"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+anyhow = "1"
+ratatui = "0.28"
+crossterm = "0.28"
+tokio = { version = "1", features = ["full"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
