@@ -1,0 +1,30 @@
+[changelog]
+header = "# Changelog\n\n"
+body = """
+{% if version %}\
+## {{ version }} — {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## Unreleased
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}\
+- {{ commit.message | split(pat=":") | last | trim | upper_first }}
+{% endfor %}\
+{% endfor %}\n
+"""
+trim = true
+
+[git]
+conventional_commits = false
+filter_unconventional = false
+tag_pattern = "v[0-9]+\\.[0-9]+\\.[0-9]+"
+commit_parsers = [
+  { message = "^[Ff]eat", group = "Features" },
+  { message = "^[Ff]ix",  group = "Bug Fixes" },
+  { message = "^[Rr]efactor", group = "Refactor" },
+  { message = "^[Dd]ocs", group = "Documentation" },
+  { message = "^[Tt]est", group = "Tests" },
+  { message = "^[Ss]tyle|^[Cc]hore", skip = true },
+]
+filter_commits = true
