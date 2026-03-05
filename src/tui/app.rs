@@ -127,6 +127,7 @@ pub struct App {
     pub mwi: MwiState,
     pub call_history: CallHistoryState,
     pub log: LogState,
+    pub last_call_reason: Option<String>,
     pub(crate) phone: Box<dyn Phone>,
     pub quit: bool,
     pub switch_to: bool,
@@ -187,6 +188,7 @@ impl App {
                 show_baresip: false,
                 baresip_lines: Vec::new(),
             },
+            last_call_reason: None,
             theme,
         }
     }

@@ -10,6 +10,7 @@ use super::app::{Call, CallDirection, CallState, TransferMode};
 
 impl super::app::App {
     pub(super) fn handle_call_incoming(&mut self, call_id: String, number: String) {
+        self.last_call_reason = None;
         self.notify("Incoming call", &number);
         self.calls.push(Call {
             id: call_id,
@@ -21,6 +22,7 @@ impl super::app::App {
     }
 
     pub(super) fn handle_call_outgoing(&mut self, call_id: String, number: String) {
+        self.last_call_reason = None;
         self.calls.push(Call {
             id: call_id,
             peer: number,
@@ -50,12 +52,23 @@ impl super::app::App {
         }
     }
 
-    pub(super) fn handle_call_closed(&mut self, call_id: String) {
+    pub(super) fn handle_call_closed(&mut self, call_id: String, reason: String, error: bool) {
         if let Some(call) = self.calls.iter().find(|c| c.id == call_id) {
             if call.direction == CallDirection::Incoming && call.started_at.is_none() {
                 self.notify("Missed call", &call.peer.clone());
             }
+            let log_entry = if error {
+                Some(format!("✗ {} — {}", call.peer, reason))
+            } else {
+                None
+            };
             self.append_call_history(call);
+            if let Some(entry) = log_entry {
+                self.push_log(entry);
+            }
+        }
+        if error {
+            self.last_call_reason = Some(reason);
         }
         self.dial.dtmf.clear();
         self.calls.retain(|c| c.id != call_id);

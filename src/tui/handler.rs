@@ -29,7 +29,11 @@ impl super::app::App {
             }
             AppEvent::CallRinging { call_id } => self.handle_call_ringing(call_id),
             AppEvent::CallEstablished { call_id } => self.handle_call_established(call_id),
-            AppEvent::CallClosed { call_id } => self.handle_call_closed(call_id),
+            AppEvent::CallClosed {
+                call_id,
+                reason,
+                error,
+            } => self.handle_call_closed(call_id, reason, error),
             AppEvent::CallOnHold { call_id } => self.handle_call_on_hold(call_id),
             AppEvent::CallResumed { call_id } => self.handle_call_resumed(call_id),
             AppEvent::TransferOk { info } => self.handle_transfer_ok(info),

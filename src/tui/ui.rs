@@ -62,6 +62,13 @@ pub fn render(f: &mut Frame, app: &App) {
 
     super::call::render_calls(f, app, chunks[0]);
     super::dial::render_dial(f, app, chunks[2]);
+    if let Some(reason) = &app.last_call_reason {
+        f.render_widget(
+            Paragraph::new(format!("  ✗ {}", reason))
+                .style(Style::default().fg(app.theme.danger.get())),
+            chunks[3],
+        );
+    }
     render_keys(f, app, chunks[4]);
     if log_visible {
         if app.log.show_baresip {
