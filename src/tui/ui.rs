@@ -125,6 +125,7 @@ fn render_keys(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 parts.push("[l] baresip log");
                 if !app.has_any_call() {
                     parts.push("[c] call history");
+                    parts.push("[ctrl+e] edit profile");
                 }
                 parts.push("[q] quit");
                 parts.join("  ")

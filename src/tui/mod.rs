@@ -90,7 +90,36 @@ pub fn run(
         Box::new(phone),
         theme,
     );
-    let render_result = render_loop(&mut terminal, &mut app, &msg_rx);
+
+    let mut do_restart = false;
+    loop {
+        render_loop(&mut terminal, &mut app, &msg_rx)?;
+
+        if !app.edit_profile {
+            break;
+        }
+
+        // Open edit form over the still-running TUI terminal
+        app.edit_profile = false;
+        app.quit = false;
+
+        let profile = crate::profile::load(&app.profile_name)?;
+        let result = crate::form::run_form(
+            &mut terminal,
+            Some(&app.profile_name),
+            &profile,
+            &[],
+            &app.theme,
+        )?;
+        if let Some((_, new_profile)) = result {
+            crate::profile::save(&app.profile_name, &new_profile)?;
+            if crate::form::run_restart_confirm(&mut terminal, &app.theme)? {
+                do_restart = true;
+                break;
+            }
+        }
+        // Form cancelled or "Later" → resume TUI
+    }
 
     // Restore terminal unconditionally
     let _ = crossterm::terminal::disable_raw_mode();
@@ -102,7 +131,9 @@ pub fn run(
     // Drop runtime without waiting for blocked TCP tasks
     rt.shutdown_background();
 
-    render_result?;
+    if do_restart {
+        return Ok(Some(app.profile_name.clone()));
+    }
 
     if app.switch_to {
         match crate::profile::pick_profile() {

@@ -14,6 +14,17 @@ impl super::app::App {
             return;
         }
 
+        // Edit profile
+        if matches!(
+            (key.code, key.modifiers),
+            (KeyCode::Char('e'), KeyModifiers::CONTROL)
+        ) && !self.has_any_call()
+        {
+            self.edit_profile = true;
+            self.quit = true;
+            return;
+        }
+
         // Switch profile
         if matches!(
             (key.code, key.modifiers),

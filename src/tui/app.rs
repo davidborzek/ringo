@@ -131,6 +131,7 @@ pub struct App {
     pub(crate) phone: Box<dyn Phone>,
     pub quit: bool,
     pub switch_to: bool,
+    pub edit_profile: bool,
     pub theme: Theme,
 }
 
@@ -189,6 +190,7 @@ impl App {
                 baresip_lines: Vec::new(),
             },
             last_call_reason: None,
+            edit_profile: false,
             theme,
         }
     }
