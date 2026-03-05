@@ -28,6 +28,17 @@ ringo is a SIP softphone with a full-featured ratatui TUI, built on top of bares
 
 ## Installation
 
+**From GitHub (no clone needed):**
+
+```sh
+cargo install --git https://github.com/davidborzek/ringo
+```
+
+**Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are available on the
+[releases page](https://github.com/davidborzek/ringo/releases).
+
+**From source:**
+
 ```sh
 cargo install --path . --root ~/.local
 ```
