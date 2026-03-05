@@ -1,5 +1,12 @@
-use super::app::InputMode;
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+};
 
+use super::app::InputMode;
 
 impl super::app::App {
     pub fn exit_history_nav(&mut self) {
@@ -65,6 +72,133 @@ impl super::app::App {
         let c = self.dial.input[self.dial.cursor..].chars().next().unwrap();
         self.dial.cursor += c.len_utf8();
     }
+}
+
+pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
+    use super::app::TransferMode;
+
+    let mute_indicator = if app.muted {
+        Span::styled(" [MUTED]", Style::default().fg(app.theme.danger.get()))
+    } else {
+        Span::raw("")
+    };
+
+    let line = match &app.transfer_mode {
+        TransferMode::BlindInput(s) => Line::from(vec![
+            Span::styled("  Xfer → : ", Style::default().fg(app.theme.transfer.get())),
+            Span::styled(
+                format!("{}_", s),
+                Style::default().fg(app.theme.transfer.get()),
+            ),
+            mute_indicator,
+        ]),
+        TransferMode::AttendedInput(s) => Line::from(vec![
+            Span::styled("  Att. → : ", Style::default().fg(app.theme.transfer.get())),
+            Span::styled(
+                format!("{}_", s),
+                Style::default().fg(app.theme.transfer.get()),
+            ),
+            mute_indicator,
+        ]),
+        TransferMode::AttendedPending => Line::from(vec![
+            Span::styled(
+                "  Attended: call ringing…",
+                Style::default().fg(app.theme.attention.get()),
+            ),
+            mute_indicator,
+        ]),
+        TransferMode::None => {
+            if app.in_active_call() {
+                Line::from(vec![
+                    Span::styled("  DTMF: ", Style::default().fg(app.theme.accent.get())),
+                    Span::styled(
+                        format!("{}_", app.dial.dtmf),
+                        Style::default().fg(app.theme.accent.get()),
+                    ),
+                    mute_indicator,
+                ])
+            } else if app.dial.mode == InputMode::HistoryNav {
+                Line::from(vec![
+                    Span::styled("  Hist: ", Style::default().fg(app.theme.attention.get())),
+                    Span::raw(format!("{}_", app.dial.input)),
+                    mute_indicator,
+                ])
+            } else {
+                let cursor = app.dial.cursor.min(app.dial.input.len());
+                let before = &app.dial.input[..cursor];
+                let after = &app.dial.input[cursor..];
+                let cursor_x = area.x + 8 + before.chars().count() as u16;
+                f.set_cursor_position((cursor_x, area.y));
+                Line::from(vec![
+                    Span::styled("  Dial: ", Style::default().fg(app.theme.accent.get())),
+                    Span::raw(before),
+                    Span::raw(after),
+                    mute_indicator,
+                ])
+            }
+        }
+    };
+    f.render_widget(Paragraph::new(line), area);
+}
+
+pub(super) fn render_history_search(f: &mut Frame, app: &super::app::App, area: Rect) {
+    let filtered = crate::history::fuzzy_filter(&app.dial.history, &app.dial.query);
+
+    let max_visible: usize = 8;
+    let visible = filtered.len().min(max_visible);
+    let popup_h = (visible as u16 + 3)
+        .max(4)
+        .min(area.height.saturating_sub(2));
+    let popup_w = area.width.saturating_sub(6).max(30);
+    let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
+    let y = area.y + area.height.saturating_sub(popup_h + 2);
+    let popup_area = Rect {
+        x,
+        y,
+        width: popup_w,
+        height: popup_h,
+    };
+
+    f.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .title(" History  (↑↓ navigate · Enter select · Esc cancel) ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.accent.get()));
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(inner);
+
+    f.render_widget(
+        Paragraph::new(format!(" / {}_", app.dial.query))
+            .style(Style::default().fg(app.theme.attention.get())),
+        chunks[0],
+    );
+
+    let scroll = app.dial.selected.saturating_sub(visible.saturating_sub(1));
+    let items: Vec<ListItem> = filtered
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(visible)
+        .map(|(i, entry)| {
+            if i == app.dial.selected {
+                ListItem::new(format!(" {}", entry)).style(
+                    Style::default()
+                        .fg(app.theme.attention.get())
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else {
+                ListItem::new(format!(" {}", entry)).style(Style::default())
+            }
+        })
+        .collect();
+
+    f.render_widget(List::new(items), chunks[1]);
 }
 
 #[cfg(test)]

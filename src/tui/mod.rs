@@ -6,12 +6,12 @@ mod handler;
 pub mod ui;
 
 mod keys;
+mod log;
 mod transfer;
 
 pub use crate::event::AppEvent;
-pub use app::{
-    App, CallDirection, CallHistoryEntry, CallState, InputMode, RegStatus, TransferMode,
-};
+#[allow(unused_imports)]
+pub use app::{App, CallDirection, CallState, RegStatus, TransferMode};
 
 use anyhow::Result;
 use crossterm::event::{self as ct_event, Event};
@@ -19,10 +19,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{io, path::PathBuf, sync::mpsc};
 use tokio::{net::TcpStream, sync::mpsc as tokio_mpsc};
 
-use crate::{
-    client,
-    phone::{BaresipPhone, Phone},
-};
+use crate::{client, phone::BaresipPhone};
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 

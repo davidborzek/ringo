@@ -1,3 +1,11 @@
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, List, ListItem, Paragraph},
+};
+
 use super::app::{Call, CallDirection, CallState, TransferMode};
 
 impl super::app::App {
@@ -130,4 +138,93 @@ impl super::app::App {
             }
         }
     }
+}
+
+pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
+    if app.calls.is_empty() {
+        let w = Paragraph::new("  (no active calls)")
+            .style(Style::default().fg(app.theme.subtle.get()))
+            .block(Block::default().title(Span::styled(
+                "CALLS",
+                Style::default().fg(app.theme.subtle.get()),
+            )));
+        f.render_widget(w, area);
+        return;
+    }
+
+    let items: Vec<ListItem> = app
+        .calls
+        .iter()
+        .enumerate()
+        .map(|(i, call)| {
+            let arrow = match call.direction {
+                CallDirection::Outgoing => "↗",
+                CallDirection::Incoming => "↙",
+            };
+            let dir = match call.direction {
+                CallDirection::Outgoing => "outgoing",
+                CallDirection::Incoming => "incoming",
+            };
+
+            let selected = i == app.selected_call;
+            let on_hold = call.state == CallState::OnHold;
+
+            let base_style = if selected {
+                Style::default()
+                    .fg(app.theme.attention.get())
+                    .add_modifier(Modifier::BOLD)
+            } else if on_hold {
+                Style::default().fg(app.theme.subtle.get())
+            } else {
+                Style::default()
+            };
+
+            let (state_str, state_style) = match &call.state {
+                CallState::Ringing => (
+                    "RINGING".to_string(),
+                    Style::default()
+                        .fg(app.theme.attention.get())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                CallState::OnHold => (
+                    "ON HOLD".to_string(),
+                    Style::default()
+                        .fg(app.theme.subtle.get())
+                        .add_modifier(Modifier::DIM),
+                ),
+                CallState::Established => {
+                    let s = call.started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+                    (
+                        format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60),
+                        Style::default().fg(app.theme.success.get()),
+                    )
+                }
+            };
+
+            let marker = if selected { "►" } else { " " };
+
+            let arrow_style = if selected || on_hold {
+                base_style
+            } else if call.direction == CallDirection::Outgoing {
+                Style::default().fg(app.theme.accent.get())
+            } else {
+                Style::default().fg(app.theme.success.get())
+            };
+
+            let line = Line::from(vec![
+                Span::styled(format!(" {} [{}] ", marker, i + 1), base_style),
+                Span::styled(format!("{} ", arrow), arrow_style),
+                Span::styled(format!("{:<8}  {:<40}  ", dir, call.peer), base_style),
+                Span::styled(state_str, state_style),
+            ]);
+
+            ListItem::new(line)
+        })
+        .collect();
+
+    let list = List::new(items).block(Block::default().title(Span::styled(
+        "CALLS",
+        Style::default().fg(app.theme.subtle.get()),
+    )));
+    f.render_widget(list, area);
 }

@@ -1,4 +1,11 @@
 use crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem},
+};
 
 use super::app::{Call, CallDirection, CallHistoryEntry};
 
@@ -189,6 +196,102 @@ impl super::app::App {
             },
         );
     }
+}
+
+pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
+    let indices = app.call_history.filtered_indices();
+    let total = app.call_history.entries.len();
+    let filtered_len = indices.len();
+    let visible = area.height.saturating_sub(2) as usize;
+
+    let sel = if filtered_len > 0 {
+        app.call_history.selected.min(filtered_len - 1)
+    } else {
+        0
+    };
+    let scroll = if sel < visible { 0 } else { sel - visible + 1 };
+
+    let items: Vec<ListItem> = indices
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(visible)
+        .map(|(fi, &ri)| {
+            let item = call_history_item(&app.call_history.entries[ri], app);
+            if fi == sel {
+                item.style(Style::default().bg(app.theme.subtle.get()))
+            } else {
+                item
+            }
+        })
+        .collect();
+
+    let accent = Style::default().fg(app.theme.accent.get());
+    let title: Line = if app.call_history.search_mode {
+        Line::from(vec![
+            Span::styled("Call History", accent),
+            Span::raw(format!(
+                "  / {}_  [Esc] cancel  [Enter] confirm",
+                app.call_history.search_query
+            )),
+        ])
+    } else if !app.call_history.search_query.is_empty() {
+        Line::from(vec![
+            Span::styled("Call History", accent),
+            Span::raw(format!(
+                "  /{} ({}/{})  [↑↓] nav  [Enter] redial  [d] del  [Esc] clear  [c] close",
+                app.call_history.search_query, filtered_len, total
+            )),
+        ])
+    } else if total == 0 {
+        Line::from(vec![
+            Span::styled("Call History", accent),
+            Span::raw("  (empty)  [c/Esc] close"),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("Call History", accent),
+            Span::raw(format!(
+                " ({}/{})  [d] del  [D] clear  [/] search  [c/Esc] close",
+                if filtered_len > 0 { sel + 1 } else { 0 },
+                filtered_len
+            )),
+        ])
+    };
+
+    f.render_widget(
+        List::new(items).block(Block::default().title(title).borders(Borders::TOP)),
+        area,
+    );
+}
+
+fn call_history_item<'a>(
+    e: &'a super::app::CallHistoryEntry,
+    app: &super::app::App,
+) -> ListItem<'a> {
+    let (arrow, dir_style) = if e.dir == "outgoing" {
+        ("↗", Style::default().fg(app.theme.accent.get()))
+    } else {
+        ("↙", Style::default().fg(app.theme.success.get()))
+    };
+
+    let dur_style = if e.duration == "missed" || e.duration == "no answer" {
+        Style::default().fg(app.theme.danger.get())
+    } else {
+        Style::default().fg(app.theme.subtle.get())
+    };
+
+    let line = Line::from(vec![
+        Span::styled(format!(" {} ", arrow), dir_style),
+        Span::raw(format!("{:<45}", e.peer)),
+        Span::styled(format!("{:<11}", e.duration), dur_style),
+        Span::styled(
+            format!("  {}", e.ts),
+            Style::default().fg(app.theme.subtle.get()),
+        ),
+    ]);
+
+    ListItem::new(line)
 }
 
 #[cfg(test)]

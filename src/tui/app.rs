@@ -61,10 +61,10 @@ pub enum TransferMode {
 // ─── Sub-structs ──────────────────────────────────────────────────────────────
 
 pub struct DialState {
-    pub input: String,  // current dial input
-    pub cursor: usize,  // byte-index cursor within `input`
-    pub dtmf: String,   // digits sent during active call (display only)
-    pub draft: String,  // saved input when entering history mode
+    pub input: String, // current dial input
+    pub cursor: usize, // byte-index cursor within `input`
+    pub dtmf: String,  // digits sent during active call (display only)
+    pub draft: String, // saved input when entering history mode
     pub history: VecDeque<String>,
     pub mode: InputMode,
     pub nav_idx: usize,  // index for HistoryNav mode
@@ -223,5 +223,4 @@ impl App {
             }
         }
     }
-
 }
