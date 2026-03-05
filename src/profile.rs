@@ -273,14 +273,18 @@ pub fn sync_all() -> Result<()> {
     println!("Syncing {} profile(s)...", names.len());
     for name in &names {
         let profile = load(name)?;
-        let config = generate_config_content(&profile, 0)?;
         let dir = profile_dir(name)?;
+
+        let config = generate_config_content(&profile, 0)?;
         let config_path = dir.join("config");
         if config_path.is_symlink() {
             fs::remove_file(&config_path)?;
         }
         fs::write(&config_path, config)?;
-        println!("  {} — config updated", name);
+
+        fs::write(dir.join("accounts"), profile.to_accounts_line() + "\n")?;
+
+        println!("  {} — config + accounts updated", name);
     }
     Ok(())
 }

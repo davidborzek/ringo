@@ -1,6 +1,7 @@
 use tokio::sync::mpsc::Sender;
 
 pub trait Phone: Send {
+    fn register(&self, aor: &str, regint: u32);
     fn dial(&self, number: &str);
     fn hangup(&self);
     fn hangup_all(&self);
@@ -33,6 +34,10 @@ impl BaresipPhone {
 }
 
 impl Phone for BaresipPhone {
+    fn register(&self, _aor: &str, regint: u32) {
+        // uareg requires "<regint> <ua_index>" — UA index must be specified
+        self.send("uareg", &format!("{} 0", regint));
+    }
     fn dial(&self, number: &str) {
         self.send("dial", number);
     }

@@ -97,8 +97,8 @@ fn map_event(class: &str, type_: &str, param: String, extra: &Map<String, Value>
 
     match t {
         "REGISTERING" => AppEvent::Registering { account: account() },
-        "REGISTER_OK" => AppEvent::RegisterOk { account: account() },
-        "REGISTER_FAIL" => AppEvent::RegisterFailed { reason: param },
+        "REGISTER_OK" | "FALLBACK_OK" => AppEvent::RegisterOk { account: account() },
+        "REGISTER_FAIL" | "FALLBACK_FAIL" => AppEvent::RegisterFailed { reason: param },
         "CALL_INCOMING" => AppEvent::CallIncoming {
             call_id: call_id(),
             number: number(),

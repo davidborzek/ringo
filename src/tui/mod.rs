@@ -91,6 +91,9 @@ pub fn run(
         theme,
     );
 
+    let aor = app.account_aor.clone();
+    app.phone.register(&aor, 3600);
+
     let mut do_restart = false;
     loop {
         render_loop(&mut terminal, &mut app, &msg_rx)?;

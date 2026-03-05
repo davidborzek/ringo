@@ -208,6 +208,7 @@ mod tests {
 
     struct NoopPhone;
     impl Phone for NoopPhone {
+        fn register(&self, _: &str, _: u32) {}
         fn dial(&self, _: &str) {}
         fn hangup(&self) {}
         fn hangup_all(&self) {}
