@@ -206,7 +206,9 @@ fn detect_module_path() -> String {
     "/usr/lib/baresip/modules".to_string()
 }
 
-fn detect_audio_driver(module_path: &str) -> &'static str {
+fn detect_audio_driver(
+    #[cfg_attr(target_os = "macos", allow(unused_variables))] module_path: &str,
+) -> &'static str {
     #[cfg(target_os = "macos")]
     return "coreaudio";
 
