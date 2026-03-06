@@ -38,6 +38,7 @@ module              dtls_srtp.so
 module_app          account.so
 module_app          debug_cmd.so
 module_app          menu.so
+module_app          netroam.so
 module_app          ctrl_tcp.so
 {% if mwi %}module_app          mwi.so
 {% endif %}

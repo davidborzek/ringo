@@ -13,6 +13,7 @@ pub struct Profile {
     pub outbound: Option<String>,
     pub stun_server: Option<String>,
     pub media_enc: Option<String>,
+    pub regint: Option<u32>,
     #[serde(default = "default_true")]
     pub notify: bool,
     #[serde(default = "default_true")]

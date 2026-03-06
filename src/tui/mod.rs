@@ -30,6 +30,7 @@ pub fn run(
     baresip_log_path: Option<PathBuf>,
     call_history_path: Option<PathBuf>,
     notify: bool,
+    regint: Option<u32>,
     theme: crate::config::Theme,
 ) -> Result<Option<String>> {
     let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
@@ -92,7 +93,7 @@ pub fn run(
     );
 
     let aor = app.account_aor.clone();
-    app.phone.register(&aor, 3600);
+    app.phone.register(&aor, regint.unwrap_or(3600));
 
     let mut do_restart = false;
     loop {
