@@ -33,6 +33,9 @@ pub struct BaresipConfig {
     pub sip_cafile: Option<String>,
     /// Set to empty string `""` to explicitly disable sip_capath.
     pub sip_capath: Option<String>,
+    /// Arbitrary extra baresip config lines appended at the end.
+    /// Last value wins, so these override anything in the generated config.
+    pub extra: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]

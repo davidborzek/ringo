@@ -1,7 +1,6 @@
 sip_cafile          {{ sip_cafile }}
 {% if sip_capath %}sip_capath          {{ sip_capath }}
 {% endif %}sip_tos             160
-sip_trace           yes
 
 call_local_timeout  120
 call_max_calls      4
@@ -20,8 +19,8 @@ audio_telev_pt      101
 
 rtp_tos             184
 audio_jitter_buffer_type  fixed
-audio_jitter_buffer_ms    5
-audio_jitter_buffer_size  10
+audio_jitter_buffer_ms    100-200
+audio_jitter_buffer_size  50
 
 module_path         {{ module_path }}
 
@@ -38,10 +37,12 @@ module              srtp.so
 module              dtls_srtp.so
 
 module_app          account.so
-module_app          debug_cmd.so
 module_app          menu.so
 module_app          netroam.so
 module_app          ctrl_tcp.so
 {% if mwi %}module_app          mwi.so
 {% endif %}
 ctrl_tcp_listen     0.0.0.0:{{ port }}
+{% for line in extra_config %}
+{{ line }}
+{% endfor %}

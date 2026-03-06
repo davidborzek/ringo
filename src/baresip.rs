@@ -175,6 +175,14 @@ fn generate_config_content(profile: &Profile, port: u16) -> Result<String> {
     ctx.insert("sip_capath", &sip_capath);
     ctx.insert("mwi", &profile.mwi);
 
+    let mut extra_lines: Vec<String> = overrides
+        .extra
+        .iter()
+        .map(|(k, v)| format!("{:<20}{}", k, v))
+        .collect();
+    extra_lines.sort();
+    ctx.insert("extra_config", &extra_lines);
+
     tera::Tera::one_off(CONFIG_TEMPLATE, &ctx, false)
         .context("Failed to render baresip config template")
 }

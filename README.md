@@ -200,6 +200,14 @@ sip_cafile = "/etc/ssl/certs/ca-certificates.crt"
 # CA certificate directory for SIP TLS — auto-detected on Linux, disabled on macOS.
 # Set to "" to explicitly disable.
 sip_capath = "/etc/ssl/certs"
+
+# Arbitrary baresip config overrides — appended at the end of the
+# generated config. Last value wins, so these override defaults.
+# ⚠️  Incorrect values can break ringo.
+# See: https://github.com/baresip/baresip/wiki/Configuration
+[baresip.extra]
+dns_server = "10.0.0.1:53"
+call_max_calls = "8"
 ```
 
 All keys are optional; omitting a key falls back to auto-detection.
