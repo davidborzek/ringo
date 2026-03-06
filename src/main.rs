@@ -11,7 +11,19 @@ mod profile;
 mod tui;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{
+    engine::{ArgValueCandidates, CompletionCandidate},
+    env::CompleteEnv,
+};
+
+fn profile_candidates() -> Vec<CompletionCandidate> {
+    profile::list_names()
+        .unwrap_or_default()
+        .into_iter()
+        .map(CompletionCandidate::new)
+        .collect()
+}
 
 #[derive(Parser)]
 #[command(
@@ -30,6 +42,7 @@ enum Commands {
     /// Start baresip with a profile (opens picker if no name given) [default]
     Start {
         /// Profile name — skips the picker
+        #[arg(add = ArgValueCandidates::new(profile_candidates))]
         profile: Option<String>,
         /// Disable desktop notifications
         #[arg(long)]
@@ -45,6 +58,8 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
+    CompleteEnv::with_factory(Cli::command).complete();
+
     let cli = Cli::parse();
 
     match cli.command.unwrap_or(Commands::Start {

@@ -230,6 +230,30 @@ mwi          = true                   # message waiting indicator (default: true
 | `~/.local/share/ringo/history` | Global dial history |
 | `/tmp/ringo-<name>-<ts>/` | Runtime temp dir (auto-cleaned) |
 
+## Shell completions
+
+ringo supports dynamic shell completions — profile names are completed from your actual profiles at `~/.config/ringo/profiles/`.
+
+**fish** — add to `~/.config/fish/config.fish`:
+
+```fish
+COMPLETE=fish ringo | source
+```
+
+**bash** — add to `~/.bashrc`:
+
+```bash
+source <(COMPLETE=bash ringo)
+```
+
+**zsh** — add to `~/.zshrc`:
+
+```zsh
+source <(COMPLETE=zsh ringo)
+```
+
+After sourcing, `ringo start <Tab>` will complete profile names.
+
 ## rofi integration
 
 ```sh
