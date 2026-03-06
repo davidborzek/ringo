@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Profile {
@@ -14,6 +14,8 @@ pub struct Profile {
     pub stun_server: Option<String>,
     pub media_enc: Option<String>,
     pub regint: Option<u32>,
+    #[serde(default)]
+    pub custom_headers: HashMap<String, String>,
     #[serde(default = "default_true")]
     pub notify: bool,
     #[serde(default = "default_true")]
