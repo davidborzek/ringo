@@ -28,6 +28,7 @@ fn profile_candidates() -> Vec<CompletionCandidate> {
 #[derive(Parser)]
 #[command(
     name = "ringo",
+    version,
     about = "A TUI softphone for managing and launching baresip SIP accounts",
     long_about = "ringo wraps baresip with a terminal UI for managing multiple SIP profiles.\n\
                   Run without arguments to open the interactive profile picker."
