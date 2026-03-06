@@ -71,7 +71,6 @@ ringo              # open profile picker (default)
 ringo start <name> # launch a specific profile directly
 ringo list         # list all profiles
 ringo list --plain # one name per line (for scripting)
-ringo sync         # regenerate all profile configs from shared template
 ```
 
 ## Keybindings
@@ -171,6 +170,37 @@ Supported names: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `
 Ready-made themes in [`themes/`](themes/):
 [Catppuccin Mocha](themes/catppuccin-mocha.toml) · [Gruvbox](themes/gruvbox.toml) · [Nord](themes/nord.toml) · [Tokyo Night](themes/tokyo-night.toml)
 
+### baresip
+
+ringo auto-detects your system's baresip module path and audio driver. All values can be overridden in `ringo.toml`:
+
+```toml
+[baresip]
+# Path to baresip modules — auto-detected via pkg-config or known system paths.
+# See: https://github.com/baresip/baresip/wiki/Modules
+module_path = "/usr/lib/baresip/modules"
+
+# Audio backend module loaded by baresip.
+# Common values: "alsa", "pulse", "pipewire", "coreaudio"
+# See: https://github.com/baresip/baresip/wiki/Configuration#audio
+audio_driver = "pipewire"
+
+# Audio device names passed to the driver (e.g. "default", "hw:0,0", a PipeWire/PulseAudio sink name).
+# Each can be set independently; all default to "default".
+audio_player_device = "default"
+audio_source_device = "default"
+audio_alert_device  = "default"
+
+# CA certificate file for SIP TLS — auto-detected from common system paths.
+sip_cafile = "/etc/ssl/certs/ca-certificates.crt"
+
+# CA certificate directory for SIP TLS — auto-detected on Linux, disabled on macOS.
+# Set to "" to explicitly disable.
+sip_capath = "/etc/ssl/certs"
+```
+
+All keys are optional; omitting a key falls back to auto-detection.
+
 ## Profile config
 
 Profiles are stored as TOML at `~/.config/ringo/profiles/<name>/profile.toml`:
@@ -195,7 +225,6 @@ mwi          = true                   # message waiting indicator (default: true
 | `~/.config/ringo/ringo.toml` | Global config |
 | `~/.config/ringo/profiles/<name>/profile.toml` | Profile config |
 | `~/.config/ringo/profiles/<name>/call_history` | Per-profile call history (JSONL) |
-| `~/.config/ringo/config` | Shared baresip config template |
 | `~/.local/share/ringo/history` | Global dial history |
 | `/tmp/ringo-<name>-<ts>/` | Runtime temp dir (auto-cleaned) |
 

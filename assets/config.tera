@@ -1,0 +1,44 @@
+sip_cafile          {{ sip_cafile }}
+{% if sip_capath %}sip_capath          {{ sip_capath }}
+{% endif %}sip_tos             160
+sip_trace           yes
+
+call_local_timeout  120
+call_max_calls      4
+call_hold_other_calls yes
+
+audio_player        {{ audio_driver }},{{ audio_player_device }}
+audio_source        {{ audio_driver }},{{ audio_source_device }}
+audio_alert         {{ audio_driver }},{{ audio_alert_device }}
+ausrc_format        s16
+auplay_format       s16
+auenc_format        s16
+audec_format        s16
+audio_buffer        20-160
+audio_buffer_mode   fixed
+audio_telev_pt      101
+
+rtp_tos             184
+audio_jitter_buffer_type  fixed
+audio_jitter_buffer_delay 5-10
+
+module_path         {{ module_path }}
+
+module              g711.so
+module              auconv.so
+module              auresamp.so
+module              {{ audio_driver }}.so
+module              uuid.so
+module              stun.so
+module              turn.so
+module              ice.so
+module              srtp.so
+module              dtls_srtp.so
+
+module_app          account.so
+module_app          debug_cmd.so
+module_app          menu.so
+module_app          ctrl_tcp.so
+{% if mwi %}module_app          mwi.so
+{% endif %}
+ctrl_tcp_listen     0.0.0.0:{{ port }}

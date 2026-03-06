@@ -41,9 +41,6 @@ enum Commands {
         #[arg(short, long)]
         plain: bool,
     },
-
-    /// Regenerate all profile configs from the shared template
-    Sync,
 }
 
 fn main() -> Result<()> {
@@ -55,7 +52,6 @@ fn main() -> Result<()> {
     }) {
         Commands::Start { profile, no_notify } => baresip::start(profile, !no_notify)?,
         Commands::List { plain } => profile::list(plain)?,
-        Commands::Sync => profile::sync_all()?,
     }
 
     Ok(())
