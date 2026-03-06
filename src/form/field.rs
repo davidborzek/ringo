@@ -1,4 +1,13 @@
 use crossterm::event::KeyCode;
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::Paragraph,
+};
+
+use crate::config::Theme;
 
 // ─── TextField ───────────────────────────────────────────────────────────────
 
@@ -140,6 +149,112 @@ impl Field {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+impl Field {
+    /// Render the value portion of a field. Returns cursor position if this field is focused.
+    pub fn render_value(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        focused: bool,
+        theme: &Theme,
+    ) -> Option<(u16, u16)> {
+        match &self.kind {
+            FieldKind::Text { tf, masked } => {
+                let (text, col) = tf.render(*masked, area.width as usize);
+                let span = if text.is_empty() && !focused {
+                    Span::styled("·", Style::default().fg(theme.subtle.get()))
+                } else {
+                    Span::styled(
+                        text,
+                        if focused {
+                            Style::default()
+                        } else {
+                            Style::default().fg(Color::White)
+                        },
+                    )
+                };
+                frame.render_widget(Paragraph::new(Line::from(span)), area);
+                if focused {
+                    return Some((area.x + col as u16, area.y));
+                }
+            }
+            FieldKind::Select { options, idx } => {
+                let text = format!("◀ {} ▶", options[*idx]);
+                let style = if focused {
+                    Style::default().fg(theme.attention.get())
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                frame.render_widget(Paragraph::new(Span::styled(text, style)), area);
+            }
+            FieldKind::Toggle { value } => {
+                let (icon, color) = if *value {
+                    ("● on", theme.success.get())
+                } else {
+                    ("○ off", theme.subtle.get())
+                };
+                let style = Style::default().fg(color);
+                let style = if focused {
+                    style.add_modifier(Modifier::BOLD)
+                } else {
+                    style
+                };
+                frame.render_widget(Paragraph::new(Span::styled(icon, style)), area);
+            }
+            FieldKind::SubMenu { count } => {
+                let text = format!("({}) ▶", count);
+                let style = if focused {
+                    Style::default()
+                        .fg(theme.attention.get())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                frame.render_widget(Paragraph::new(Span::styled(text, style)), area);
+            }
+            FieldKind::Button => {
+                let style = if focused {
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(theme.accent.get())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme.subtle.get())
+                };
+                frame.render_widget(
+                    Paragraph::new(Span::styled(format!("  {}  ", self.label), style)),
+                    area,
+                );
+            }
+        }
+        None
+    }
+
+    pub fn handle_key(&mut self, code: KeyCode) {
+        match &mut self.kind {
+            FieldKind::Text { tf, .. } => tf.handle_key(code),
+            FieldKind::Select { options, idx } => match code {
+                KeyCode::Left => {
+                    *idx = if *idx == 0 {
+                        options.len() - 1
+                    } else {
+                        *idx - 1
+                    };
+                }
+                KeyCode::Right | KeyCode::Char(' ') => {
+                    *idx = (*idx + 1) % options.len();
+                }
+                _ => {}
+            },
+            FieldKind::Toggle { value } => match code {
+                KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right => *value = !*value,
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+}
 
 pub(crate) fn get_text(f: &Field) -> String {
     if let FieldKind::Text { tf, .. } = &f.kind {
