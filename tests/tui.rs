@@ -173,56 +173,6 @@ fn call_closed_missed_incoming_removes_call() {
     assert_eq!(app.calls.len(), 0);
 }
 
-#[test]
-fn call_hold_sets_on_hold() {
-    let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
-    app.handle_message(evt("CALL_HOLD", "", json!({"id": "1"})));
-    assert_eq!(app.calls[0].state, CallState::OnHold);
-}
-
-#[test]
-fn call_resume_sets_established() {
-    let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
-    app.handle_message(evt("CALL_HOLD", "", json!({"id": "1"})));
-    app.handle_message(evt("CALL_RESUME", "", json!({"id": "1"})));
-    assert_eq!(app.calls[0].state, CallState::Established);
-}
-
-// ─── Transfer Events ──────────────────────────────────────────────────────────
-
-#[test]
-fn transfer_event_adds_log_entry() {
-    let (mut app, _) = test_app();
-    app.handle_message(evt("TRANSFER", "sip:other@example.com", json!({})));
-    assert!(app.log.entries.iter().any(|l| l.contains("Transfer")));
-}
-
-#[test]
-fn transfer_failed_clears_mode_and_logs() {
-    let (mut app, _) = test_app();
-    app.transfer_mode = TransferMode::BlindInput("123".into());
-    app.handle_message(evt("TRANSFER_FAILED", "503 Service Unavailable", json!({})));
-    assert_eq!(app.transfer_mode, TransferMode::None);
-    assert!(
-        app.log
-            .entries
-            .iter()
-            .any(|l| l.contains("Transfer failed") || l.contains("failed"))
-    );
-}
-
 // ─── MWI ──────────────────────────────────────────────────────────────────────
 
 #[test]

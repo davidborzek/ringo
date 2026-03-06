@@ -32,18 +32,6 @@ pub enum AppEvent {
         reason: String,
         error: bool,
     },
-    CallOnHold {
-        call_id: String,
-    },
-    CallResumed {
-        call_id: String,
-    },
-    TransferOk {
-        info: String,
-    },
-    TransferFailed {
-        reason: String,
-    },
     VoicemailStatus {
         waiting: bool,
         new_count: u32,
@@ -123,10 +111,7 @@ fn map_event(class: &str, type_: &str, param: String, extra: &Map<String, Value>
                 error,
             }
         }
-        "CALL_HOLD" => AppEvent::CallOnHold { call_id: call_id() },
-        "CALL_RESUME" => AppEvent::CallResumed { call_id: call_id() },
-        "TRANSFER" => AppEvent::TransferOk { info: param },
-        "TRANSFER_FAILED" => AppEvent::TransferFailed { reason: param },
+
         "MWI_NOTIFY" => parse_mwi(&param),
         _ => AppEvent::Unknown {
             class: class.to_string(),
@@ -143,6 +128,7 @@ fn is_error_reason(reason: &str) -> bool {
         "Connection reset by peer",
         "Connection closed",
         "Rejected by user",
+        "Call transfered",
     ];
     !NORMAL
         .iter()
