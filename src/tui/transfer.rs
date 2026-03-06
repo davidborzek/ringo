@@ -2,15 +2,6 @@ use super::app::{CallState, InputMode, TransferMode};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 impl super::app::App {
-    pub(super) fn handle_transfer_ok(&mut self, info: String) {
-        self.push_log(format!("↔ Transfer requested: {}", info));
-    }
-
-    pub(super) fn handle_transfer_failed(&mut self, reason: String) {
-        self.push_log(format!("✗ Transfer failed: {}", reason));
-        self.transfer_mode = TransferMode::None;
-    }
-
     pub(super) fn handle_transfer_input(&mut self, key: crossterm::event::KeyEvent) {
         match key.code {
             KeyCode::Esc => {

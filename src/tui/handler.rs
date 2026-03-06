@@ -34,10 +34,6 @@ impl super::app::App {
                 reason,
                 error,
             } => self.handle_call_closed(call_id, reason, error),
-            AppEvent::CallOnHold { call_id } => self.handle_call_on_hold(call_id),
-            AppEvent::CallResumed { call_id } => self.handle_call_resumed(call_id),
-            AppEvent::TransferOk { info } => self.handle_transfer_ok(info),
-            AppEvent::TransferFailed { reason } => self.handle_transfer_failed(reason),
             AppEvent::VoicemailStatus { waiting, new_count } => {
                 self.mwi.waiting = waiting;
                 self.mwi.new_messages = new_count;

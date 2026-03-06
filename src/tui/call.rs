@@ -70,22 +70,11 @@ impl super::app::App {
         if error {
             self.last_call_reason = Some(reason);
         }
+        self.muted = false;
         self.dial.dtmf.clear();
         self.calls.retain(|c| c.id != call_id);
         if self.selected_call >= self.calls.len() && !self.calls.is_empty() {
             self.selected_call = self.calls.len() - 1;
-        }
-    }
-
-    pub(super) fn handle_call_on_hold(&mut self, call_id: String) {
-        if let Some(c) = self.calls.iter_mut().find(|c| c.id == call_id) {
-            c.state = CallState::OnHold;
-        }
-    }
-
-    pub(super) fn handle_call_resumed(&mut self, call_id: String) {
-        if let Some(c) = self.calls.iter_mut().find(|c| c.id == call_id) {
-            c.state = CallState::Established;
         }
     }
 
