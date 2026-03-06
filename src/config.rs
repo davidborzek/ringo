@@ -8,6 +8,31 @@ use std::fs;
 pub struct RingoConfig {
     pub picker: PickerConfig,
     pub theme: Theme,
+    pub baresip: BaresipConfig,
+}
+
+/// Overrides for auto-detected baresip config values.
+///
+/// Example in ringo.toml:
+/// ```toml
+/// [baresip]
+/// module_path  = "/usr/lib/baresip/modules"
+/// audio_driver = "pulse"
+/// sip_cafile   = "/etc/ssl/certs/ca-certificates.crt"
+/// sip_capath   = "/etc/ssl/certs"
+/// ```
+/// Any key that is absent falls back to auto-detection.
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct BaresipConfig {
+    pub module_path: Option<String>,
+    pub audio_driver: Option<String>,
+    pub audio_player_device: Option<String>,
+    pub audio_source_device: Option<String>,
+    pub audio_alert_device: Option<String>,
+    pub sip_cafile: Option<String>,
+    /// Set to empty string `""` to explicitly disable sip_capath.
+    pub sip_capath: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
