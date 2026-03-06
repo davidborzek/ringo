@@ -40,6 +40,7 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
         Some(dir.join("call_history")),
         notify && prof.notify,
         prof.regint,
+        prof.custom_headers,
         theme,
     )
 }

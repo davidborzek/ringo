@@ -222,6 +222,7 @@ mod tests {
         fn attended_transfer_start(&self, _: &str) {}
         fn attended_transfer_exec(&self) {}
         fn attended_transfer_abort(&self) {}
+        fn add_header(&self, _: &str, _: &str) {}
     }
 
     fn test_app() -> App {

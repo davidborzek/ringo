@@ -31,6 +31,7 @@ pub fn run(
     call_history_path: Option<PathBuf>,
     notify: bool,
     regint: Option<u32>,
+    custom_headers: std::collections::HashMap<String, String>,
     theme: crate::config::Theme,
 ) -> Result<Option<String>> {
     let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
@@ -94,6 +95,10 @@ pub fn run(
 
     let aor = app.account_aor.clone();
     app.phone.register(&aor, regint.unwrap_or(3600));
+
+    for (key, value) in &custom_headers {
+        app.phone.add_header(key, value);
+    }
 
     let mut do_restart = false;
     loop {
