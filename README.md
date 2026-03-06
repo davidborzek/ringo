@@ -2,8 +2,10 @@
 
 > A terminal SIP softphone built on [baresip](https://github.com/baresip/baresip).
 
+[![CI](https://github.com/davidborzek/ringo/actions/workflows/ci.yml/badge.svg)](https://github.com/davidborzek/ringo/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/davidborzek/ringo)](https://github.com/davidborzek/ringo/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.80%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
 ringo is a SIP softphone with a full-featured ratatui TUI, built on top of baresip. It manages multiple accounts side by side — each with its own profile, call history, and configuration — while keeping baresip running headless in the background.
 
