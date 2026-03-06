@@ -297,6 +297,7 @@ fn extract_profile(fields: &[Field], include_name: bool) -> (String, Profile) {
             v
         },
         mwi: get_toggle(&fields[i]),
+        regint: None,
     };
     (name, profile)
 }

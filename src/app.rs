@@ -39,6 +39,7 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
         Some(instance.log_path.clone()),
         Some(dir.join("call_history")),
         notify && prof.notify,
+        prof.regint,
         theme,
     )
 }

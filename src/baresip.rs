@@ -124,6 +124,9 @@ fn accounts_line(profile: &Profile) -> String {
     if let Some(v) = profile.media_enc.as_deref().filter(|s| !s.is_empty()) {
         line.push_str(&format!(";mediaenc={}", v));
     }
+    if let Some(v) = profile.regint {
+        line.push_str(&format!(";regint={}", v));
+    }
 
     line
 }
