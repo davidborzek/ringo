@@ -9,12 +9,22 @@ use ratatui::{
 use super::app::{Call, CallDirection, CallState, TransferMode};
 
 impl super::app::App {
-    pub(super) fn handle_call_incoming(&mut self, call_id: String, number: String) {
+    pub(super) fn handle_call_incoming(
+        &mut self,
+        call_id: String,
+        number: String,
+        display_name: Option<String>,
+    ) {
         self.last_call_reason = None;
-        self.notify("Incoming call", &number);
+        let notify_text = match &display_name {
+            Some(name) => format!("{} ({})", name, number),
+            None => number.clone(),
+        };
+        self.notify("Incoming call", &notify_text);
         self.calls.push(Call {
             id: call_id,
             peer: number,
+            peer_display_name: display_name,
             direction: CallDirection::Incoming,
             state: CallState::Ringing,
             started_at: None,
@@ -26,6 +36,7 @@ impl super::app::App {
         self.calls.push(Call {
             id: call_id,
             peer: number,
+            peer_display_name: None,
             direction: CallDirection::Outgoing,
             state: CallState::Ringing,
             started_at: None,
@@ -227,7 +238,17 @@ pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
             let line = Line::from(vec![
                 Span::styled(format!(" {} [{}] ", marker, i + 1), base_style),
                 Span::styled(format!("{} ", arrow), arrow_style),
-                Span::styled(format!("{:<8}  {:<40}  ", dir, call.peer), base_style),
+                Span::styled(
+                    format!(
+                        "{:<8}  {:<40}  ",
+                        dir,
+                        match &call.peer_display_name {
+                            Some(name) => format!("{} ({})", name, call.peer),
+                            None => call.peer.clone(),
+                        }
+                    ),
+                    base_style,
+                ),
                 Span::styled(state_str, state_style),
             ]);
 

@@ -15,6 +15,7 @@ pub enum AppEvent {
     CallIncoming {
         call_id: String,
         number: String,
+        display_name: Option<String>,
     },
     CallOutgoing {
         call_id: String,
@@ -102,6 +103,11 @@ fn map_event(class: &str, type_: &str, param: String, extra: &Map<String, Value>
         "CALL_INCOMING" => AppEvent::CallIncoming {
             call_id: call_id(),
             number: number(),
+            display_name: extra
+                .get("peerdisplayname")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
         },
         "CALL_OUTGOING" => AppEvent::CallOutgoing {
             call_id: call_id(),
@@ -219,8 +225,10 @@ mod tests {
     fn call_incoming_event() {
         let extra = json!({"id": "call-1", "peeruri": "sip:carol@example.com"});
         let event = AppEvent::from(event_msg("BEVENT_CALL_INCOMING", "", extra));
-        assert!(matches!(event, AppEvent::CallIncoming { call_id, number }
-                if call_id == "call-1" && number == "sip:carol@example.com"));
+        assert!(
+            matches!(event, AppEvent::CallIncoming { call_id, number, .. }
+                if call_id == "call-1" && number == "sip:carol@example.com")
+        );
     }
 
     #[test]

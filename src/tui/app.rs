@@ -29,6 +29,7 @@ pub struct Call {
     pub id: String,
     pub direction: CallDirection,
     pub peer: String,
+    pub peer_display_name: Option<String>,
     pub state: CallState,
     pub started_at: Option<Instant>,
 }
