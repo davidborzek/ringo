@@ -150,7 +150,7 @@ pub fn load() -> RingoConfig {
         .unwrap_or_default()
 }
 
-fn config_path() -> Option<std::path::PathBuf> {
+pub fn config_path() -> Option<std::path::PathBuf> {
     let home = std::env::var("HOME").ok()?;
     Some(
         std::path::PathBuf::from(home)

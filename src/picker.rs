@@ -18,6 +18,7 @@ pub enum PickerAction {
     Clone(String),
     Delete(String),
     New,
+    Settings,
 }
 
 /// A profile entry shown in the picker. `subtitle` may be empty.
@@ -130,7 +131,7 @@ pub(crate) fn run(
             // Hint line
             frame.render_widget(
                 Paragraph::new(
-                    "  Enter start  ·  ^E edit  ·  ^Y clone  ·  ^D delete  ·  ^N new  ·  Esc quit",
+                    "  Enter start  ·  ^E edit  ·  ^Y clone  ·  ^D delete  ·  ^N new  ·  ^S settings  ·  Esc quit",
                 )
                 .style(Style::default().fg(theme.subtle.get())),
                 chunks[3],
@@ -143,6 +144,7 @@ pub(crate) fn run(
                 KeyCode::Esc => anyhow::bail!("No selection made."),
                 KeyCode::Char('c') if ctrl => anyhow::bail!("No selection made."),
                 KeyCode::Char('n') if ctrl => return Ok(PickerAction::New),
+                KeyCode::Char('s') if ctrl => return Ok(PickerAction::Settings),
                 KeyCode::Char('e') if ctrl => {
                     if let Some(item) = filtered.get(selected) {
                         return Ok(PickerAction::Edit(item.name.clone()));

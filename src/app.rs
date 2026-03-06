@@ -67,9 +67,9 @@ pub fn pick_profile() -> Result<String> {
 
 fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<String> {
     use crate::picker::{PickerAction, PickerItem};
-    let config = crate::config::load();
-    let theme = &config.theme;
     loop {
+        let config = crate::config::load();
+        let theme = &config.theme;
         let names = profile::list_names().unwrap_or_default();
         let items: Vec<PickerItem> = names
             .iter()
@@ -112,6 +112,9 @@ fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> R
                     profile::save(&name, &p)?;
                 }
             }
+            PickerAction::Settings => {
+                open_settings(terminal)?;
+            }
             PickerAction::Delete(name) => {
                 if crate::form::run_confirm(terminal, &name, theme)? {
                     fs::remove_dir_all(profile::profile_dir(&name)?)?;
@@ -119,6 +122,39 @@ fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> R
             }
         }
     }
+}
+
+fn open_settings(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+    use crossterm::terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    };
+    use std::process::Command;
+
+    let config_path = crate::config::config_path()
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine config path"))?;
+
+    if !config_path.exists() {
+        fs::create_dir_all(config_path.parent().unwrap())?;
+        fs::write(
+            &config_path,
+            "# ringo configuration\n# See: https://github.com/davidborzek/ringo#configuration\n",
+        )?;
+    }
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+
+    let status = Command::new(&editor).arg(&config_path).status();
+
+    enable_raw_mode()?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    terminal.clear()?;
+
+    status
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("Failed to open editor '{}': {}", editor, e))
 }
 
 fn build_subtitle(profile: &profile::Profile, fields: &[String]) -> String {
