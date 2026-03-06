@@ -24,7 +24,7 @@ ringo is a SIP softphone with a full-featured ratatui TUI, built on top of bares
 
 ## Requirements
 
-- [baresip](https://github.com/baresip/baresip) in `$PATH`
+- [baresip](https://github.com/baresip/baresip) >= 3.14 in `$PATH`
 - Rust 1.80+ (for building)
 - rofi (optional, for `scripts/ringo-rofi`)
 
@@ -84,6 +84,7 @@ ringo list --plain # one name per line (for scripting)
 | `Enter` | Start selected profile |
 | `Ctrl+N` | Create new profile |
 | `Ctrl+E` | Edit selected profile |
+| `Ctrl+Y` | Clone selected profile |
 | `Ctrl+D` | Delete selected profile (confirmation popup) |
 | `Esc` | Quit |
 

@@ -161,12 +161,15 @@ fn generate_config_content(profile: &Profile, port: u16) -> Result<String> {
         None => detect_sip_capath(),
     };
 
+    let extra_codecs = detect_codecs(&module_path);
+
     let mut ctx = tera::Context::new();
     ctx.insert("module_path", &module_path);
     ctx.insert("audio_driver", &audio_driver);
     ctx.insert("audio_player_device", &audio_player_device);
     ctx.insert("audio_source_device", &audio_source_device);
     ctx.insert("audio_alert_device", &audio_alert_device);
+    ctx.insert("extra_codecs", &extra_codecs);
     ctx.insert("port", &port);
     ctx.insert("sip_cafile", &sip_cafile);
     ctx.insert("sip_capath", &sip_capath);
@@ -256,6 +259,17 @@ fn detect_sip_capath() -> Option<String> {
             None
         }
     }
+}
+
+/// Detect optional codec modules available in the module path.
+fn detect_codecs(module_path: &str) -> Vec<String> {
+    let base = std::path::Path::new(module_path);
+    let candidates = ["opus", "g722", "g726", "gsm", "l16"];
+    candidates
+        .iter()
+        .filter(|c| base.join(format!("{}.so", c)).exists())
+        .map(|c| c.to_string())
+        .collect()
 }
 
 /// Ask the OS for a free ephemeral port by binding to port 0.

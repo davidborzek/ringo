@@ -20,12 +20,14 @@ audio_telev_pt      101
 
 rtp_tos             184
 audio_jitter_buffer_type  fixed
-audio_jitter_buffer_delay 5-10
+audio_jitter_buffer_ms    5
+audio_jitter_buffer_size  10
 
 module_path         {{ module_path }}
 
 module              g711.so
-module              auconv.so
+{% for codec in extra_codecs %}module              {{ codec }}.so
+{% endfor %}module              auconv.so
 module              auresamp.so
 module              {{ audio_driver }}.so
 module              uuid.so
