@@ -1,3 +1,4 @@
+mod app;
 mod baresip;
 mod client;
 mod config;
@@ -50,7 +51,7 @@ fn main() -> Result<()> {
         profile: None,
         no_notify: false,
     }) {
-        Commands::Start { profile, no_notify } => baresip::start(profile, !no_notify)?,
+        Commands::Start { profile, no_notify } => app::run(profile, !no_notify)?,
         Commands::List { plain } => profile::list(plain)?,
     }
 
