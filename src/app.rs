@@ -96,6 +96,14 @@ fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> R
                     profile::save(&name, &p)?;
                 }
             }
+            PickerAction::Clone(source) => {
+                let current = profile::load(&source)?;
+                if let Some((name, p)) =
+                    crate::form::run_form(terminal, None, &current, &names, theme)?
+                {
+                    profile::save(&name, &p)?;
+                }
+            }
             PickerAction::Edit(name) => {
                 let current = profile::load(&name)?;
                 if let Some((_, p)) =

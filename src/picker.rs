@@ -15,6 +15,7 @@ use crate::config::Theme;
 pub enum PickerAction {
     Start(String),
     Edit(String),
+    Clone(String),
     Delete(String),
     New,
 }
@@ -128,8 +129,10 @@ pub(crate) fn run(
 
             // Hint line
             frame.render_widget(
-                Paragraph::new("  Enter start  ·  ^E edit  ·  ^D delete  ·  ^N new  ·  Esc quit")
-                    .style(Style::default().fg(theme.subtle.get())),
+                Paragraph::new(
+                    "  Enter start  ·  ^E edit  ·  ^Y clone  ·  ^D delete  ·  ^N new  ·  Esc quit",
+                )
+                .style(Style::default().fg(theme.subtle.get())),
                 chunks[3],
             );
         })?;
@@ -143,6 +146,11 @@ pub(crate) fn run(
                 KeyCode::Char('e') if ctrl => {
                     if let Some(item) = filtered.get(selected) {
                         return Ok(PickerAction::Edit(item.name.clone()));
+                    }
+                }
+                KeyCode::Char('y') if ctrl => {
+                    if let Some(item) = filtered.get(selected) {
+                        return Ok(PickerAction::Clone(item.name.clone()));
                     }
                 }
                 KeyCode::Char('d') if ctrl => {
