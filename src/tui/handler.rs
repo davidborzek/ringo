@@ -21,9 +21,11 @@ impl super::app::App {
                 self.reg_status = RegStatus::Failed(reason.clone());
                 self.push_log(format!("✗ Registration failed: {}", reason));
             }
-            AppEvent::CallIncoming { call_id, number } => {
-                self.handle_call_incoming(call_id, number)
-            }
+            AppEvent::CallIncoming {
+                call_id,
+                number,
+                display_name,
+            } => self.handle_call_incoming(call_id, number, display_name),
             AppEvent::CallOutgoing { call_id, number } => {
                 self.handle_call_outgoing(call_id, number)
             }
