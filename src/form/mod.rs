@@ -84,88 +84,58 @@ impl FormState {
     }
 
     fn update_header_count(&mut self) {
-        for field in &mut self.fields {
-            if let FieldKind::SubMenu { count } = &mut field.kind {
+        if let Some(f) = self.fields.iter_mut().find(|f| f.id == FieldId::SipHeaders) {
+            if let FieldKind::SubMenu { count } = &mut f.kind {
                 *count = self.custom_headers.len();
             }
         }
     }
 
+    fn field(&self, id: FieldId) -> &Field {
+        self.fields.iter().find(|f| f.id == id).unwrap()
+    }
+
     fn extract(&self, prev_profile: &Profile) -> (String, Profile) {
-        let fields = &self.fields;
-        let mut i = 0;
+        use FieldId::*;
         let name = if self.is_new {
-            let n = get_text(&fields[i]);
-            i += 1;
-            n
+            get_text(self.field(ProfileName))
         } else {
             String::new()
         };
 
+        let transport_idx = get_select(self.field(Transport));
+        let enc_idx = get_select(self.field(Encryption));
+
         let profile = Profile {
-            display_name: {
-                let v = opt(get_text(&fields[i]));
-                i += 1;
-                v
+            display_name: opt(get_text(self.field(DisplayName))),
+            username: get_text(self.field(Username)),
+            password: get_text(self.field(Password)),
+            domain: get_text(self.field(Domain)),
+            transport: if transport_idx == 0 {
+                None
+            } else {
+                Some(TRANSPORTS[transport_idx].into())
             },
-            username: {
-                let v = get_text(&fields[i]);
-                i += 1;
-                v
+            auth_user: opt(get_text(self.field(AuthUser))),
+            outbound: opt(get_text(self.field(Outbound))),
+            stun_server: opt(get_text(self.field(StunServer))),
+            media_enc: if enc_idx == 0 {
+                None
+            } else {
+                Some(ENCRYPTIONS[enc_idx].into())
             },
-            password: {
-                let v = get_text(&fields[i]);
-                i += 1;
-                v
-            },
-            domain: {
-                let v = get_text(&fields[i]);
-                i += 1;
-                v
-            },
-            transport: {
-                let v = get_select(&fields[i]);
-                i += 1;
-                if v == 0 {
-                    None
-                } else {
-                    Some(TRANSPORTS[v].into())
-                }
-            },
-            auth_user: {
-                let v = opt(get_text(&fields[i]));
-                i += 1;
-                v
-            },
-            outbound: {
-                let v = opt(get_text(&fields[i]));
-                i += 1;
-                v
-            },
-            stun_server: {
-                let v = opt(get_text(&fields[i]));
-                i += 1;
-                v
-            },
-            media_enc: {
-                let v = get_select(&fields[i]);
-                i += 1;
-                if v == 0 {
-                    None
-                } else {
-                    Some(ENCRYPTIONS[v].into())
-                }
-            },
-            notify: {
-                let v = get_toggle(&fields[i]);
-                i += 1;
-                v
-            },
-            mwi: get_toggle(&fields[i]),
+            notify: get_toggle(self.field(Notify)),
+            mwi: get_toggle(self.field(Mwi)),
             regint: prev_profile.regint,
             custom_headers: self.custom_headers.clone(),
         };
         (name, profile)
+    }
+
+    fn focus_field(&mut self, id: FieldId) {
+        if let Some(pos) = self.fields.iter().position(|f| f.id == id) {
+            self.focused = pos;
+        }
     }
 
     fn validate(
@@ -176,20 +146,20 @@ impl FormState {
     ) -> Option<String> {
         if self.is_new {
             if name.is_empty() || name.contains('/') || name.contains(' ') {
-                self.focused = 0;
+                self.focus_field(FieldId::ProfileName);
                 return Some("non-empty, no spaces or slashes".into());
             }
             if existing_names.iter().any(|n| n == name) {
-                self.focused = 0;
+                self.focus_field(FieldId::ProfileName);
                 return Some(format!("'{}' already exists", name));
             }
         }
         if profile.username.is_empty() {
-            self.focused = if self.is_new { 2 } else { 1 };
+            self.focus_field(FieldId::Username);
             return Some("Username is required".into());
         }
         if profile.domain.is_empty() {
-            self.focused = if self.is_new { 4 } else { 3 };
+            self.focus_field(FieldId::Domain);
             return Some("Domain is required".into());
         }
         None
@@ -286,51 +256,74 @@ impl FormState {
 // ─── Profile form ────────────────────────────────────────────────────────────
 
 fn build_fields(profile: &Profile, include_name: bool) -> Vec<Field> {
+    use FieldId::*;
     let mut f = Vec::new();
     if include_name {
-        f.push(Field::text("Profile name", "", false, true));
+        f.push(Field::text(ProfileName, "Profile name", "", false, true));
     }
     f.push(Field::text(
+        DisplayName,
         "Display name",
         profile.display_name.as_deref().unwrap_or(""),
         false,
         false,
     ));
-    f.push(Field::text("Username", &profile.username, false, true));
-    f.push(Field::text("Password", &profile.password, true, false));
-    f.push(Field::text("Domain", &profile.domain, false, true));
+    f.push(Field::text(
+        Username,
+        "Username",
+        &profile.username,
+        false,
+        true,
+    ));
+    f.push(Field::text(
+        Password,
+        "Password",
+        &profile.password,
+        true,
+        false,
+    ));
+    f.push(Field::text(Domain, "Domain", &profile.domain, false, true));
     f.push(Field::select(
+        Transport,
         "Transport",
         TRANSPORTS,
         transport_idx(profile.transport.as_deref()),
     ));
     f.push(Field::text(
+        AuthUser,
         "Auth user",
         profile.auth_user.as_deref().unwrap_or(""),
         false,
         false,
     ));
     f.push(Field::text(
+        Outbound,
         "Outbound proxy",
         profile.outbound.as_deref().unwrap_or(""),
         false,
         false,
     ));
     f.push(Field::text(
+        StunServer,
         "STUN server",
         profile.stun_server.as_deref().unwrap_or(""),
         false,
         false,
     ));
     f.push(Field::select(
+        Encryption,
         "Encryption",
         ENCRYPTIONS,
         enc_idx(profile.media_enc.as_deref()),
     ));
-    f.push(Field::toggle("Notifications", profile.notify));
-    f.push(Field::toggle("MWI", profile.mwi));
-    f.push(Field::submenu("SIP Headers", profile.custom_headers.len()));
-    f.push(Field::button("Save"));
+    f.push(Field::toggle(Notify, "Notifications", profile.notify));
+    f.push(Field::toggle(Mwi, "MWI", profile.mwi));
+    f.push(Field::submenu(
+        SipHeaders,
+        "SIP Headers",
+        profile.custom_headers.len(),
+    ));
+    f.push(Field::button(Save, "Save"));
     f
 }
 

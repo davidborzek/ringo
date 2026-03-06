@@ -101,15 +101,41 @@ pub(crate) enum FieldKind {
     Button,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldId {
+    ProfileName,
+    DisplayName,
+    Username,
+    Password,
+    Domain,
+    Transport,
+    AuthUser,
+    Outbound,
+    StunServer,
+    Encryption,
+    Notify,
+    Mwi,
+    SipHeaders,
+    Save,
+}
+
 pub(crate) struct Field {
+    pub id: FieldId,
     pub label: &'static str,
     pub required: bool,
     pub kind: FieldKind,
 }
 
 impl Field {
-    pub fn text(label: &'static str, value: &str, masked: bool, required: bool) -> Self {
+    pub fn text(
+        id: FieldId,
+        label: &'static str,
+        value: &str,
+        masked: bool,
+        required: bool,
+    ) -> Self {
         Self {
+            id,
             label,
             required,
             kind: FieldKind::Text {
@@ -118,29 +144,38 @@ impl Field {
             },
         }
     }
-    pub fn select(label: &'static str, options: &'static [&'static str], idx: usize) -> Self {
+    pub fn select(
+        id: FieldId,
+        label: &'static str,
+        options: &'static [&'static str],
+        idx: usize,
+    ) -> Self {
         Self {
+            id,
             label,
             required: false,
             kind: FieldKind::Select { options, idx },
         }
     }
-    pub fn toggle(label: &'static str, value: bool) -> Self {
+    pub fn toggle(id: FieldId, label: &'static str, value: bool) -> Self {
         Self {
+            id,
             label,
             required: false,
             kind: FieldKind::Toggle { value },
         }
     }
-    pub fn submenu(label: &'static str, count: usize) -> Self {
+    pub fn submenu(id: FieldId, label: &'static str, count: usize) -> Self {
         Self {
+            id,
             label,
             required: false,
             kind: FieldKind::SubMenu { count },
         }
     }
-    pub fn button(label: &'static str) -> Self {
+    pub fn button(id: FieldId, label: &'static str) -> Self {
         Self {
+            id,
             label,
             required: false,
             kind: FieldKind::Button,
