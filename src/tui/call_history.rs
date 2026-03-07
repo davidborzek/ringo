@@ -178,8 +178,7 @@ impl super::app::App {
                 self.command.error = None;
             }
             KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
-                self.phone.hangup_all();
-                self.quit = true;
+                self.quit_confirm = true;
             }
             _ => {}
         }

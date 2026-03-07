@@ -153,6 +153,13 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 // ─── Command / Hint Bar ──────────────────────────────────────────────────────
 
 fn render_command_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    if app.quit_confirm {
+        f.render_widget(
+            Paragraph::new(" Quit? (y/n)").style(Style::default().fg(app.theme.attention.get())),
+            area,
+        );
+        return;
+    }
     if app.command.active {
         let line = Line::from(vec![
             Span::styled(":", Style::default().fg(app.theme.accent.get())),

@@ -142,6 +142,7 @@ pub struct App {
     pub command: CommandState,
     pub(crate) phone: Box<dyn Phone>,
     pub quit: bool,
+    pub quit_confirm: bool,
     pub switch_to: bool,
     pub edit_profile: bool,
     pub theme: Theme,
@@ -169,6 +170,7 @@ impl App {
             tick: 0,
             phone,
             quit: false,
+            quit_confirm: false,
             switch_to: false,
             dial: DialState {
                 input: String::new(),

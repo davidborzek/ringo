@@ -3,6 +3,28 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 impl super::app::App {
     pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        // Ctrl+C → quit immediately (always, regardless of mode)
+        if matches!(
+            (key.code, key.modifiers),
+            (KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ) {
+            self.phone.hangup_all();
+            self.quit = true;
+            return;
+        }
+
+        // Quit confirmation captures all input
+        if self.quit_confirm {
+            match key.code {
+                KeyCode::Char('y') => {
+                    self.phone.hangup_all();
+                    self.quit = true;
+                }
+                _ => self.quit_confirm = false,
+            }
+            return;
+        }
+
         // Command bar captures all input when active
         if self.command.active {
             self.handle_command_key(key);
@@ -49,14 +71,9 @@ impl super::app::App {
     fn handle_normal_key(&mut self, key: crossterm::event::KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            // Quit
+            // Quit (with confirmation)
             KeyCode::Char('q') if !ctrl => {
-                self.phone.hangup_all();
-                self.quit = true;
-            }
-            KeyCode::Char('c') if ctrl => {
-                self.phone.hangup_all();
-                self.quit = true;
+                self.quit_confirm = true;
             }
 
             // Edit profile (only when no calls)
