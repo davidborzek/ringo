@@ -1,3 +1,5 @@
+use crossterm::event::{KeyCode, KeyModifiers};
+
 use super::app::App;
 
 pub const COMMANDS: &[&str] = &[
@@ -183,6 +185,39 @@ impl App {
     pub fn reset_tab(&mut self) {
         self.command.tab_prefix = None;
         self.command.tab_index = 0;
+    }
+
+    pub(super) fn handle_command_key(&mut self, key: crossterm::event::KeyEvent) {
+        match key.code {
+            KeyCode::Tab => {
+                self.cycle_completion();
+                return;
+            }
+            _ => self.reset_tab(),
+        }
+        match key.code {
+            KeyCode::Esc => {
+                self.command.active = false;
+                self.command.input.clear();
+            }
+            KeyCode::Enter => {
+                self.execute_command();
+            }
+            KeyCode::Backspace => {
+                if self.command.input.is_empty() {
+                    self.command.active = false;
+                } else {
+                    self.command.input.pop();
+                }
+            }
+            KeyCode::Char(c)
+                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                self.command.error = None;
+                self.command.input.push(c);
+            }
+            _ => {}
+        }
     }
 }
 

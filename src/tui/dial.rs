@@ -6,9 +6,171 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use super::app::InputMode;
+use crossterm::event::{KeyCode, KeyModifiers};
+
+use super::app::{InputMode, TransferMode};
 
 impl super::app::App {
+    pub(super) fn handle_dial_key(&mut self, key: crossterm::event::KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc => {
+                if self.dial.mode == InputMode::HistoryNav {
+                    let draft = self.dial.draft.clone();
+                    self.dial_set(draft);
+                }
+                self.dial.mode = InputMode::Normal;
+                self.dial_clear();
+            }
+            KeyCode::Enter => {
+                if self.dial.mode == InputMode::HistoryNav {
+                    self.dial.mode = InputMode::Dial;
+                }
+                if !self.dial.input.is_empty() {
+                    let target = self.dial.input.clone();
+                    self.phone.dial(&target);
+                    crate::history::push(&mut self.dial.history, target);
+                    self.dial_clear();
+                }
+                self.dial.mode = InputMode::Normal;
+            }
+            KeyCode::Backspace => {
+                if self.dial.mode == InputMode::HistoryNav {
+                    self.dial.mode = InputMode::Dial;
+                    let draft = self.dial.draft.clone();
+                    self.dial_set(draft);
+                } else if self.dial.input.is_empty() {
+                    self.dial.mode = InputMode::Normal;
+                } else {
+                    self.dial_backspace();
+                }
+            }
+            KeyCode::Delete => {
+                self.dial_delete_forward();
+            }
+            KeyCode::Char('r') if ctrl => {
+                self.dial.draft = self.dial.input.clone();
+                self.dial.query.clear();
+                self.dial.selected = 0;
+                self.dial.mode = InputMode::HistorySearch;
+            }
+            KeyCode::Up => match self.dial.mode {
+                InputMode::Dial => {
+                    if !self.dial.history.is_empty() {
+                        self.dial.draft = self.dial.input.clone();
+                        self.dial.nav_idx = 0;
+                        self.dial.mode = InputMode::HistoryNav;
+                        let entry = self.dial.history[0].clone();
+                        self.dial_set(entry);
+                    }
+                }
+                InputMode::HistoryNav => {
+                    if self.dial.nav_idx + 1 < self.dial.history.len() {
+                        self.dial.nav_idx += 1;
+                        let entry = self.dial.history[self.dial.nav_idx].clone();
+                        self.dial_set(entry);
+                    }
+                }
+                _ => {}
+            },
+            KeyCode::Down => {
+                if self.dial.mode == InputMode::HistoryNav {
+                    if self.dial.nav_idx == 0 {
+                        self.dial.mode = InputMode::Dial;
+                        let draft = self.dial.draft.clone();
+                        self.dial_set(draft);
+                    } else {
+                        self.dial.nav_idx -= 1;
+                        let entry = self.dial.history[self.dial.nav_idx].clone();
+                        self.dial_set(entry);
+                    }
+                }
+            }
+            KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
+                self.dial_cursor_left();
+            }
+            KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
+                self.dial_cursor_right();
+            }
+            KeyCode::Home => {
+                self.dial.cursor = 0;
+            }
+            KeyCode::End => {
+                self.dial.cursor = self.dial.input.len();
+            }
+            KeyCode::Char(c)
+                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                if self.dial.mode == InputMode::HistoryNav {
+                    self.dial.mode = InputMode::Dial;
+                }
+                self.dial_insert(c);
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_history_search(&mut self, key: crossterm::event::KeyEvent) {
+        let in_transfer = matches!(
+            self.transfer_mode,
+            TransferMode::BlindInput(_) | TransferMode::AttendedInput(_)
+        );
+        match key.code {
+            KeyCode::Esc => {
+                self.dial.mode = InputMode::Dial;
+                let draft = self.dial.draft.clone();
+                if in_transfer {
+                    self.transfer_input_set(draft);
+                } else {
+                    self.dial.input = draft;
+                }
+            }
+            KeyCode::Enter => {
+                let filtered = crate::history::fuzzy_filter(&self.dial.history, &self.dial.query);
+                let selected = filtered
+                    .get(self.dial.selected)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| self.dial.draft.clone());
+                self.dial.mode = InputMode::Dial;
+                if in_transfer {
+                    self.transfer_input_set(selected);
+                } else {
+                    self.dial_set(selected);
+                }
+            }
+            KeyCode::Up => {
+                if self.dial.selected > 0 {
+                    self.dial.selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let count =
+                    crate::history::fuzzy_filter(&self.dial.history, &self.dial.query).len();
+                if self.dial.selected + 1 < count {
+                    self.dial.selected += 1;
+                }
+            }
+            KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => {
+                let count =
+                    crate::history::fuzzy_filter(&self.dial.history, &self.dial.query).len();
+                if self.dial.selected + 1 < count {
+                    self.dial.selected += 1;
+                }
+            }
+            KeyCode::Backspace => {
+                self.dial.query.pop();
+                self.dial.selected = 0;
+            }
+            KeyCode::Char(c)
+                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                self.dial.query.push(c);
+                self.dial.selected = 0;
+            }
+            _ => {}
+        }
+    }
+
     /// Insert a character at the current cursor position and advance cursor.
     pub fn dial_insert(&mut self, c: char) {
         self.dial.input.insert(self.dial.cursor, c);
