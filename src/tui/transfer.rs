@@ -61,7 +61,7 @@ impl super::app::App {
                                 self.transfer_input_set(entry);
                             }
                         }
-                        InputMode::HistorySearch => {}
+                        InputMode::HistorySearch | InputMode::Normal => {}
                     }
                 }
             }

@@ -5,6 +5,7 @@ mod dial;
 mod handler;
 pub mod ui;
 
+mod command;
 mod keys;
 mod log;
 mod transfer;

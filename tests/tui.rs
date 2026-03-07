@@ -203,10 +203,10 @@ fn mwi_notify_messages_waiting_no() {
 // ─── Transfer Key Handling ────────────────────────────────────────────────────
 
 #[test]
-fn t_without_active_call_types_into_dial_input() {
+fn t_without_active_call_is_noop_in_normal_mode() {
     let (mut app, _) = test_app();
     app.handle_key(key('t'));
-    assert_eq!(app.dial.input, "t");
+    assert_eq!(app.dial.input, "");
     assert_eq!(app.transfer_mode, TransferMode::None);
 }
 

@@ -15,50 +15,33 @@ pub fn render(f: &mut Frame, app: &App) {
     let title_left = Line::from(vec![
         Span::raw(" "),
         Span::styled("ringo", Style::default().fg(app.theme.accent.get())),
-        Span::styled(
-            format!(" — {} ({}) ", app.profile_name, app.account_aor),
-            Style::default().fg(app.theme.subtle.get()),
-        ),
     ]);
-    let mut title_right_spans = vec![];
-    if app.mwi.waiting {
-        title_right_spans.push(Span::styled(
-            format!(" ✉ {} ", app.mwi.new_messages),
-            Style::default()
-                .fg(app.theme.attention.get())
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-    let reg_text = reg_text(&app.reg_status);
-    let reg_style = reg_style(&app.reg_status, app);
-    title_right_spans.push(Span::styled(format!(" {} ", reg_text), reg_style));
-
-    let outer = Block::default()
-        .title(title_left)
-        .title(
-            ratatui::widgets::block::Title::from(Line::from(title_right_spans))
-                .alignment(Alignment::Right),
-        )
-        .borders(Borders::ALL);
+    let outer = Block::default().title(title_left).borders(Borders::ALL);
 
     let inner = outer.inner(area);
     f.render_widget(outer, area);
 
     let log_visible = app.log.show || app.log.show_baresip || app.call_history.show;
     let mut constraints = vec![
-        Constraint::Min(6),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Min(6),    // [0] calls
+        Constraint::Length(1), // [1] spacer
+        Constraint::Length(1), // [2] dial
+        Constraint::Length(1), // [3] error reason
     ];
     if log_visible {
-        constraints.push(Constraint::Min(3));
+        constraints.push(Constraint::Min(3)); // log panel
     }
+    constraints.push(Constraint::Length(1)); // status bar
+    constraints.push(Constraint::Length(1)); // hints / command bar
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(inner);
+
+    let len = chunks.len();
+    let status_idx = len - 2;
+    let cmd_idx = len - 1;
 
     super::call::render_calls(f, app, chunks[0]);
     super::dial::render_dial(f, app, chunks[2]);
@@ -69,89 +52,176 @@ pub fn render(f: &mut Frame, app: &App) {
             chunks[3],
         );
     }
-    render_keys(f, app, chunks[4]);
     if log_visible {
+        let log_idx = 4;
         if app.log.show_baresip {
-            super::log::render_baresip_log(f, app, chunks[5]);
+            super::log::render_baresip_log(f, app, chunks[log_idx]);
         } else if app.call_history.show {
-            super::call_history::render(f, app, chunks[5]);
+            super::call_history::render(f, app, chunks[log_idx]);
         } else {
-            super::log::render_event_log(f, app, chunks[5]);
+            super::log::render_event_log(f, app, chunks[log_idx]);
         }
     }
+
+    render_status_bar(f, app, chunks[status_idx]);
+    render_command_bar(f, app, chunks[cmd_idx]);
 
     if app.dial.mode == InputMode::HistorySearch {
         super::dial::render_history_search(f, app, inner);
     }
 }
 
-fn render_keys(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+// ─── Status Bar ──────────────────────────────────────────────────────────────
+
+fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let sep = Span::styled(" │ ", Style::default().fg(app.theme.subtle.get()));
+
+    let mut spans = vec![
+        Span::styled(
+            format!(" {} ", app.profile_name),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        sep.clone(),
+    ];
+
+    // Registration status
+    let (reg_text, reg_style) = match &app.reg_status {
+        RegStatus::Ok => ("● Registered", Style::default().fg(app.theme.success.get())),
+        RegStatus::Failed(_) => ("✗ Failed", Style::default().fg(app.theme.danger.get())),
+        RegStatus::Registering => (
+            "◌ Registering",
+            Style::default().fg(app.theme.attention.get()),
+        ),
+        RegStatus::Unknown => ("○ Connecting", Style::default().fg(app.theme.subtle.get())),
+    };
+    spans.push(Span::styled(reg_text, reg_style));
+
+    // Call count
+    if !app.calls.is_empty() {
+        spans.push(sep.clone());
+        let call_text = if app.calls.len() == 1 {
+            "1 call".to_string()
+        } else {
+            format!("{} calls", app.calls.len())
+        };
+        spans.push(Span::styled(
+            call_text,
+            Style::default().fg(app.theme.attention.get()),
+        ));
+    }
+
+    // Muted
+    if app.muted {
+        spans.push(sep.clone());
+        spans.push(Span::styled(
+            "MUTED",
+            Style::default()
+                .fg(app.theme.danger.get())
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    // MWI
+    if app.mwi.waiting {
+        spans.push(sep.clone());
+        spans.push(Span::styled(
+            format!("✉ {}", app.mwi.new_messages),
+            Style::default()
+                .fg(app.theme.attention.get())
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    // AOR on the right side
+    let right_spans = vec![Span::styled(
+        format!("{} ", app.account_aor),
+        Style::default().fg(app.theme.subtle.get()),
+    )];
+
+    // Render left-aligned status and right-aligned AOR
+    // Use two paragraphs overlaid on the same area
+    f.render_widget(
+        Paragraph::new(Line::from(spans)).style(Style::default()),
+        area,
+    );
+    f.render_widget(
+        Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right),
+        area,
+    );
+}
+
+// ─── Command / Hint Bar ──────────────────────────────────────────────────────
+
+fn render_command_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    if app.command.active {
+        let line = Line::from(vec![
+            Span::styled(":", Style::default().fg(app.theme.accent.get())),
+            Span::raw(&app.command.input),
+        ]);
+        let cursor_x = area.x + 1 + app.command.input.len() as u16;
+        f.set_cursor_position((cursor_x, area.y));
+        f.render_widget(Paragraph::new(line), area);
+    } else if let Some(err) = &app.command.error {
+        f.render_widget(
+            Paragraph::new(format!(" {}", err)).style(Style::default().fg(app.theme.danger.get())),
+            area,
+        );
+    } else {
+        render_hints(f, app, area);
+    }
+}
+
+fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    use super::app::InputMode;
+
     let text = match &app.transfer_mode {
         TransferMode::BlindInput(_) | TransferMode::AttendedInput(_) => {
             "[Enter] send  [Esc] cancel".to_string()
         }
         TransferMode::AttendedPending => "[X] execute transfer  [Esc] abort".to_string(),
-        TransferMode::None => {
-            if app.log.show_baresip {
-                "[l] hide  [↑/↓] scroll  [q] quit".to_string()
-            } else if app.log.show {
-                "[e] hide  [l] baresip log  [c] call history  [↑/↓] scroll  [q] quit".to_string()
-            } else if app.call_history.show {
-                String::new()
-            } else {
-                let mut parts: Vec<&str> = vec!["[Enter] dial"];
-                if app.has_incoming_ringing() {
-                    parts.push("[a] accept");
-                }
-                if app.has_any_call() {
-                    parts.push("[b] hangup");
-                }
-                if app.in_active_call() {
-                    parts.push("[h] hold");
-                }
-                if app.selected_call_on_hold() {
-                    parts.push("[r] resume");
-                }
-                if app.in_active_call() {
-                    parts.push("[m] mute");
-                }
-                if app.in_active_call() {
-                    parts.push("[t] transfer  [T] att.xfer");
-                }
-                if app.calls.len() > 1 {
-                    parts.push("[Tab] switch");
-                }
-                parts.push("[e] event log");
-                parts.push("[l] baresip log");
-                if !app.has_any_call() {
-                    parts.push("[c] call history");
-                    parts.push("[ctrl+e] edit profile");
-                }
-                parts.push("[q] quit");
-                parts.join("  ")
+        TransferMode::None => match app.dial.mode {
+            InputMode::Dial | InputMode::HistoryNav => {
+                "[Enter] dial  [Esc] cancel  [↑/↓] history  [^R] search".to_string()
             }
-        }
+            InputMode::HistorySearch => String::new(),
+            InputMode::Normal => {
+                if app.call_history.show {
+                    String::new()
+                } else {
+                    let mut parts: Vec<&str> = vec!["[d] dial"];
+                    if app.has_incoming_ringing() {
+                        parts.push("[a] accept");
+                    }
+                    if app.has_any_call() {
+                        parts.push("[b] hangup");
+                    }
+                    if app.in_active_call() {
+                        parts.push("[h] hold");
+                    }
+                    if app.selected_call_on_hold() {
+                        parts.push("[r] resume");
+                    }
+                    if app.in_active_call() {
+                        parts.push("[m] mute");
+                    }
+                    if app.in_active_call() {
+                        parts.push("[t] xfer  [T] att.xfer");
+                    }
+                    if app.calls.len() > 1 {
+                        parts.push("[Tab] switch");
+                    }
+                    parts.push("[e] log");
+                    parts.push("[l] blog");
+                    parts.push("[c] history");
+                    parts.push("[:] cmd");
+                    parts.push("[q] quit");
+                    parts.join("  ")
+                }
+            }
+        },
     };
     f.render_widget(
         Paragraph::new(text).style(Style::default().fg(app.theme.subtle.get())),
         area,
     );
-}
-
-fn reg_text(status: &RegStatus) -> &'static str {
-    match status {
-        RegStatus::Unknown => "○ Connecting",
-        RegStatus::Registering => "◌ Registering",
-        RegStatus::Ok => "● Registered",
-        RegStatus::Failed(_) => "✗ Registration Failed",
-    }
-}
-
-fn reg_style(status: &RegStatus, app: &App) -> Style {
-    match status {
-        RegStatus::Ok => Style::default().fg(app.theme.success.get()),
-        RegStatus::Failed(_) => Style::default().fg(app.theme.danger.get()),
-        RegStatus::Registering => Style::default().fg(app.theme.attention.get()),
-        RegStatus::Unknown => Style::default().fg(app.theme.subtle.get()),
-    }
 }

@@ -9,12 +9,6 @@ use ratatui::{
 use super::app::InputMode;
 
 impl super::app::App {
-    pub fn exit_history_nav(&mut self) {
-        if self.dial.mode == InputMode::HistoryNav {
-            self.dial.mode = InputMode::Dial;
-        }
-    }
-
     /// Insert a character at the current cursor position and advance cursor.
     pub fn dial_insert(&mut self, c: char) {
         self.dial.input.insert(self.dial.cursor, c);
@@ -107,23 +101,24 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
             ),
             mute_indicator,
         ]),
-        TransferMode::None => {
-            if app.in_active_call() {
-                Line::from(vec![
-                    Span::styled("  DTMF: ", Style::default().fg(app.theme.accent.get())),
-                    Span::styled(
-                        format!("{}_", app.dial.dtmf),
-                        Style::default().fg(app.theme.accent.get()),
-                    ),
-                    mute_indicator,
-                ])
-            } else if app.dial.mode == InputMode::HistoryNav {
-                Line::from(vec![
-                    Span::styled("  Hist: ", Style::default().fg(app.theme.attention.get())),
-                    Span::raw(format!("{}_", app.dial.input)),
-                    mute_indicator,
-                ])
-            } else {
+        TransferMode::None => match app.dial.mode {
+            InputMode::Normal => {
+                if app.in_active_call() {
+                    Line::from(vec![
+                        Span::styled("  DTMF: ", Style::default().fg(app.theme.accent.get())),
+                        Span::styled(&app.dial.dtmf, Style::default().fg(app.theme.accent.get())),
+                        mute_indicator,
+                    ])
+                } else {
+                    Line::from(vec![mute_indicator])
+                }
+            }
+            InputMode::HistoryNav => Line::from(vec![
+                Span::styled("  Hist: ", Style::default().fg(app.theme.attention.get())),
+                Span::raw(format!("{}_", app.dial.input)),
+                mute_indicator,
+            ]),
+            InputMode::Dial => {
                 let cursor = app.dial.cursor.min(app.dial.input.len());
                 let before = &app.dial.input[..cursor];
                 let after = &app.dial.input[cursor..];
@@ -136,7 +131,8 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
                     mute_indicator,
                 ])
             }
-        }
+            InputMode::HistorySearch => Line::from(vec![mute_indicator]),
+        },
     };
     f.render_widget(Paragraph::new(line), area);
 }
