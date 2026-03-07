@@ -171,6 +171,16 @@ impl super::app::App {
             KeyCode::Char('D') if key.modifiers == KeyModifiers::SHIFT => {
                 self.clear_call_history();
             }
+            // Command bar
+            KeyCode::Char(':') => {
+                self.command.active = true;
+                self.command.input.clear();
+                self.command.error = None;
+            }
+            KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
+                self.phone.hangup_all();
+                self.quit = true;
+            }
             _ => {}
         }
     }
@@ -227,35 +237,42 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
         .collect();
 
     let accent = Style::default().fg(app.theme.accent.get());
+    let subtle = Style::default().fg(app.theme.subtle.get());
     let title: Line = if app.call_history.search_mode {
         Line::from(vec![
             Span::styled("Call History", accent),
-            Span::raw(format!(
-                "  / {}_  [Esc] cancel  [Enter] confirm",
-                app.call_history.search_query
-            )),
+            Span::styled(
+                format!("  / {}_", app.call_history.search_query),
+                Style::default().fg(app.theme.attention.get()),
+            ),
         ])
     } else if !app.call_history.search_query.is_empty() {
         Line::from(vec![
             Span::styled("Call History", accent),
-            Span::raw(format!(
-                "  /{} ({}/{})  [↑↓] nav  [Enter] redial  [d] del  [Esc] clear  [c] close",
-                app.call_history.search_query, filtered_len, total
-            )),
+            Span::styled(
+                format!(
+                    "  /{} ({}/{})",
+                    app.call_history.search_query, filtered_len, total
+                ),
+                subtle,
+            ),
         ])
     } else if total == 0 {
         Line::from(vec![
             Span::styled("Call History", accent),
-            Span::raw("  (empty)  [c/Esc] close"),
+            Span::styled("  (empty)", subtle),
         ])
     } else {
         Line::from(vec![
             Span::styled("Call History", accent),
-            Span::raw(format!(
-                " ({}/{})  [d] del  [D] clear  [/] search  [c/Esc] close",
-                if filtered_len > 0 { sel + 1 } else { 0 },
-                filtered_len
-            )),
+            Span::styled(
+                format!(
+                    " ({}/{})",
+                    if filtered_len > 0 { sel + 1 } else { 0 },
+                    filtered_len
+                ),
+                subtle,
+            ),
         ])
     };
 

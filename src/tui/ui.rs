@@ -186,7 +186,11 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             InputMode::HistorySearch => String::new(),
             InputMode::Normal => {
                 if app.call_history.show {
-                    String::new()
+                    if app.call_history.search_mode {
+                        "[Enter] confirm  [Esc] cancel".to_string()
+                    } else {
+                        "[↑/↓] nav  [Enter] redial  [/] search  [d] del  [D] clear  [:] cmd  [c/Esc] close  [q] quit".to_string()
+                    }
                 } else {
                     let mut parts: Vec<&str> = vec!["[d] dial"];
                     if app.has_incoming_ringing() {
