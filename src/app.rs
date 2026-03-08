@@ -39,8 +39,10 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
         crate::config::HookEvent::ProfileLoaded,
         name,
         &prof,
+        serde_json::json!({}),
     );
     let theme = config.theme;
+    let hooks = config.hooks;
     crate::tui::run(
         name.to_string(),
         prof.aor(),
@@ -49,8 +51,10 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
         Some(dir.join("call_history")),
         notify && prof.notify,
         prof.regint,
-        prof.custom_headers,
+        prof.custom_headers.clone(),
         theme,
+        hooks,
+        prof,
     )
 }
 

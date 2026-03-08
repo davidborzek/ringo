@@ -34,6 +34,8 @@ pub fn run(
     regint: Option<u32>,
     custom_headers: std::collections::HashMap<String, String>,
     theme: crate::config::Theme,
+    hooks: Vec<crate::config::Hook>,
+    profile: crate::profile::Profile,
 ) -> Result<Option<String>> {
     let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
     let (cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(32);
@@ -93,6 +95,8 @@ pub fn run(
         notify,
         Box::new(phone),
         theme,
+        hooks,
+        profile,
     );
 
     let aor = app.account_aor.clone();

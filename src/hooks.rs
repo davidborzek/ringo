@@ -6,9 +6,19 @@ use crate::rlog;
 
 /// Run all hooks matching the given event.
 /// Commands are spawned in the background and do not block the caller.
-pub fn run(hooks: &[Hook], event: HookEvent, profile_name: &str, profile: &Profile) {
+///
+/// `event_data` is serialized as JSON into `RINGO_EVENT_DATA`.
+/// Top-level string fields are also exported as `RINGO_<UPPER_KEY>` env vars.
+pub fn run(
+    hooks: &[Hook],
+    event: HookEvent,
+    profile_name: &str,
+    profile: &Profile,
+    event_data: serde_json::Value,
+) {
     let event_str = event.as_str();
     let profile_json = build_profile_json(profile_name, profile);
+    let event_data_json = event_data.to_string();
 
     let matching: Vec<_> = hooks.iter().filter(|h| h.event == event_str).collect();
     rlog!(
@@ -27,9 +37,20 @@ pub fn run(hooks: &[Hook], event: HookEvent, profile_name: &str, profile: &Profi
             .env("RINGO_EVENT", event_str)
             .env("RINGO_PROFILE", profile_name)
             .env("RINGO_PROFILE_JSON", &profile_json)
+            .env("RINGO_EVENT_DATA", &event_data_json)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+
+        // Export top-level string fields as RINGO_<UPPER_KEY> env vars.
+        if let Some(obj) = event_data.as_object() {
+            for (k, v) in obj {
+                if let Some(s) = v.as_str() {
+                    let env_key = format!("RINGO_{}", k.to_uppercase());
+                    cmd.env(env_key, s);
+                }
+            }
+        }
 
         match cmd.spawn() {
             Ok(child) => {

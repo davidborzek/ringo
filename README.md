@@ -284,13 +284,19 @@ event = "profile_loaded"
 command = "bash ~/.config/ringo/hooks/on_profile_loaded.sh"
 
 [[hooks]]
-event = "profile_loaded"
-command = "notify-send 'ringo' \"Profile $RINGO_PROFILE started\""
+event = "call_incoming"
+command = "notify-send 'ringo' \"Incoming call from $RINGO_NUMBER\""
+
+[[hooks]]
+event = "call_outgoing"
+command = "echo \"Calling $RINGO_NUMBER\" >> /tmp/ringo-calls.log"
 ```
 
-| Event | Trigger |
-|-------|---------|
-| `profile_loaded` | After a profile is loaded and baresip is spawned |
+| Event | Trigger | Event data |
+|-------|---------|------------|
+| `profile_loaded` | After a profile is loaded and baresip is spawned | — |
+| `call_incoming` | Incoming call received | `call_id`, `number`, `display_name` |
+| `call_outgoing` | Outgoing call initiated | `call_id`, `number` |
 
 **Environment variables** passed to each hook:
 
@@ -299,6 +305,8 @@ command = "notify-send 'ringo' \"Profile $RINGO_PROFILE started\""
 | `RINGO_EVENT` | Event name (e.g. `profile_loaded`) |
 | `RINGO_PROFILE` | Profile name |
 | `RINGO_PROFILE_JSON` | Profile data as JSON (excludes `password`) |
+| `RINGO_EVENT_DATA` | Event-specific data as JSON (see table above) |
+| `RINGO_<KEY>` | Each event data field as individual env var (e.g. `RINGO_NUMBER`, `RINGO_DISPLAY_NAME`) |
 
 Hooks run in background threads and do not block the UI. Errors are logged to `/tmp/ringo-<name>.log`.
 

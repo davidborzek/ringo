@@ -22,12 +22,16 @@ pub struct Hook {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookEvent {
     ProfileLoaded,
+    CallIncoming,
+    CallOutgoing,
 }
 
 impl HookEvent {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ProfileLoaded => "profile_loaded",
+            Self::CallIncoming => "call_incoming",
+            Self::CallOutgoing => "call_outgoing",
         }
     }
 }

@@ -21,6 +21,19 @@ impl super::app::App {
             None => number.clone(),
         };
         self.notify("Incoming call", &notify_text);
+
+        crate::hooks::run(
+            &self.hooks,
+            crate::config::HookEvent::CallIncoming,
+            &self.profile_name,
+            &self.profile,
+            serde_json::json!({
+                "call_id": call_id,
+                "number": number,
+                "display_name": display_name.as_deref().unwrap_or(""),
+            }),
+        );
+
         self.calls.push(Call {
             id: call_id,
             peer: number,
@@ -33,6 +46,18 @@ impl super::app::App {
 
     pub(super) fn handle_call_outgoing(&mut self, call_id: String, number: String) {
         self.last_call_reason = None;
+
+        crate::hooks::run(
+            &self.hooks,
+            crate::config::HookEvent::CallOutgoing,
+            &self.profile_name,
+            &self.profile,
+            serde_json::json!({
+                "call_id": call_id,
+                "number": number,
+            }),
+        );
+
         self.calls.push(Call {
             id: call_id,
             peer: number,
