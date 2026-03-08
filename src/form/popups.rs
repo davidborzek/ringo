@@ -168,8 +168,8 @@ pub fn run_rename(
                     let name = input.trim().to_string();
                     if name.is_empty() {
                         error = Some("Name cannot be empty".into());
-                    } else if name.contains('/') || name.contains(' ') {
-                        error = Some("Name cannot contain '/' or spaces".into());
+                    } else if name.contains('/') {
+                        error = Some("Name cannot contain '/'".into());
                     } else if name == old_name {
                         return Ok(None);
                     } else if existing.iter().any(|n| n == &name) {

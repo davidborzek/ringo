@@ -145,9 +145,9 @@ impl FormState {
         existing_names: &[String],
     ) -> Option<String> {
         if self.is_new {
-            if name.is_empty() || name.contains('/') || name.contains(' ') {
+            if name.is_empty() || name.contains('/') {
                 self.focus_field(FieldId::ProfileName);
-                return Some("non-empty, no spaces or slashes".into());
+                return Some("non-empty, no slashes".into());
             }
             if existing_names.iter().any(|n| n == name) {
                 self.focus_field(FieldId::ProfileName);
