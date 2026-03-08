@@ -9,7 +9,7 @@ use ratatui::{
 use super::app::InputMode;
 use super::{App, RegStatus, TransferMode};
 
-pub fn render(f: &mut Frame, app: &App) {
+pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
 
     let title_left = Line::from(vec![
@@ -54,6 +54,7 @@ pub fn render(f: &mut Frame, app: &App) {
     }
     if log_visible {
         let log_idx = 4;
+        app.log.visible_height = chunks[log_idx].height.saturating_sub(1) as usize;
         if app.log.show_baresip {
             super::log::render_baresip_log(f, app, chunks[log_idx]);
         } else if app.call_history.show {
@@ -205,7 +206,7 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                         "[↑/↓] nav  [Enter] redial  [/] search  [d] del  [D] clear  [:] cmd  [c/Esc] close  [q] quit".to_string()
                     }
                 } else if app.log.show || app.log.show_baresip {
-                    "[↑/↓] scroll  [e] events  [l] log  [c] history  [:] cmd  [Esc] close  [q] quit"
+                    "[↑/↓] scroll  [g] top  [G] bottom  [e] events  [l] log  [c] history  [:] cmd  [Esc] close  [q] quit"
                         .to_string()
                 } else {
                     let mut parts: Vec<&str> = vec!["[d] dial"];

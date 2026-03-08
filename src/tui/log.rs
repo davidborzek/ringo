@@ -7,6 +7,15 @@ use ratatui::{
 };
 
 impl super::app::App {
+    fn log_max_scroll(&self) -> usize {
+        let total = if self.log.show_baresip {
+            self.log.baresip_lines.len()
+        } else {
+            self.log.entries.len()
+        };
+        total.saturating_sub(self.log.visible_height)
+    }
+
     pub(super) fn handle_log_key(&mut self, key: crossterm::event::KeyEvent) {
         match key.code {
             KeyCode::Esc => {
@@ -43,10 +52,19 @@ impl super::app::App {
                 self.log.scroll = 0;
             }
             KeyCode::Up => {
-                self.log.scroll = self.log.scroll.saturating_add(1);
+                let max = self.log_max_scroll();
+                if self.log.scroll < max {
+                    self.log.scroll += 1;
+                }
             }
             KeyCode::Down => {
                 self.log.scroll = self.log.scroll.saturating_sub(1);
+            }
+            KeyCode::Char('g') if key.modifiers == KeyModifiers::NONE => {
+                self.log.scroll = self.log_max_scroll();
+            }
+            KeyCode::Char('G') if key.modifiers == KeyModifiers::SHIFT => {
+                self.log.scroll = 0;
             }
             KeyCode::Char(':') => {
                 self.command.active = true;

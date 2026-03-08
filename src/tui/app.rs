@@ -111,6 +111,8 @@ pub struct LogState {
     pub baresip_path: Option<PathBuf>,
     pub show_baresip: bool,
     pub baresip_lines: Vec<String>,
+    /// Last known visible height (set during render, used to clamp scroll).
+    pub visible_height: usize,
 }
 
 pub struct CommandState {
@@ -202,6 +204,7 @@ impl App {
                 baresip_path: baresip_log_path,
                 show_baresip: false,
                 baresip_lines: Vec::new(),
+                visible_height: 0,
             },
             last_call_reason: None,
             command: CommandState {
