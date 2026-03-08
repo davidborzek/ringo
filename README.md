@@ -30,6 +30,31 @@ ringo is a SIP softphone with a full-featured ratatui TUI, built on top of bares
 
 ## Installation
 
+### 1. Install baresip
+
+ringo requires [baresip](https://github.com/baresip/baresip) >= 3.14 to be installed and available in `$PATH`. See [Supported platforms](https://github.com/baresip/baresip/wiki/Supported-platforms) for platform-specific instructions.
+
+On most systems:
+
+```sh
+# Arch Linux
+sudo pacman -S baresip
+
+# Ubuntu / Debian (may need a PPA or manual build for >= 3.14)
+sudo apt install baresip
+
+# macOS
+brew install baresip
+
+# From source
+git clone https://github.com/baresip/baresip.git
+cd baresip && cmake -B build && cmake --build build && sudo cmake --install build
+```
+
+Verify the installation: `baresip -v` should show version 3.14 or later.
+
+### 2. Install ringo
+
 **From GitHub (no clone needed):**
 
 ```sh
