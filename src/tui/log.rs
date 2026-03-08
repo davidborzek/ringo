@@ -66,14 +66,6 @@ impl super::app::App {
             KeyCode::Char('G') if key.modifiers == KeyModifiers::SHIFT => {
                 self.log.scroll = 0;
             }
-            KeyCode::Char(':') => {
-                self.command.active = true;
-                self.command.input.clear();
-                self.command.error = None;
-            }
-            KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
-                self.quit_confirm = true;
-            }
             _ => {}
         }
     }

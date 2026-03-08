@@ -171,15 +171,6 @@ impl super::app::App {
             KeyCode::Char('D') if key.modifiers == KeyModifiers::SHIFT => {
                 self.clear_call_history();
             }
-            // Command bar
-            KeyCode::Char(':') => {
-                self.command.active = true;
-                self.command.input.clear();
-                self.command.error = None;
-            }
-            KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
-                self.quit_confirm = true;
-            }
             _ => {}
         }
     }

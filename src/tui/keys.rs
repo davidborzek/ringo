@@ -25,6 +25,31 @@ impl super::app::App {
             return;
         }
 
+        // Global: q → quit confirm, : → command bar (except during text input)
+        let in_text_input = self.command.active
+            || self.dial.mode == InputMode::Dial
+            || self.dial.mode == InputMode::HistoryNav
+            || self.dial.mode == InputMode::HistorySearch
+            || matches!(
+                self.transfer_mode,
+                TransferMode::BlindInput(_) | TransferMode::AttendedInput(_)
+            );
+        if !in_text_input {
+            match key.code {
+                KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
+                    self.quit_confirm = true;
+                    return;
+                }
+                KeyCode::Char(':') => {
+                    self.command.active = true;
+                    self.command.input.clear();
+                    self.command.error = None;
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         // Command bar
         if self.command.active {
             self.handle_command_key(key);
@@ -75,9 +100,6 @@ impl super::app::App {
     fn handle_normal_key(&mut self, key: crossterm::event::KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            KeyCode::Char('q') if !ctrl => {
-                self.quit_confirm = true;
-            }
             KeyCode::Char('e') if ctrl && !self.has_any_call() => {
                 self.edit_profile = true;
                 self.quit = true;
@@ -86,11 +108,6 @@ impl super::app::App {
                 self.phone.hangup_all();
                 self.switch_to = true;
                 self.quit = true;
-            }
-            KeyCode::Char(':') => {
-                self.command.active = true;
-                self.command.input.clear();
-                self.command.error = None;
             }
             KeyCode::Char('d') if !ctrl => {
                 self.dial.mode = InputMode::Dial;
