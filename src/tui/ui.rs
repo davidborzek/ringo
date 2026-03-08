@@ -203,7 +203,9 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             InputMode::HistorySearch => String::new(),
             InputMode::Normal => {
                 if app.contacts_state.show {
-                    if app.contacts_state.form.mode != super::app::ContactFormMode::None {
+                    if app.contacts_state.delete_confirm.is_some() {
+                        String::new() // title shows y/n prompt
+                    } else if app.contacts_state.form.mode != super::app::ContactFormMode::None {
                         String::new() // form has its own hints
                     } else if app.contacts_state.search_mode {
                         "[Enter] confirm  [Esc] cancel".to_string()

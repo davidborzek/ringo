@@ -52,6 +52,27 @@ impl super::app::App {
     }
 
     pub(super) fn handle_contacts_key(&mut self, key: crossterm::event::KeyEvent) {
+        // Delete confirmation captures all input
+        if let Some(ci) = self.contacts_state.delete_confirm {
+            match key.code {
+                KeyCode::Char('y') => {
+                    if ci < self.contacts.len() {
+                        self.contacts.remove(ci);
+                        crate::contacts::save(&self.contacts);
+                        let new_len = self.contacts_display_entries().len();
+                        if self.contacts_state.selected >= new_len && new_len > 0 {
+                            self.contacts_state.selected = new_len - 1;
+                        }
+                    }
+                    self.contacts_state.delete_confirm = None;
+                }
+                _ => {
+                    self.contacts_state.delete_confirm = None;
+                }
+            }
+            return;
+        }
+
         // Form mode takes priority
         if self.contacts_state.form.mode != ContactFormMode::None {
             self.handle_contact_form_key(key);
@@ -128,13 +149,7 @@ impl super::app::App {
             }
             KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => {
                 if let Some(ci) = self.selected_contact_idx() {
-                    self.contacts.remove(ci);
-                    crate::contacts::save(&self.contacts);
-                    // Adjust selection
-                    let new_len = self.contacts_display_entries().len();
-                    if self.contacts_state.selected >= new_len && new_len > 0 {
-                        self.contacts_state.selected = new_len - 1;
-                    }
+                    self.contacts_state.delete_confirm = Some(ci);
                 }
             }
             KeyCode::Char('g') if key.modifiers == KeyModifiers::NONE => {
@@ -337,7 +352,16 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
 
     let accent = Style::default().fg(app.theme.accent.get());
     let subtle = Style::default().fg(app.theme.subtle.get());
-    let title: Line = if app.contacts_state.form.mode != ContactFormMode::None {
+    let title: Line = if let Some(ci) = app.contacts_state.delete_confirm {
+        let name = app.contacts.get(ci).map(|c| c.name.as_str()).unwrap_or("?");
+        Line::from(vec![
+            Span::styled("Contacts", accent),
+            Span::styled(
+                format!("  Delete \"{}\"? (y/n)", name),
+                Style::default().fg(app.theme.danger.get()),
+            ),
+        ])
+    } else if app.contacts_state.form.mode != ContactFormMode::None {
         Line::from(vec![Span::styled("Contacts", accent)])
     } else if app.contacts_state.search_mode {
         Line::from(vec![

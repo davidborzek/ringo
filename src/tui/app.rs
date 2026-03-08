@@ -138,6 +138,8 @@ pub struct ContactsState {
     pub search_query: String,
     pub search_mode: bool,
     pub form: ContactFormState,
+    /// Contact index pending deletion (waiting for y/n confirmation).
+    pub delete_confirm: Option<usize>,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -272,6 +274,7 @@ impl App {
                 selected: 0,
                 search_query: String::new(),
                 search_mode: false,
+                delete_confirm: None,
                 form: ContactFormState {
                     mode: ContactFormMode::None,
                     field: ContactFormField::Name,
