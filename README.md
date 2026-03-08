@@ -300,7 +300,7 @@ command = "notify-send 'ringo' \"Profile $RINGO_PROFILE started\""
 | `RINGO_PROFILE` | Profile name |
 | `RINGO_PROFILE_JSON` | Profile data as JSON (excludes `password`) |
 
-Hooks run in background threads and do not block the UI. Errors are logged to `/tmp/ringo-hooks.log`.
+Hooks run in background threads and do not block the UI. Errors are logged to `/tmp/ringo-<name>.log`.
 
 ## Profile config
 
@@ -328,7 +328,7 @@ mwi          = true                   # message waiting indicator (default: true
 | `~/.config/ringo/profiles/<name>/call_history` | Per-profile call history (JSONL) |
 | `~/.local/share/ringo/history` | Global dial history |
 | `/tmp/ringo-<name>-<ts>/` | Runtime temp dir (auto-cleaned) |
-| `/tmp/ringo-hooks.log` | Hook execution log |
+| `/tmp/ringo-<name>.log` | Application log (hooks, TCP errors, lifecycle) |
 
 ## Shell completions
 
