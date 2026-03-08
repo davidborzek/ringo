@@ -23,6 +23,8 @@ pub fn run(name: Option<String>, notify: bool) -> Result<()> {
 }
 
 fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
+    crate::log::init(name);
+
     let dir = profile::profile_dir(name)?;
     if !dir.join("profile.toml").exists() {
         bail!("Profile '{}' not found.", name);

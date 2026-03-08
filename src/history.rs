@@ -24,7 +24,9 @@ fn save(history: &VecDeque<String>) {
         let _ = fs::create_dir_all(parent);
     }
     let content = history.iter().cloned().collect::<Vec<_>>().join("\n");
-    let _ = fs::write(&p, content);
+    if let Err(e) = fs::write(&p, &content) {
+        crate::rlog!(Warn, "dial history write failed: {}", e);
+    }
 }
 
 /// Prepend `entry` (deduplicating), cap at 1000, persist to disk.

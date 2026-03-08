@@ -30,7 +30,9 @@ impl BaresipPhone {
     }
 
     fn send(&self, cmd: &str, params: &str) {
-        let _ = self.cmd_tx.try_send((cmd.to_string(), params.to_string()));
+        if let Err(e) = self.cmd_tx.try_send((cmd.to_string(), params.to_string())) {
+            crate::rlog!(Warn, "cmd dropped: {} ({})", cmd, e);
+        }
     }
 }
 

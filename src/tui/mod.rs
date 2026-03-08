@@ -58,7 +58,10 @@ pub fn run(
                         break;
                     }
                 }
-                Err(_) => break,
+                Err(e) => {
+                    crate::rlog!(Error, "tcp reader: {}", e);
+                    break;
+                }
             }
         }
     });
@@ -68,10 +71,8 @@ pub fn run(
         let mut writer = write_half;
         let mut rx = cmd_rx;
         while let Some((cmd, params)) = rx.recv().await {
-            if client::write_command(&mut writer, &cmd, &params)
-                .await
-                .is_err()
-            {
+            if let Err(e) = client::write_command(&mut writer, &cmd, &params).await {
+                crate::rlog!(Error, "tcp writer: {} (cmd={})", e, cmd);
                 break;
             }
         }

@@ -165,10 +165,19 @@ pub fn load() -> RingoConfig {
     if !path.exists() {
         return RingoConfig::default();
     }
-    fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or_default()
+    match fs::read_to_string(&path) {
+        Ok(s) => match toml::from_str(&s) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                crate::rlog!(Warn, "config parse error ({}): {}", path.display(), e);
+                RingoConfig::default()
+            }
+        },
+        Err(e) => {
+            crate::rlog!(Warn, "config read error ({}): {}", path.display(), e);
+            RingoConfig::default()
+        }
+    }
 }
 
 pub fn config_path() -> Option<std::path::PathBuf> {
