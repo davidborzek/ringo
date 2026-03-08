@@ -7,6 +7,7 @@ pub mod form;
 pub mod history;
 pub mod hooks;
 pub mod log;
+pub mod notify;
 pub mod phone;
 pub mod picker;
 pub mod profile;

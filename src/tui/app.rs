@@ -238,19 +238,7 @@ impl App {
             return;
         }
         let body_with_profile = format!("[{}] {}", self.profile_name, body);
-        if let Err(e) = std::process::Command::new("notify-send")
-            .args([
-                "-a",
-                "ringo",
-                "-i",
-                "call-start",
-                summary,
-                &body_with_profile,
-            ])
-            .spawn()
-        {
-            crate::rlog!(Debug, "notify-send failed: {}", e);
-        }
+        crate::notify::send(summary, &body_with_profile);
     }
 
     pub(super) fn refresh_baresip_log(&mut self) {

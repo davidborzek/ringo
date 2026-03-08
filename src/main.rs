@@ -7,6 +7,7 @@ mod form;
 mod history;
 mod hooks;
 mod log;
+mod notify;
 mod phone;
 mod picker;
 mod profile;
