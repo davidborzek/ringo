@@ -137,6 +137,30 @@ pub struct ContactsState {
     pub selected: usize,
     pub search_query: String,
     pub search_mode: bool,
+    pub form: ContactFormState,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub enum ContactFormMode {
+    #[default]
+    None,
+    Add,
+    Edit(usize), // index into contacts vec
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum ContactFormField {
+    #[default]
+    Name,
+    Numbers,
+}
+
+pub struct ContactFormState {
+    pub mode: ContactFormMode,
+    pub field: ContactFormField,
+    pub name: String,
+    pub numbers: String, // comma-separated
+    pub cursor: usize,   // byte cursor in active field
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -248,6 +272,13 @@ impl App {
                 selected: 0,
                 search_query: String::new(),
                 search_mode: false,
+                form: ContactFormState {
+                    mode: ContactFormMode::None,
+                    field: ContactFormField::Name,
+                    name: String::new(),
+                    numbers: String::new(),
+                    cursor: 0,
+                },
             },
         }
     }

@@ -7,7 +7,7 @@ pub struct Contact {
     pub numbers: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ContactsFile {
     #[serde(default)]
     contacts: Vec<Contact>,
@@ -36,6 +36,28 @@ pub fn load() -> Vec<Contact> {
             }
         },
         Err(_) => Vec::new(),
+    }
+}
+
+pub fn save(contacts: &[Contact]) {
+    let Some(path) = contacts_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let file = ContactsFile {
+        contacts: contacts.to_vec(),
+    };
+    match toml::to_string_pretty(&file) {
+        Ok(content) => {
+            if let Err(e) = std::fs::write(&path, content) {
+                crate::rlog!(Warn, "contacts write failed: {}", e);
+            }
+        }
+        Err(e) => {
+            crate::rlog!(Warn, "contacts serialize failed: {}", e);
+        }
     }
 }
 

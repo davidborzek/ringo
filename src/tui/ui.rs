@@ -203,10 +203,12 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             InputMode::HistorySearch => String::new(),
             InputMode::Normal => {
                 if app.contacts_state.show {
-                    if app.contacts_state.search_mode {
+                    if app.contacts_state.form.mode != super::app::ContactFormMode::None {
+                        String::new() // form has its own hints
+                    } else if app.contacts_state.search_mode {
                         "[Enter] confirm  [Esc] cancel".to_string()
                     } else {
-                        "[↑/↓] nav  [Enter] dial  [/] search  [e] edit  [:] cmd  [f/Esc] close  [q] quit".to_string()
+                        "[↑/↓] nav  [Enter] dial  [/] search  [a] add  [e] edit  [d] del  [E] $EDITOR  [:] cmd  [f/Esc] close  [q] quit".to_string()
                     }
                 } else if app.call_history.show {
                     if app.call_history.search_mode {

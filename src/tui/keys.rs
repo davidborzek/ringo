@@ -35,6 +35,8 @@ impl super::app::App {
                 TransferMode::BlindInput(_) | TransferMode::AttendedInput(_)
             )
             || (self.contacts_state.show && self.contacts_state.search_mode)
+            || (self.contacts_state.show
+                && self.contacts_state.form.mode != super::app::ContactFormMode::None)
             || (self.call_history.show && self.call_history.search_mode);
         if !in_text_input {
             match key.code {
