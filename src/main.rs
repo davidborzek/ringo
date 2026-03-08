@@ -55,6 +55,16 @@ enum Commands {
         /// Print only profile names, one per line (for scripting)
         #[arg(short, long)]
         plain: bool,
+
+        /// Custom output format with placeholders: {name}, {username}, {domain},
+        /// {display_name}, {transport}, {aor}, {auth_user}, {outbound},
+        /// {stun_server}, {media_enc} (implies --plain)
+        #[arg(short, long)]
+        format: Option<String>,
+
+        /// Output as JSON array
+        #[arg(short, long)]
+        json: bool,
     },
 }
 
@@ -68,7 +78,11 @@ fn main() -> Result<()> {
         no_notify: false,
     }) {
         Commands::Start { profile, no_notify } => app::run(profile, !no_notify)?,
-        Commands::List { plain } => profile::list(plain)?,
+        Commands::List {
+            plain,
+            format,
+            json,
+        } => profile::list(plain, format, json)?,
     }
 
     Ok(())

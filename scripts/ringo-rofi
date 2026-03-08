@@ -5,13 +5,14 @@
 # Bind to a key in your WM config, e.g. (sway/i3):
 #   bindsym $mod+p exec ringo-rofi
 #
-# Requires: ringo, rofi, and a terminal set via $TERMINAL
+# Requires: ringo, rofi, jq, and a terminal set via $TERMINAL
 # (or one of: kitty, alacritty, foot, wezterm, xterm)
 
 set -e
 
-profile=$(ringo list --plain | rofi -dmenu -i -p "ringo")
-[ -z "$profile" ] && exit 0
+selection=$(ringo list --json | jq -r '.[] | "\(.name)\t\(.aor)"' | rofi -dmenu -i -p "ringo")
+[ -z "$selection" ] && exit 0
+profile=$(printf '%s' "$selection" | cut -f1)
 
 # Resolve terminal
 if [ -n "$TERMINAL" ]; then
