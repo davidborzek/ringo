@@ -73,11 +73,16 @@ pub(crate) fn run(
                 ])
                 .split(area);
 
-            // ASCII logo — vertically centered in header area
-            let logo_height = LOGO.len() as u16;
+            // ASCII logo + version — vertically centered in header area
+            let version_line = Line::from(Span::styled(
+                format!("v{}", env!("CARGO_PKG_VERSION")),
+                Style::default().fg(theme.subtle.get()),
+            ));
+            let logo_height = LOGO.len() as u16 + 1; // +1 for version
             let top_pad = chunks[0].height.saturating_sub(logo_height) / 2;
             let mut logo_lines: Vec<Line> = std::iter::repeat_n(Line::from(""), top_pad as usize)
                 .chain(LOGO.iter().map(|l| Line::from(*l)))
+                .chain(std::iter::once(version_line))
                 .collect();
             while logo_lines.len() < chunks[0].height as usize {
                 logo_lines.push(Line::from(""));
