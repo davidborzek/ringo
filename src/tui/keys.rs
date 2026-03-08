@@ -163,10 +163,10 @@ impl super::app::App {
                 self.dial.selected = 0;
                 self.dial.mode = InputMode::HistorySearch;
             }
-            KeyCode::Up if self.log.show || self.log.show_baresip || self.call_history.show => {
+            KeyCode::Up if self.log.show || self.log.show_baresip => {
                 self.log.scroll = self.log.scroll.saturating_add(1);
             }
-            KeyCode::Down if self.log.show || self.log.show_baresip || self.call_history.show => {
+            KeyCode::Down if self.log.show || self.log.show_baresip => {
                 self.log.scroll = self.log.scroll.saturating_sub(1);
             }
             _ => {}

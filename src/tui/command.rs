@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use super::app::App;
 
 pub const COMMANDS: &[&str] = &[
-    "accept", "dial", "edit", "hangup", "help", "history", "hold", "log", "blog", "mute", "quit",
+    "accept", "dial", "edit", "events", "hangup", "help", "history", "hold", "log", "mute", "quit",
     "resume", "switch", "transfer", "xfer",
 ];
 
@@ -89,7 +89,7 @@ impl App {
                     self.command.error = Some("No active call".into());
                 }
             }
-            "log" | "e" => {
+            "events" | "e" => {
                 self.log.show = !self.log.show;
                 if self.log.show {
                     self.log.show_baresip = false;
@@ -97,7 +97,7 @@ impl App {
                 }
                 self.log.scroll = 0;
             }
-            "blog" | "l" => {
+            "log" | "l" => {
                 self.log.show_baresip = !self.log.show_baresip;
                 if self.log.show_baresip {
                     self.log.show = false;
@@ -129,7 +129,7 @@ impl App {
                 self.quit = true;
             }
             "help" | "?" => {
-                self.push_log("Commands: dial <n>, hangup, accept, hold, resume, mute, transfer <uri>, log, blog, history, edit, switch, quit");
+                self.push_log("Commands: dial <n>, hangup, accept, hold, resume, mute, transfer <uri>, events, log, history, edit, switch, quit");
                 self.log.show = true;
                 self.log.show_baresip = false;
                 self.call_history.show = false;

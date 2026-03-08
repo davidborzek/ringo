@@ -138,15 +138,21 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Style::default().fg(app.theme.subtle.get()),
     )];
 
-    // Render left-aligned status and right-aligned AOR
-    // Use two paragraphs overlaid on the same area
+    // Render left-aligned status and right-aligned AOR using a horizontal split
+    // to prevent overlap when the left side gets long.
+    let aor_width = (app.account_aor.len() + 1) as u16;
+    let bar_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(aor_width)])
+        .split(area);
+
     f.render_widget(
         Paragraph::new(Line::from(spans)).style(Style::default()),
-        area,
+        bar_chunks[0],
     );
     f.render_widget(
         Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right),
-        area,
+        bar_chunks[1],
     );
 }
 
@@ -221,8 +227,8 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                     if app.calls.len() > 1 {
                         parts.push("[Tab] switch");
                     }
-                    parts.push("[e] log");
-                    parts.push("[l] blog");
+                    parts.push("[e] events");
+                    parts.push("[l] log");
                     parts.push("[c] history");
                     parts.push("[:] cmd");
                     parts.push("[q] quit");

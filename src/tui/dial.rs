@@ -233,12 +233,6 @@ impl super::app::App {
 pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
     use super::app::TransferMode;
 
-    let mute_indicator = if app.muted {
-        Span::styled(" [MUTED]", Style::default().fg(app.theme.danger.get()))
-    } else {
-        Span::raw("")
-    };
-
     let line = match &app.transfer_mode {
         TransferMode::BlindInput(s) => Line::from(vec![
             Span::styled("  Xfer → : ", Style::default().fg(app.theme.transfer.get())),
@@ -246,7 +240,6 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
                 format!("{}_", s),
                 Style::default().fg(app.theme.transfer.get()),
             ),
-            mute_indicator,
         ]),
         TransferMode::AttendedInput(s) => Line::from(vec![
             Span::styled("  Att. → : ", Style::default().fg(app.theme.transfer.get())),
@@ -254,31 +247,25 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
                 format!("{}_", s),
                 Style::default().fg(app.theme.transfer.get()),
             ),
-            mute_indicator,
         ]),
-        TransferMode::AttendedPending => Line::from(vec![
-            Span::styled(
-                "  Attended: call ringing…",
-                Style::default().fg(app.theme.attention.get()),
-            ),
-            mute_indicator,
-        ]),
+        TransferMode::AttendedPending => Line::from(vec![Span::styled(
+            "  Attended: call ringing…",
+            Style::default().fg(app.theme.attention.get()),
+        )]),
         TransferMode::None => match app.dial.mode {
             InputMode::Normal => {
                 if app.in_active_call() {
                     Line::from(vec![
                         Span::styled("  DTMF: ", Style::default().fg(app.theme.accent.get())),
                         Span::styled(&app.dial.dtmf, Style::default().fg(app.theme.accent.get())),
-                        mute_indicator,
                     ])
                 } else {
-                    Line::from(vec![mute_indicator])
+                    Line::default()
                 }
             }
             InputMode::HistoryNav => Line::from(vec![
                 Span::styled("  Hist: ", Style::default().fg(app.theme.attention.get())),
                 Span::raw(format!("{}_", app.dial.input)),
-                mute_indicator,
             ]),
             InputMode::Dial => {
                 let cursor = app.dial.cursor.min(app.dial.input.len());
@@ -290,10 +277,9 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
                     Span::styled("  Dial: ", Style::default().fg(app.theme.accent.get())),
                     Span::raw(before),
                     Span::raw(after),
-                    mute_indicator,
                 ])
             }
-            InputMode::HistorySearch => Line::from(vec![mute_indicator]),
+            InputMode::HistorySearch => Line::default(),
         },
     };
     f.render_widget(Paragraph::new(line), area);
