@@ -43,6 +43,12 @@ impl super::app::App {
             return;
         }
 
+        // Event log / baresip log view
+        if self.log.show || self.log.show_baresip {
+            self.handle_log_key(key);
+            return;
+        }
+
         // Transfer input modes
         match &self.transfer_mode {
             TransferMode::BlindInput(_) | TransferMode::AttendedInput(_) => {
@@ -132,42 +138,30 @@ impl super::app::App {
                 self.switch_line();
             }
             KeyCode::Char('e') if !ctrl => {
-                self.log.show = !self.log.show;
-                if self.log.show {
-                    self.log.show_baresip = false;
-                    self.call_history.show = false;
-                }
+                self.log.show = true;
+                self.log.show_baresip = false;
+                self.call_history.show = false;
                 self.log.scroll = 0;
             }
             KeyCode::Char('l') if !ctrl => {
-                self.log.show_baresip = !self.log.show_baresip;
-                if self.log.show_baresip {
-                    self.log.show = false;
-                    self.call_history.show = false;
-                    self.refresh_baresip_log();
-                    self.log.scroll = 0;
-                }
+                self.log.show_baresip = true;
+                self.log.show = false;
+                self.call_history.show = false;
+                self.refresh_baresip_log();
+                self.log.scroll = 0;
             }
             KeyCode::Char('c') if !ctrl => {
-                self.call_history.show = !self.call_history.show;
-                if self.call_history.show {
-                    self.log.show = false;
-                    self.log.show_baresip = false;
-                    self.refresh_call_history();
-                    self.log.scroll = 0;
-                }
+                self.call_history.show = true;
+                self.log.show = false;
+                self.log.show_baresip = false;
+                self.refresh_call_history();
+                self.log.scroll = 0;
             }
             KeyCode::Char('r') if ctrl => {
                 self.dial.draft = self.dial.input.clone();
                 self.dial.query.clear();
                 self.dial.selected = 0;
                 self.dial.mode = InputMode::HistorySearch;
-            }
-            KeyCode::Up if self.log.show || self.log.show_baresip => {
-                self.log.scroll = self.log.scroll.saturating_add(1);
-            }
-            KeyCode::Down if self.log.show || self.log.show_baresip => {
-                self.log.scroll = self.log.scroll.saturating_sub(1);
             }
             _ => {}
         }

@@ -1,9 +1,65 @@
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     Frame,
     layout::Rect,
     style::Style,
     widgets::{Block, Borders, List, ListItem},
 };
+
+impl super::app::App {
+    pub(super) fn handle_log_key(&mut self, key: crossterm::event::KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.log.show = false;
+                self.log.show_baresip = false;
+                self.log.scroll = 0;
+            }
+            KeyCode::Char('e') if key.modifiers == KeyModifiers::NONE => {
+                if self.log.show {
+                    self.log.show = false;
+                    self.log.scroll = 0;
+                } else {
+                    self.log.show = true;
+                    self.log.show_baresip = false;
+                    self.log.scroll = 0;
+                }
+            }
+            KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
+                if self.log.show_baresip {
+                    self.log.show_baresip = false;
+                    self.log.scroll = 0;
+                } else {
+                    self.log.show_baresip = true;
+                    self.log.show = false;
+                    self.refresh_baresip_log();
+                    self.log.scroll = 0;
+                }
+            }
+            KeyCode::Char('c') if key.modifiers == KeyModifiers::NONE => {
+                self.log.show = false;
+                self.log.show_baresip = false;
+                self.call_history.show = true;
+                self.refresh_call_history();
+                self.log.scroll = 0;
+            }
+            KeyCode::Up => {
+                self.log.scroll = self.log.scroll.saturating_add(1);
+            }
+            KeyCode::Down => {
+                self.log.scroll = self.log.scroll.saturating_sub(1);
+            }
+            KeyCode::Char(':') => {
+                self.command.active = true;
+                self.command.input.clear();
+                self.command.error = None;
+            }
+            KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
+                self.quit_confirm = true;
+            }
+            _ => {}
+        }
+    }
+}
 
 pub(super) fn render_event_log(f: &mut Frame, app: &super::app::App, area: Rect) {
     let visible = area.height.saturating_sub(1) as usize;
@@ -22,9 +78,9 @@ pub(super) fn render_event_log(f: &mut Frame, app: &super::app::App, area: Rect)
         .collect();
 
     let title = if app.log.scroll > 0 {
-        format!("Events ↑{} (↓ scroll down)", app.log.scroll)
+        format!("Events ↑{}", app.log.scroll)
     } else {
-        "Events  (↑/↓ scroll)".to_string()
+        "Events".to_string()
     };
     f.render_widget(
         List::new(items).block(Block::default().title(title).borders(Borders::TOP)),
@@ -45,14 +101,12 @@ pub(super) fn render_baresip_log(f: &mut Frame, app: &super::app::App, area: Rec
         .map(|s| ListItem::new(s.as_str()).style(Style::default().fg(app.theme.subtle.get())))
         .collect();
 
-    let title = if app.log.baresip_path.is_some() {
-        if app.log.scroll > 0 {
-            format!("baresip.log ↑{} (↓ scroll down, [l] back)", app.log.scroll)
-        } else {
-            "baresip.log  (↑/↓ scroll, [l] back)".to_string()
-        }
-    } else {
+    let title = if app.log.baresip_path.is_none() {
         "baresip.log  (no log path)".to_string()
+    } else if app.log.scroll > 0 {
+        format!("baresip.log ↑{}", app.log.scroll)
+    } else {
+        "baresip.log".to_string()
     };
 
     f.render_widget(

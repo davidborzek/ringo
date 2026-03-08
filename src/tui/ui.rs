@@ -204,6 +204,9 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                     } else {
                         "[↑/↓] nav  [Enter] redial  [/] search  [d] del  [D] clear  [:] cmd  [c/Esc] close  [q] quit".to_string()
                     }
+                } else if app.log.show || app.log.show_baresip {
+                    "[↑/↓] scroll  [e] events  [l] log  [c] history  [:] cmd  [Esc] close  [q] quit"
+                        .to_string()
                 } else {
                     let mut parts: Vec<&str> = vec!["[d] dial"];
                     if app.has_incoming_ringing() {
