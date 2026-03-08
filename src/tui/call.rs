@@ -275,10 +275,11 @@ pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
                     format!(
                         "{:<8}  {:<40}  ",
                         dir,
-                        match &call.peer_display_name {
-                            Some(name) => format!("{} ({})", name, call.peer),
-                            None => call.peer.clone(),
-                        }
+                        format_peer(
+                            &call.peer,
+                            call.peer_display_name.as_deref(),
+                            crate::contacts::resolve_name(&app.contacts, &call.peer),
+                        )
                     ),
                     base_style,
                 ),
@@ -294,4 +295,16 @@ pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
         Style::default().fg(app.theme.subtle.get()),
     )));
     f.render_widget(list, area);
+}
+
+/// Format peer for display.
+/// Priority: contact_name > display_name > raw peer.
+/// When contact_name is set, display_name is shown in brackets if different.
+fn format_peer(peer: &str, display_name: Option<&str>, contact_name: Option<&str>) -> String {
+    match (contact_name, display_name) {
+        (Some(cn), Some(dn)) => format!("{} [{}] ({})", cn, dn, peer),
+        (Some(cn), None) => format!("{} ({})", cn, peer),
+        (None, Some(dn)) => format!("{} ({})", dn, peer),
+        (None, None) => peer.to_string(),
+    }
 }

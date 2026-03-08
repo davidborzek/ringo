@@ -1,4 +1,4 @@
-use crate::{config::Hook, config::Theme, phone::Phone, profile::Profile};
+use crate::{config::Hook, config::Theme, contacts::Contact, phone::Phone, profile::Profile};
 use std::{collections::VecDeque, path::PathBuf, time::Instant};
 
 // ─── State types ──────────────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ pub struct CallHistoryState {
 
 impl CallHistoryState {
     /// Indices into `entries` that match the current search query.
-    pub fn filtered_indices(&self) -> Vec<usize> {
+    pub fn filtered_indices(&self, contacts: &[Contact]) -> Vec<usize> {
         let q = self.search_query.to_lowercase();
         if q.is_empty() {
             return (0..self.entries.len()).collect();
@@ -98,7 +98,15 @@ impl CallHistoryState {
         self.entries
             .iter()
             .enumerate()
-            .filter(|(_, e)| e.peer.to_lowercase().contains(&q))
+            .filter(|(_, e)| {
+                if e.peer.to_lowercase().contains(&q) {
+                    return true;
+                }
+                if let Some(name) = crate::contacts::resolve_name(contacts, &e.peer) {
+                    return name.to_lowercase().contains(&q);
+                }
+                false
+            })
             .map(|(i, _)| i)
             .collect()
     }
@@ -124,6 +132,13 @@ pub struct CommandState {
     pub tab_index: usize,
 }
 
+pub struct ContactsState {
+    pub show: bool,
+    pub selected: usize,
+    pub search_query: String,
+    pub search_mode: bool,
+}
+
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 pub struct App {
@@ -147,9 +162,12 @@ pub struct App {
     pub quit_confirm: bool,
     pub switch_to: bool,
     pub edit_profile: bool,
+    pub needs_clear: bool,
     pub theme: Theme,
     pub hooks: Vec<Hook>,
     pub profile: Profile,
+    pub contacts: Vec<Contact>,
+    pub contacts_state: ContactsState,
 }
 
 impl App {
@@ -163,6 +181,7 @@ impl App {
         theme: Theme,
         hooks: Vec<Hook>,
         profile: Profile,
+        contacts: Vec<Contact>,
     ) -> Self {
         Self {
             profile_name,
@@ -219,9 +238,17 @@ impl App {
                 tab_index: 0,
             },
             edit_profile: false,
+            needs_clear: false,
             theme,
             hooks,
             profile,
+            contacts,
+            contacts_state: ContactsState {
+                show: false,
+                selected: 0,
+                search_query: String::new(),
+                search_mode: false,
+            },
         }
     }
 

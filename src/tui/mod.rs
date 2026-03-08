@@ -1,6 +1,7 @@
 mod app;
 mod call;
 mod call_history;
+mod contacts;
 mod dial;
 mod handler;
 pub mod ui;
@@ -36,6 +37,7 @@ pub fn run(
     theme: crate::config::Theme,
     hooks: Vec<crate::config::Hook>,
     profile: crate::profile::Profile,
+    contacts: Vec<crate::contacts::Contact>,
 ) -> Result<Option<String>> {
     let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
     let (cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(32);
@@ -97,6 +99,7 @@ pub fn run(
         theme,
         hooks,
         profile,
+        contacts,
     );
 
     let aor = app.account_aor.clone();
@@ -169,6 +172,11 @@ fn render_loop(
 ) -> Result<()> {
     use std::time::Duration;
     loop {
+        if app.needs_clear {
+            terminal.clear()?;
+            app.needs_clear = false;
+        }
+
         app.tick = app.tick.wrapping_add(1);
         // Refresh baresip log every ~500ms (30 ticks × 16ms) when visible
         if app.log.show_baresip && app.tick % 30 == 0 {

@@ -2,6 +2,7 @@ mod app;
 mod baresip;
 mod client;
 mod config;
+mod contacts;
 mod event;
 mod form;
 mod history;

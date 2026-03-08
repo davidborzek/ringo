@@ -112,7 +112,7 @@ impl super::app::App {
             return;
         }
 
-        let indices = self.call_history.filtered_indices();
+        let indices = self.call_history.filtered_indices(&self.contacts);
         let filtered_len = indices.len();
 
         match key.code {
@@ -156,6 +156,7 @@ impl super::app::App {
                 if let Some(&real_idx) = indices.get(self.call_history.selected) {
                     let peer = self.call_history.entries[real_idx].peer.clone();
                     self.dial_set(peer);
+                    self.dial.mode = super::app::InputMode::Dial;
                     self.call_history.show = false;
                     self.call_history.search_query.clear();
                     self.call_history.search_mode = false;
@@ -166,7 +167,7 @@ impl super::app::App {
                 if let Some(&real_idx) = indices.get(self.call_history.selected) {
                     self.call_history.entries.remove(real_idx);
                     self.rewrite_call_history_file();
-                    let new_len = self.call_history.filtered_indices().len();
+                    let new_len = self.call_history.filtered_indices(&self.contacts).len();
                     if self.call_history.selected >= new_len && new_len > 0 {
                         self.call_history.selected = new_len - 1;
                     }
@@ -204,7 +205,7 @@ impl super::app::App {
 }
 
 pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
-    let indices = app.call_history.filtered_indices();
+    let indices = app.call_history.filtered_indices(&app.contacts);
     let total = app.call_history.entries.len();
     let filtered_len = indices.len();
     let visible = area.height.saturating_sub(2) as usize;
@@ -293,9 +294,14 @@ fn call_history_item<'a>(
         Style::default().fg(app.theme.subtle.get())
     };
 
+    let peer_display = match crate::contacts::resolve_name(&app.contacts, &e.peer) {
+        Some(name) => format!("{} ({})", name, e.peer),
+        None => e.peer.clone(),
+    };
+
     let line = Line::from(vec![
         Span::styled(format!(" {} ", arrow), dir_style),
-        Span::raw(format!("{:<45}", e.peer)),
+        Span::raw(format!("{:<45}", peer_display)),
         Span::styled(format!("{:<11}", e.duration), dur_style),
         Span::styled(
             format!("  {}", e.ts),
@@ -334,30 +340,30 @@ mod tests {
     #[test]
     fn empty_query_returns_all_indices() {
         let s = make_state(&["sip:alice@example.com", "sip:bob@example.com"], "");
-        assert_eq!(s.filtered_indices(), vec![0, 1]);
+        assert_eq!(s.filtered_indices(&[]), vec![0, 1]);
     }
 
     #[test]
     fn query_filters_by_peer() {
         let s = make_state(&["sip:alice@example.com", "sip:bob@example.com"], "alice");
-        assert_eq!(s.filtered_indices(), vec![0]);
+        assert_eq!(s.filtered_indices(&[]), vec![0]);
     }
 
     #[test]
     fn query_is_case_insensitive() {
         let s = make_state(&["sip:Alice@Example.com"], "alice");
-        assert_eq!(s.filtered_indices(), vec![0]);
+        assert_eq!(s.filtered_indices(&[]), vec![0]);
     }
 
     #[test]
     fn no_match_returns_empty() {
         let s = make_state(&["sip:alice@example.com"], "zzz");
-        assert_eq!(s.filtered_indices(), vec![] as Vec<usize>);
+        assert_eq!(s.filtered_indices(&[]), vec![] as Vec<usize>);
     }
 
     #[test]
     fn empty_entries_returns_empty() {
         let s = make_state(&[], "alice");
-        assert_eq!(s.filtered_indices(), vec![] as Vec<usize>);
+        assert_eq!(s.filtered_indices(&[]), vec![] as Vec<usize>);
     }
 }

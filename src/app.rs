@@ -33,6 +33,8 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
     let prof = profile::load(name)?;
     let instance = crate::baresip::Instance::spawn(name, &prof)?;
 
+    let contacts = crate::contacts::load();
+
     let config = crate::config::load();
     crate::hooks::run(
         &config.hooks,
@@ -55,6 +57,7 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
         theme,
         hooks,
         prof,
+        contacts,
     )
 }
 

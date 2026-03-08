@@ -2,6 +2,7 @@ pub mod app;
 pub mod baresip;
 pub mod client;
 pub mod config;
+pub mod contacts;
 pub mod event;
 pub mod form;
 pub mod history;

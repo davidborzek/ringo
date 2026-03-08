@@ -380,6 +380,7 @@ mod tests {
             crate::config::Theme::default(),
             Vec::new(),
             crate::profile::Profile::default(),
+            Vec::new(),
         )
     }
 
