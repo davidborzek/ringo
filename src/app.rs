@@ -184,6 +184,7 @@ fn build_subtitle(profile: &profile::Profile, fields: &[String]) -> String {
                     .unwrap_or("default")
                     .to_string(),
             ),
+            "notes" => profile.notes.clone().filter(|s| !s.is_empty()),
             "auth_user" => profile.auth_user.clone().filter(|s| !s.is_empty()),
             "outbound" => profile.outbound.clone().filter(|s| !s.is_empty()),
             "stun_server" => profile.stun_server.clone().filter(|s| !s.is_empty()),

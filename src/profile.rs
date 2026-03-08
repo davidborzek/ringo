@@ -14,12 +14,15 @@ pub struct Profile {
     pub stun_server: Option<String>,
     pub media_enc: Option<String>,
     pub regint: Option<u32>,
+    pub notes: Option<String>,
     #[serde(default)]
     pub custom_headers: HashMap<String, String>,
     #[serde(default = "default_true")]
     pub notify: bool,
     #[serde(default = "default_true")]
     pub mwi: bool,
+    #[serde(default)]
+    pub metadata: HashMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -140,6 +143,7 @@ fn format_profile(name: &str, profile: &Profile, fmt: &str) -> String {
             "{media_enc}",
             profile.media_enc.as_deref().unwrap_or("none"),
         )
+        .replace("{notes}", profile.notes.as_deref().unwrap_or(""))
 }
 
 // ─── Load / Save ─────────────────────────────────────────────────────────────

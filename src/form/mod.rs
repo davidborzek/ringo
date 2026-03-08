@@ -124,10 +124,12 @@ impl FormState {
             } else {
                 Some(ENCRYPTIONS[enc_idx].into())
             },
+            notes: opt(get_text(self.field(Notes))),
             notify: get_toggle(self.field(Notify)),
             mwi: get_toggle(self.field(Mwi)),
             regint: prev_profile.regint,
             custom_headers: self.custom_headers.clone(),
+            metadata: prev_profile.metadata.clone(),
         };
         (name, profile)
     }
@@ -315,6 +317,13 @@ fn build_fields(profile: &Profile, include_name: bool) -> Vec<Field> {
         "Encryption",
         ENCRYPTIONS,
         enc_idx(profile.media_enc.as_deref()),
+    ));
+    f.push(Field::text(
+        Notes,
+        "Notes",
+        profile.notes.as_deref().unwrap_or(""),
+        false,
+        false,
     ));
     f.push(Field::toggle(Notify, "Notifications", profile.notify));
     f.push(Field::toggle(Mwi, "MWI", profile.mwi));

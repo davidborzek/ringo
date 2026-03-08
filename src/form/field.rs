@@ -113,6 +113,7 @@ pub(crate) enum FieldId {
     Outbound,
     StunServer,
     Encryption,
+    Notes,
     Notify,
     Mwi,
     SipHeaders,
