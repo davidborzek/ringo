@@ -3,7 +3,7 @@
 > A terminal SIP softphone built on [baresip](https://github.com/baresip/baresip).
 
 [![CI](https://github.com/davidborzek/ringo/actions/workflows/ci.yml/badge.svg)](https://github.com/davidborzek/ringo/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/davidborzek/ringo)](https://github.com/davidborzek/ringo/releases)
+[![crates.io](https://img.shields.io/crates/v/ringo-phone)](https://crates.io/crates/ringo-phone)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
@@ -54,6 +54,12 @@ cd baresip && cmake -B build && cmake --build build && sudo cmake --install buil
 Verify the installation: `baresip -v` should show version 3.14 or later.
 
 ### 2. Install ringo
+
+**From crates.io:**
+
+```sh
+cargo install ringo-phone
+```
 
 **From GitHub (no clone needed):**
 
