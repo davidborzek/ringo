@@ -126,39 +126,8 @@ impl super::app::App {
     }
 
     fn open_contacts_editor(&mut self) {
-        let Some(path) = crate::contacts::contacts_path() else {
-            return;
-        };
-
-        if !path.exists() {
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(
-                &path,
-                "# ringo contacts\n\
-                 # [[contacts]]\n\
-                 # name = \"Alice\"\n\
-                 # numbers = [\"+49123456789\", \"alice.work\"]\n",
-            );
-        }
-
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
-
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::LeaveAlternateScreen);
-
-        let _ = std::process::Command::new(&editor).arg(&path).status();
-
-        let _ = crossterm::terminal::enable_raw_mode();
-        let _ = crossterm::execute!(std::io::stdout(), crossterm::terminal::EnterAlternateScreen);
-
-        // Reload contacts and force full redraw
-        self.needs_clear = true;
-        self.contacts = crate::contacts::load();
-        self.contacts_state.selected = 0;
-        self.contacts_state.search_query.clear();
-        self.contacts_state.search_mode = false;
+        self.edit_contacts = true;
+        self.quit = true;
     }
 }
 
