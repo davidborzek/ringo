@@ -42,16 +42,6 @@ pub fn run(
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        // Export top-level string fields as RINGO_<UPPER_KEY> env vars.
-        if let Some(obj) = event_data.as_object() {
-            for (k, v) in obj {
-                if let Some(s) = v.as_str() {
-                    let env_key = format!("RINGO_{}", k.to_uppercase());
-                    cmd.env(env_key, s);
-                }
-            }
-        }
-
         match cmd.spawn() {
             Ok(child) => {
                 let command = hook.command.clone();

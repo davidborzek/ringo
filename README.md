@@ -285,11 +285,11 @@ command = "bash ~/.config/ringo/hooks/on_profile_loaded.sh"
 
 [[hooks]]
 event = "call_incoming"
-command = "notify-send 'ringo' \"Incoming call from $RINGO_NUMBER\""
+command = "notify-send 'ringo' \"Incoming call from $(echo $RINGO_EVENT_DATA | jq -r .number)\""
 
 [[hooks]]
 event = "call_outgoing"
-command = "echo \"Calling $RINGO_NUMBER\" >> /tmp/ringo-calls.log"
+command = "echo $RINGO_EVENT_DATA >> /tmp/ringo-calls.log"
 ```
 
 | Event | Trigger | Event data |
@@ -307,7 +307,6 @@ command = "echo \"Calling $RINGO_NUMBER\" >> /tmp/ringo-calls.log"
 | `RINGO_PROFILE` | Profile name |
 | `RINGO_PROFILE_JSON` | Profile data as JSON (excludes `password`) |
 | `RINGO_EVENT_DATA` | Event-specific data as JSON (see table above) |
-| `RINGO_<KEY>` | Each event data field as individual env var (e.g. `RINGO_NUMBER`, `RINGO_DISPLAY_NAME`) |
 
 Hooks run in background threads and do not block the UI. Errors are logged to `/tmp/ringo-<name>.log`.
 
