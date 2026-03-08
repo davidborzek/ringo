@@ -207,13 +207,9 @@ fn fuzzy_match(query: &str, text: &str) -> bool {
     if query.is_empty() {
         return true;
     }
-    let text_lower: Vec<char> = text.to_lowercase().chars().collect();
-    let mut t = 0;
-    for qc in query.to_lowercase().chars() {
-        match text_lower[t..].iter().position(|&c| c == qc) {
-            Some(pos) => t += pos + 1,
-            None => return false,
-        }
-    }
-    true
+    let text_lower = text.to_lowercase();
+    query
+        .to_lowercase()
+        .split_whitespace()
+        .all(|token| text_lower.contains(token))
 }
