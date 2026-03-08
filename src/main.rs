@@ -5,6 +5,7 @@ mod config;
 mod event;
 mod form;
 mod history;
+mod hooks;
 mod phone;
 mod picker;
 mod profile;

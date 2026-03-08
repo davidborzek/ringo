@@ -31,7 +31,14 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
     let prof = profile::load(name)?;
     let instance = crate::baresip::Instance::spawn(name, &prof)?;
 
-    let theme = crate::config::load().theme;
+    let config = crate::config::load();
+    crate::hooks::run(
+        &config.hooks,
+        crate::config::HookEvent::ProfileLoaded,
+        name,
+        &prof,
+    );
+    let theme = config.theme;
     crate::tui::run(
         name.to_string(),
         prof.aor(),

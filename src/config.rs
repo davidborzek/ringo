@@ -9,6 +9,27 @@ pub struct RingoConfig {
     pub picker: PickerConfig,
     pub theme: Theme,
     pub baresip: BaresipConfig,
+    #[serde(default)]
+    pub hooks: Vec<Hook>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Hook {
+    pub event: String,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookEvent {
+    ProfileLoaded,
+}
+
+impl HookEvent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ProfileLoaded => "profile_loaded",
+        }
+    }
 }
 
 /// Overrides for auto-detected baresip config values.
