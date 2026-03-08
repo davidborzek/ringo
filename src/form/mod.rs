@@ -17,7 +17,7 @@ use std::{collections::HashMap, io};
 use crate::{config::Theme, profile::Profile};
 use field::*;
 
-pub use popups::{run_confirm, run_restart_confirm};
+pub use popups::{run_confirm, run_rename, run_restart_confirm};
 
 type Term = Terminal<CrosstermBackend<io::Stdout>>;
 

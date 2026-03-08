@@ -67,6 +67,7 @@ pub fn pick_profile() -> Result<String> {
 
 fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<String> {
     use crate::picker::{PickerAction, PickerItem};
+    let mut focus: Option<String> = None;
     loop {
         let config = crate::config::load();
         let theme = &config.theme;
@@ -83,7 +84,7 @@ fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> R
                 }
             })
             .collect();
-        match crate::picker::run(terminal, &items, theme)? {
+        match crate::picker::run(terminal, &items, theme, focus.as_deref())? {
             PickerAction::Start(name) => return Ok(name),
             PickerAction::New => {
                 if let Some((name, p)) = crate::form::run_form(
@@ -94,6 +95,7 @@ fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> R
                     theme,
                 )? {
                     profile::save(&name, &p)?;
+                    focus = Some(name);
                 }
             }
             PickerAction::Clone(source) => {
@@ -102,6 +104,7 @@ fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> R
                     crate::form::run_form(terminal, None, &current, &names, theme)?
                 {
                     profile::save(&name, &p)?;
+                    focus = Some(name);
                 }
             }
             PickerAction::Edit(name) => {
@@ -111,9 +114,18 @@ fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> R
                 {
                     profile::save(&name, &p)?;
                 }
+                focus = Some(name);
             }
             PickerAction::Settings => {
                 open_settings(terminal)?;
+            }
+            PickerAction::Rename(name) => {
+                if let Some(new_name) = crate::form::run_rename(terminal, &name, &names, theme)? {
+                    profile::rename(&name, &new_name)?;
+                    focus = Some(new_name);
+                } else {
+                    focus = Some(name);
+                }
             }
             PickerAction::Delete(name) => {
                 if crate::form::run_confirm(terminal, &name, theme)? {

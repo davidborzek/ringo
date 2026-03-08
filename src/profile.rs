@@ -151,6 +151,12 @@ pub fn load(name: &str) -> Result<Profile> {
     toml::from_str(&raw).with_context(|| format!("Invalid profile.toml for '{}'", name))
 }
 
+pub fn rename(old: &str, new: &str) -> Result<()> {
+    let from = profile_dir(old)?;
+    let to = profile_dir(new)?;
+    fs::rename(&from, &to).with_context(|| format!("Cannot rename '{}' to '{}'", old, new))
+}
+
 pub fn save(name: &str, profile: &Profile) -> Result<()> {
     let dir = profile_dir(name)?;
     fs::create_dir_all(&dir)?;

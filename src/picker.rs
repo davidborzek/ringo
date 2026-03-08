@@ -17,6 +17,7 @@ pub enum PickerAction {
     Edit(String),
     Clone(String),
     Delete(String),
+    Rename(String),
     New,
     Settings,
 }
@@ -37,13 +38,17 @@ const LOGO: &[&str] = &[
 ];
 
 /// Run the profile picker using an existing terminal (no terminal lifecycle management).
+/// When `focus` is provided the picker pre-selects the item with that name.
 pub(crate) fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     items: &[PickerItem],
     theme: &Theme,
+    focus: Option<&str>,
 ) -> Result<PickerAction> {
     let mut query = String::new();
-    let mut selected: usize = 0;
+    let mut selected: usize = focus
+        .and_then(|name| items.iter().position(|i| i.name == name))
+        .unwrap_or(0);
 
     loop {
         let filtered: Vec<&PickerItem> = items
@@ -131,7 +136,7 @@ pub(crate) fn run(
             // Hint line
             frame.render_widget(
                 Paragraph::new(
-                    "  Enter start  ·  ^E edit  ·  ^Y clone  ·  ^D delete  ·  ^N new  ·  ^S settings  ·  Esc quit",
+                    "  Enter start  ·  ^E edit  ·  ^R rename  ·  ^Y clone  ·  ^D delete  ·  ^N new  ·  ^S settings  ·  Esc quit",
                 )
                 .style(Style::default().fg(theme.subtle.get())),
                 chunks[3],
@@ -153,6 +158,11 @@ pub(crate) fn run(
                 KeyCode::Char('y') if ctrl => {
                     if let Some(item) = filtered.get(selected) {
                         return Ok(PickerAction::Clone(item.name.clone()));
+                    }
+                }
+                KeyCode::Char('r') if ctrl => {
+                    if let Some(item) = filtered.get(selected) {
+                        return Ok(PickerAction::Rename(item.name.clone()));
                     }
                 }
                 KeyCode::Char('d') if ctrl => {
