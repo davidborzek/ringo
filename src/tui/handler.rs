@@ -37,9 +37,10 @@ impl super::app::App {
                 error,
             } => self.handle_call_closed(call_id, reason, error),
             AppEvent::VoicemailStatus { waiting, new_count } => {
+                let changed = self.mwi.waiting != waiting || self.mwi.new_messages != new_count;
                 self.mwi.waiting = waiting;
                 self.mwi.new_messages = new_count;
-                if waiting {
+                if changed && waiting {
                     self.push_log(format!("✉ {} new voicemail message(s)", new_count));
                     self.notify("Voicemail", &format!("{} new message(s)", new_count));
                 }
