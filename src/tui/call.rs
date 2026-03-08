@@ -93,6 +93,25 @@ impl super::app::App {
             if call.direction == CallDirection::Incoming && call.started_at.is_none() {
                 self.notify("Missed call", &call.peer.clone());
             }
+            let direction = match call.direction {
+                CallDirection::Outgoing => "outgoing",
+                CallDirection::Incoming => "incoming",
+            };
+            let duration_secs = call.started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+            crate::hooks::run(
+                &self.hooks,
+                crate::config::HookEvent::CallEnded,
+                &self.profile_name,
+                &self.profile,
+                serde_json::json!({
+                    "call_id": call_id,
+                    "number": call.peer,
+                    "direction": direction,
+                    "duration_secs": duration_secs,
+                    "reason": reason,
+                    "error": error,
+                }),
+            );
             let log_entry = if error {
                 Some(format!("✗ {} — {}", call.peer, reason))
             } else {

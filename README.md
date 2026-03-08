@@ -297,6 +297,7 @@ command = "echo \"Calling $RINGO_NUMBER\" >> /tmp/ringo-calls.log"
 | `profile_loaded` | After a profile is loaded and baresip is spawned | — |
 | `call_incoming` | Incoming call received | `call_id`, `number`, `display_name` |
 | `call_outgoing` | Outgoing call initiated | `call_id`, `number` |
+| `call_ended` | Call closed/ended | `call_id`, `number`, `direction`, `duration_secs`, `reason`, `error` |
 
 **Environment variables** passed to each hook:
 

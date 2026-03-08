@@ -24,6 +24,7 @@ pub enum HookEvent {
     ProfileLoaded,
     CallIncoming,
     CallOutgoing,
+    CallEnded,
 }
 
 impl HookEvent {
@@ -32,6 +33,7 @@ impl HookEvent {
             Self::ProfileLoaded => "profile_loaded",
             Self::CallIncoming => "call_incoming",
             Self::CallOutgoing => "call_outgoing",
+            Self::CallEnded => "call_ended",
         }
     }
 }
