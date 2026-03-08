@@ -12,7 +12,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use std::{collections::HashMap, io};
+use std::{collections::HashMap, io, path::Path};
 
 use crate::{config::Theme, profile::Profile};
 use field::*;
@@ -30,6 +30,7 @@ enum Action {
     None,
     Cancel,
     OpenHeaders,
+    OpenEditor,
     Save,
 }
 
@@ -60,6 +61,12 @@ impl FormState {
             KeyCode::Esc => return Action::Cancel,
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 return Action::Cancel;
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Action::Save;
+            }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Action::OpenEditor;
             }
             KeyCode::Tab | KeyCode::Down => {
                 self.focused = (self.focused + 1) % field_count;
@@ -243,7 +250,7 @@ impl FormState {
             )
         } else {
             Span::styled(
-                "  ↑↓ Tab navigate  ← → Space toggle  Enter select  Esc cancel",
+                "  ↑↓ Tab navigate  ← → Space toggle  Enter select  ^S save  ^E editor  Esc cancel",
                 Style::default().fg(theme.subtle.get()),
             )
         };
@@ -351,7 +358,8 @@ pub fn run_form(
     } else {
         " Edit Profile "
     };
-    let mut state = FormState::new(profile, is_new);
+    let mut base_profile = profile.clone();
+    let mut state = FormState::new(&base_profile, is_new);
 
     loop {
         terminal.draw(|frame| state.render(frame, title, theme))?;
@@ -359,12 +367,20 @@ pub fn run_form(
         if let Event::Key(key) = event::read()? {
             match state.handle_key(key) {
                 Action::Cancel => return Ok(None),
+                Action::OpenEditor => {
+                    if let Some(name) = profile_name {
+                        let path = crate::profile::profile_dir(name)?.join("profile.toml");
+                        open_editor(terminal, &path)?;
+                        base_profile = crate::profile::load(name)?;
+                        state = FormState::new(&base_profile, is_new);
+                    }
+                }
                 Action::OpenHeaders => {
                     headers::run_headers_submenu(terminal, &mut state.custom_headers, theme)?;
                     state.update_header_count();
                 }
                 Action::Save => {
-                    let (name, profile_out) = state.extract(profile);
+                    let (name, profile_out) = state.extract(&base_profile);
                     if let Some(err) = state.validate(&name, &profile_out, existing_names) {
                         state.error = Some(err);
                         continue;
@@ -380,4 +396,27 @@ pub fn run_form(
             }
         }
     }
+}
+
+fn open_editor(terminal: &mut Term, path: &Path) -> Result<()> {
+    use crossterm::{
+        execute,
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    };
+    use std::process::Command;
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+
+    let status = Command::new(&editor).arg(path).status();
+
+    enable_raw_mode()?;
+    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    terminal.clear()?;
+
+    status
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("Failed to open editor '{}': {}", editor, e))
 }
