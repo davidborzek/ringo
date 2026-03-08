@@ -34,6 +34,8 @@ pub fn run(
     regint: Option<u32>,
     custom_headers: std::collections::HashMap<String, String>,
     theme: crate::config::Theme,
+    hooks: Vec<crate::config::Hook>,
+    profile: crate::profile::Profile,
 ) -> Result<Option<String>> {
     let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
     let (cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(32);
@@ -58,7 +60,10 @@ pub fn run(
                         break;
                     }
                 }
-                Err(_) => break,
+                Err(e) => {
+                    crate::rlog!(Error, "tcp reader: {}", e);
+                    break;
+                }
             }
         }
     });
@@ -68,10 +73,8 @@ pub fn run(
         let mut writer = write_half;
         let mut rx = cmd_rx;
         while let Some((cmd, params)) = rx.recv().await {
-            if client::write_command(&mut writer, &cmd, &params)
-                .await
-                .is_err()
-            {
+            if let Err(e) = client::write_command(&mut writer, &cmd, &params).await {
+                crate::rlog!(Error, "tcp writer: {} (cmd={})", e, cmd);
                 break;
             }
         }
@@ -92,6 +95,8 @@ pub fn run(
         notify,
         Box::new(phone),
         theme,
+        hooks,
+        profile,
     );
 
     let aor = app.account_aor.clone();

@@ -47,11 +47,14 @@ impl super::app::App {
         };
         if let Ok(mut line) = serde_json::to_string(&entry) {
             line.push('\n');
-            let _ = std::fs::OpenOptions::new()
+            if let Err(e) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(path)
-                .and_then(|mut f| f.write_all(line.as_bytes()));
+                .and_then(|mut f| f.write_all(line.as_bytes()))
+            {
+                crate::rlog!(Warn, "call history write failed: {}", e);
+            }
         }
     }
 
@@ -75,7 +78,9 @@ impl super::app::App {
         self.call_history.entries.clear();
         self.call_history.selected = 0;
         if let Some(path) = &self.call_history.path {
-            let _ = std::fs::write(path, "");
+            if let Err(e) = std::fs::write(path, "") {
+                crate::rlog!(Warn, "call history clear failed: {}", e);
+            }
         }
     }
 

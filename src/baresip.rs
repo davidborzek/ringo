@@ -56,7 +56,21 @@ impl Instance {
             .spawn()
             .context("Failed to start baresip. Is it installed and in PATH?")?;
 
+        crate::rlog!(
+            Info,
+            "baresip spawned pid={} port={} tmpdir={}",
+            child.id(),
+            port,
+            tmp_dir.display()
+        );
+
         if let Err(e) = wait_for_port(port, Duration::from_secs(5)) {
+            crate::rlog!(
+                Error,
+                "baresip port {} not ready, tmpdir={}",
+                port,
+                tmp_dir.display()
+            );
             // child dropped after this block — Drop kills & cleans up
             let mut instance = Self {
                 port,
@@ -70,6 +84,13 @@ impl Instance {
             return Err(e);
         }
 
+        crate::rlog!(
+            Info,
+            "baresip ready on port {} tmpdir={}",
+            port,
+            tmp_dir.display()
+        );
+
         Ok(Self {
             port,
             log_path,
@@ -81,9 +102,21 @@ impl Instance {
 
 impl Drop for Instance {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = fs::remove_dir_all(&self.tmp_dir);
+        crate::rlog!(Info, "baresip cleanup, removing {}", self.tmp_dir.display());
+        if let Err(e) = self.child.kill() {
+            crate::rlog!(Warn, "baresip kill failed: {}", e);
+        }
+        if let Err(e) = self.child.wait() {
+            crate::rlog!(Warn, "baresip wait failed: {}", e);
+        }
+        if let Err(e) = fs::remove_dir_all(&self.tmp_dir) {
+            crate::rlog!(
+                Warn,
+                "tmpdir cleanup failed ({}): {}",
+                self.tmp_dir.display(),
+                e
+            );
+        }
     }
 }
 

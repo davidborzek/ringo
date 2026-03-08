@@ -9,6 +9,33 @@ pub struct RingoConfig {
     pub picker: PickerConfig,
     pub theme: Theme,
     pub baresip: BaresipConfig,
+    #[serde(default)]
+    pub hooks: Vec<Hook>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Hook {
+    pub event: String,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookEvent {
+    ProfileLoaded,
+    CallIncoming,
+    CallOutgoing,
+    CallEnded,
+}
+
+impl HookEvent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ProfileLoaded => "profile_loaded",
+            Self::CallIncoming => "call_incoming",
+            Self::CallOutgoing => "call_outgoing",
+            Self::CallEnded => "call_ended",
+        }
+    }
 }
 
 /// Overrides for auto-detected baresip config values.
@@ -144,10 +171,19 @@ pub fn load() -> RingoConfig {
     if !path.exists() {
         return RingoConfig::default();
     }
-    fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| toml::from_str(&s).ok())
-        .unwrap_or_default()
+    match fs::read_to_string(&path) {
+        Ok(s) => match toml::from_str(&s) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                crate::rlog!(Warn, "config parse error ({}): {}", path.display(), e);
+                RingoConfig::default()
+            }
+        },
+        Err(e) => {
+            crate::rlog!(Warn, "config read error ({}): {}", path.display(), e);
+            RingoConfig::default()
+        }
+    }
 }
 
 pub fn config_path() -> Option<std::path::PathBuf> {

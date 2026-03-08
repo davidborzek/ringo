@@ -23,6 +23,8 @@ pub fn run(name: Option<String>, notify: bool) -> Result<()> {
 }
 
 fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
+    crate::log::init(name);
+
     let dir = profile::profile_dir(name)?;
     if !dir.join("profile.toml").exists() {
         bail!("Profile '{}' not found.", name);
@@ -31,7 +33,16 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
     let prof = profile::load(name)?;
     let instance = crate::baresip::Instance::spawn(name, &prof)?;
 
-    let theme = crate::config::load().theme;
+    let config = crate::config::load();
+    crate::hooks::run(
+        &config.hooks,
+        crate::config::HookEvent::ProfileLoaded,
+        name,
+        &prof,
+        serde_json::json!({}),
+    );
+    let theme = config.theme;
+    let hooks = config.hooks;
     crate::tui::run(
         name.to_string(),
         prof.aor(),
@@ -40,8 +51,10 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
         Some(dir.join("call_history")),
         notify && prof.notify,
         prof.regint,
-        prof.custom_headers,
+        prof.custom_headers.clone(),
         theme,
+        hooks,
+        prof,
     )
 }
 

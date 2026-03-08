@@ -113,10 +113,18 @@ fn map_event(class: &str, type_: &str, param: String, extra: &Map<String, Value>
         }
 
         "MWI_NOTIFY" => parse_mwi(&param),
-        _ => AppEvent::Unknown {
-            class: class.to_string(),
-            type_: type_.to_string(),
-        },
+        _ => {
+            crate::rlog!(
+                Debug,
+                "unknown baresip event: class={} type={}",
+                class,
+                type_
+            );
+            AppEvent::Unknown {
+                class: class.to_string(),
+                type_: type_.to_string(),
+            }
+        }
     }
 }
 

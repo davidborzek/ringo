@@ -17,6 +17,8 @@ fn test_app() -> (App, tokio::sync::mpsc::Receiver<(String, String)>) {
         false,
         Box::new(BaresipPhone::new(cmd_tx)),
         Theme::default(),
+        Vec::new(),
+        ringo::profile::Profile::default(),
     );
     (app, cmd_rx)
 }

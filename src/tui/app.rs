@@ -1,4 +1,4 @@
-use crate::{config::Theme, phone::Phone};
+use crate::{config::Hook, config::Theme, phone::Phone, profile::Profile};
 use std::{collections::VecDeque, path::PathBuf, time::Instant};
 
 // ─── State types ──────────────────────────────────────────────────────────────
@@ -148,6 +148,8 @@ pub struct App {
     pub switch_to: bool,
     pub edit_profile: bool,
     pub theme: Theme,
+    pub hooks: Vec<Hook>,
+    pub profile: Profile,
 }
 
 impl App {
@@ -159,6 +161,8 @@ impl App {
         notify_enabled: bool,
         phone: Box<dyn Phone>,
         theme: Theme,
+        hooks: Vec<Hook>,
+        profile: Profile,
     ) -> Self {
         Self {
             profile_name,
@@ -216,6 +220,8 @@ impl App {
             },
             edit_profile: false,
             theme,
+            hooks,
+            profile,
         }
     }
 
@@ -232,7 +238,7 @@ impl App {
             return;
         }
         let body_with_profile = format!("[{}] {}", self.profile_name, body);
-        let _ = std::process::Command::new("notify-send")
+        if let Err(e) = std::process::Command::new("notify-send")
             .args([
                 "-a",
                 "ringo",
@@ -241,7 +247,10 @@ impl App {
                 summary,
                 &body_with_profile,
             ])
-            .spawn();
+            .spawn()
+        {
+            crate::rlog!(Debug, "notify-send failed: {}", e);
+        }
     }
 
     pub(super) fn refresh_baresip_log(&mut self) {

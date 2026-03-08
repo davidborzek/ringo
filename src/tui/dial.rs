@@ -378,6 +378,8 @@ mod tests {
             false,
             Box::new(NoopPhone),
             crate::config::Theme::default(),
+            Vec::new(),
+            crate::profile::Profile::default(),
         )
     }
 

@@ -274,6 +274,42 @@ call_max_calls = "8"
 
 All keys are optional; omitting a key falls back to auto-detection.
 
+### Hooks
+
+Run shell commands when certain events occur. Each hook receives environment variables with context about the event.
+
+```toml
+[[hooks]]
+event = "profile_loaded"
+command = "bash ~/.config/ringo/hooks/on_profile_loaded.sh"
+
+[[hooks]]
+event = "call_incoming"
+command = "notify-send 'ringo' \"Incoming call from $(echo $RINGO_EVENT_DATA | jq -r .number)\""
+
+[[hooks]]
+event = "call_outgoing"
+command = "echo $RINGO_EVENT_DATA >> /tmp/ringo-calls.log"
+```
+
+| Event | Trigger | Event data |
+|-------|---------|------------|
+| `profile_loaded` | After a profile is loaded and baresip is spawned | — |
+| `call_incoming` | Incoming call received | `call_id`, `number`, `display_name` |
+| `call_outgoing` | Outgoing call initiated | `call_id`, `number` |
+| `call_ended` | Call closed/ended | `call_id`, `number`, `direction`, `duration_secs`, `reason`, `error` |
+
+**Environment variables** passed to each hook:
+
+| Variable | Description |
+|----------|-------------|
+| `RINGO_EVENT` | Event name (e.g. `profile_loaded`) |
+| `RINGO_PROFILE` | Profile name |
+| `RINGO_PROFILE_JSON` | Profile data as JSON (excludes `password`) |
+| `RINGO_EVENT_DATA` | Event-specific data as JSON (see table above) |
+
+Hooks run in background threads and do not block the UI. Errors are logged to `/tmp/ringo-<name>.log`.
+
 ## Profile config
 
 Profiles are stored as TOML at `~/.config/ringo/profiles/<name>/profile.toml`:
@@ -300,6 +336,7 @@ mwi          = true                   # message waiting indicator (default: true
 | `~/.config/ringo/profiles/<name>/call_history` | Per-profile call history (JSONL) |
 | `~/.local/share/ringo/history` | Global dial history |
 | `/tmp/ringo-<name>-<ts>/` | Runtime temp dir (auto-cleaned) |
+| `/tmp/ringo-<name>.log` | Application log (hooks, TCP errors, lifecycle) |
 
 ## Shell completions
 
