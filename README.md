@@ -13,7 +13,7 @@ ringo is a SIP softphone with a full-featured ratatui TUI, built on top of bares
 
 - **Profile picker** — fuzzy-search profile selector with inline create / edit / delete
 - **Headless baresip** — spawns baresip without its built-in stdio UI, no terminal clutter
-- **ratatui TUI** — call list, dial input with cursor editing, DTMF, hold/resume, mute
+- **ratatui TUI** — status bar, command bar (`:` with tab-completion), Normal/Dial mode split, call list, DTMF, hold/resume, mute
 - **Blind & attended transfer** — full call transfer support
 - **Call history** — per-profile JSONL log with redial support
 - **Dial history** — persistent global history with fuzzy search (Ctrl+R)
@@ -86,30 +86,14 @@ ringo list --plain # one name per line (for scripting)
 | `Ctrl+E` | Edit selected profile |
 | `Ctrl+Y` | Clone selected profile |
 | `Ctrl+D` | Delete selected profile (confirmation popup) |
+| `↑` / `↓` | Navigate (wrap-around) |
 | `Esc` | Quit |
 
-### TUI — always available
+### TUI — Normal mode (default)
 
 | Key | Action |
 |-----|--------|
-| `q` / `Ctrl+C` | Quit (hangs up all active calls) |
-| `Ctrl+P` | Switch profile (returns to picker) |
-| `Enter` | Dial |
-| `Esc` | Clear dial input / cancel history navigation |
-| `Backspace` / `Delete` | Edit dial input |
-| `←` / `→` | Move cursor in dial input |
-| `Home` / `End` | Jump to start / end of dial input |
-| `↑` / `↓` | Navigate dial history (when no log open) |
-| `Ctrl+R` | Fuzzy search dial history |
-| `Tab` | Switch active call (when multiple calls) |
-| `e` | Toggle event log |
-| `l` | Toggle baresip process log |
-| `c` | Toggle call history (when no active calls) |
-
-### TUI — during a call
-
-| Key | Action |
-|-----|--------|
+| `d` | Enter Dial mode |
 | `a` | Accept incoming call |
 | `b` / `Del` | Hang up |
 | `h` | Hold |
@@ -117,17 +101,64 @@ ringo list --plain # one name per line (for scripting)
 | `m` | Toggle mute |
 | `t` | Blind transfer |
 | `T` | Attended transfer |
-| `0-9` `*` `#` | DTMF tones |
+| `0-9` `*` `#` | DTMF tones (during active call) |
+| `Tab` | Switch active call (when multiple calls) |
+| `e` | Open event log |
+| `l` | Open baresip log |
+| `c` | Open call history |
+| `Ctrl+R` | Fuzzy search dial history |
+| `Ctrl+E` | Edit profile (no active call) |
+| `Ctrl+P` | Switch profile (returns to picker) |
+| `:` | Open command bar |
+| `q` | Quit (confirmation prompt) |
+| `Ctrl+C` | Quit immediately |
+
+### TUI — Dial mode
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Dial and return to Normal mode |
+| `Esc` | Cancel and return to Normal mode |
+| `Backspace` | Delete character / exit to Normal mode (when empty) |
+| `←` / `→` | Move cursor |
+| `Home` / `End` | Jump to start / end |
+| `↑` / `↓` | Navigate dial history |
+| `Ctrl+R` | Fuzzy search dial history |
+
+### Command bar
+
+| Key | Action |
+|-----|--------|
+| `:` | Open command bar (from Normal mode) |
+| `Tab` | Cycle tab-completion |
+| `Enter` | Execute command |
+| `Esc` | Close |
+| `Backspace` | Delete character / close (when empty) |
+
+Available commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`, `transfer <uri>`, `events`, `log`, `history`, `edit`, `switch`, `help`, `quit`
 
 ### Call history view
 
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Navigate entries |
+| `g` / `G` | Jump to top / bottom |
 | `Enter` | Copy peer to dial input (redial) |
+| `/` | Search |
 | `d` | Delete selected entry |
 | `D` | Clear entire history |
 | `c` / `Esc` | Close |
+
+### Event log / baresip log view
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Scroll |
+| `g` / `G` | Jump to top / bottom |
+| `e` | Toggle / switch to event log |
+| `l` | Toggle / switch to baresip log |
+| `c` | Switch to call history |
+| `Esc` | Close |
 
 ## Configuration
 

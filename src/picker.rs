@@ -168,11 +168,15 @@ pub(crate) fn run(
                 KeyCode::Up => {
                     if selected > 0 {
                         selected -= 1;
+                    } else if !filtered.is_empty() {
+                        selected = filtered.len() - 1;
                     }
                 }
                 KeyCode::Down => {
                     if !filtered.is_empty() && selected + 1 < filtered.len() {
                         selected += 1;
+                    } else {
+                        selected = 0;
                     }
                 }
                 KeyCode::Backspace => {

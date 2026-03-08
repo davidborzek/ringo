@@ -6,12 +6,168 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use super::app::InputMode;
+use crossterm::event::{KeyCode, KeyModifiers};
+
+use super::app::{InputMode, TransferMode};
 
 impl super::app::App {
-    pub fn exit_history_nav(&mut self) {
-        if self.dial.mode == InputMode::HistoryNav {
-            self.dial.mode = InputMode::Dial;
+    pub(super) fn handle_dial_key(&mut self, key: crossterm::event::KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Esc => {
+                if self.dial.mode == InputMode::HistoryNav {
+                    let draft = self.dial.draft.clone();
+                    self.dial_set(draft);
+                }
+                self.dial.mode = InputMode::Normal;
+                self.dial_clear();
+            }
+            KeyCode::Enter => {
+                if self.dial.mode == InputMode::HistoryNav {
+                    self.dial.mode = InputMode::Dial;
+                }
+                if !self.dial.input.is_empty() {
+                    let target = self.dial.input.clone();
+                    self.phone.dial(&target);
+                    crate::history::push(&mut self.dial.history, target);
+                    self.dial_clear();
+                }
+                self.dial.mode = InputMode::Normal;
+            }
+            KeyCode::Backspace => {
+                if self.dial.mode == InputMode::HistoryNav {
+                    self.dial.mode = InputMode::Dial;
+                    let draft = self.dial.draft.clone();
+                    self.dial_set(draft);
+                } else if self.dial.input.is_empty() {
+                    self.dial.mode = InputMode::Normal;
+                } else {
+                    self.dial_backspace();
+                }
+            }
+            KeyCode::Delete => {
+                self.dial_delete_forward();
+            }
+            KeyCode::Char('r') if ctrl => {
+                self.dial.draft = self.dial.input.clone();
+                self.dial.query.clear();
+                self.dial.selected = 0;
+                self.dial.mode = InputMode::HistorySearch;
+            }
+            KeyCode::Up => match self.dial.mode {
+                InputMode::Dial => {
+                    if !self.dial.history.is_empty() {
+                        self.dial.draft = self.dial.input.clone();
+                        self.dial.nav_idx = 0;
+                        self.dial.mode = InputMode::HistoryNav;
+                        let entry = self.dial.history[0].clone();
+                        self.dial_set(entry);
+                    }
+                }
+                InputMode::HistoryNav => {
+                    if self.dial.nav_idx + 1 < self.dial.history.len() {
+                        self.dial.nav_idx += 1;
+                        let entry = self.dial.history[self.dial.nav_idx].clone();
+                        self.dial_set(entry);
+                    }
+                }
+                _ => {}
+            },
+            KeyCode::Down => {
+                if self.dial.mode == InputMode::HistoryNav {
+                    if self.dial.nav_idx == 0 {
+                        self.dial.mode = InputMode::Dial;
+                        let draft = self.dial.draft.clone();
+                        self.dial_set(draft);
+                    } else {
+                        self.dial.nav_idx -= 1;
+                        let entry = self.dial.history[self.dial.nav_idx].clone();
+                        self.dial_set(entry);
+                    }
+                }
+            }
+            KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
+                self.dial_cursor_left();
+            }
+            KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
+                self.dial_cursor_right();
+            }
+            KeyCode::Home => {
+                self.dial.cursor = 0;
+            }
+            KeyCode::End => {
+                self.dial.cursor = self.dial.input.len();
+            }
+            KeyCode::Char(c)
+                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                if self.dial.mode == InputMode::HistoryNav {
+                    self.dial.mode = InputMode::Dial;
+                }
+                self.dial_insert(c);
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_history_search(&mut self, key: crossterm::event::KeyEvent) {
+        let in_transfer = matches!(
+            self.transfer_mode,
+            TransferMode::BlindInput(_) | TransferMode::AttendedInput(_)
+        );
+        match key.code {
+            KeyCode::Esc => {
+                self.dial.mode = InputMode::Dial;
+                let draft = self.dial.draft.clone();
+                if in_transfer {
+                    self.transfer_input_set(draft);
+                } else {
+                    self.dial.input = draft;
+                }
+            }
+            KeyCode::Enter => {
+                let filtered = crate::history::fuzzy_filter(&self.dial.history, &self.dial.query);
+                let selected = filtered
+                    .get(self.dial.selected)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| self.dial.draft.clone());
+                self.dial.mode = InputMode::Dial;
+                if in_transfer {
+                    self.transfer_input_set(selected);
+                } else {
+                    self.dial_set(selected);
+                }
+            }
+            KeyCode::Up => {
+                if self.dial.selected > 0 {
+                    self.dial.selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let count =
+                    crate::history::fuzzy_filter(&self.dial.history, &self.dial.query).len();
+                if self.dial.selected + 1 < count {
+                    self.dial.selected += 1;
+                }
+            }
+            KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => {
+                let count =
+                    crate::history::fuzzy_filter(&self.dial.history, &self.dial.query).len();
+                if self.dial.selected + 1 < count {
+                    self.dial.selected += 1;
+                }
+            }
+            KeyCode::Backspace => {
+                self.dial.query.pop();
+                self.dial.selected = 0;
+            }
+            KeyCode::Char(c)
+                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                self.dial.query.push(c);
+                self.dial.selected = 0;
+            }
+            _ => {}
         }
     }
 
@@ -77,12 +233,6 @@ impl super::app::App {
 pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
     use super::app::TransferMode;
 
-    let mute_indicator = if app.muted {
-        Span::styled(" [MUTED]", Style::default().fg(app.theme.danger.get()))
-    } else {
-        Span::raw("")
-    };
-
     let line = match &app.transfer_mode {
         TransferMode::BlindInput(s) => Line::from(vec![
             Span::styled("  Xfer → : ", Style::default().fg(app.theme.transfer.get())),
@@ -90,7 +240,6 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
                 format!("{}_", s),
                 Style::default().fg(app.theme.transfer.get()),
             ),
-            mute_indicator,
         ]),
         TransferMode::AttendedInput(s) => Line::from(vec![
             Span::styled("  Att. → : ", Style::default().fg(app.theme.transfer.get())),
@@ -98,32 +247,27 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
                 format!("{}_", s),
                 Style::default().fg(app.theme.transfer.get()),
             ),
-            mute_indicator,
         ]),
-        TransferMode::AttendedPending => Line::from(vec![
-            Span::styled(
-                "  Attended: call ringing…",
-                Style::default().fg(app.theme.attention.get()),
-            ),
-            mute_indicator,
-        ]),
-        TransferMode::None => {
-            if app.in_active_call() {
-                Line::from(vec![
-                    Span::styled("  DTMF: ", Style::default().fg(app.theme.accent.get())),
-                    Span::styled(
-                        format!("{}_", app.dial.dtmf),
-                        Style::default().fg(app.theme.accent.get()),
-                    ),
-                    mute_indicator,
-                ])
-            } else if app.dial.mode == InputMode::HistoryNav {
-                Line::from(vec![
-                    Span::styled("  Hist: ", Style::default().fg(app.theme.attention.get())),
-                    Span::raw(format!("{}_", app.dial.input)),
-                    mute_indicator,
-                ])
-            } else {
+        TransferMode::AttendedPending => Line::from(vec![Span::styled(
+            "  Attended: call ringing…",
+            Style::default().fg(app.theme.attention.get()),
+        )]),
+        TransferMode::None => match app.dial.mode {
+            InputMode::Normal => {
+                if app.in_active_call() {
+                    Line::from(vec![
+                        Span::styled("  DTMF: ", Style::default().fg(app.theme.accent.get())),
+                        Span::styled(&app.dial.dtmf, Style::default().fg(app.theme.accent.get())),
+                    ])
+                } else {
+                    Line::default()
+                }
+            }
+            InputMode::HistoryNav => Line::from(vec![
+                Span::styled("  Hist: ", Style::default().fg(app.theme.attention.get())),
+                Span::raw(format!("{}_", app.dial.input)),
+            ]),
+            InputMode::Dial => {
                 let cursor = app.dial.cursor.min(app.dial.input.len());
                 let before = &app.dial.input[..cursor];
                 let after = &app.dial.input[cursor..];
@@ -133,10 +277,10 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
                     Span::styled("  Dial: ", Style::default().fg(app.theme.accent.get())),
                     Span::raw(before),
                     Span::raw(after),
-                    mute_indicator,
                 ])
             }
-        }
+            InputMode::HistorySearch => Line::default(),
+        },
     };
     f.render_widget(Paragraph::new(line), area);
 }

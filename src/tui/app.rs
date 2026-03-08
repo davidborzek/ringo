@@ -36,7 +36,8 @@ pub struct Call {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputMode {
-    Dial,
+    Normal,        // Default — single keys are shortcuts
+    Dial,          // Typing into dial input
     HistoryNav,    // Up/Down through full history
     HistorySearch, // Ctrl+R fuzzy popup
 }
@@ -110,6 +111,17 @@ pub struct LogState {
     pub baresip_path: Option<PathBuf>,
     pub show_baresip: bool,
     pub baresip_lines: Vec<String>,
+    /// Last known visible height (set during render, used to clamp scroll).
+    pub visible_height: usize,
+}
+
+pub struct CommandState {
+    pub active: bool,
+    pub input: String,
+    pub error: Option<String>,
+    /// Prefix typed before Tab was first pressed (for cycling through matches).
+    pub tab_prefix: Option<String>,
+    pub tab_index: usize,
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -129,8 +141,10 @@ pub struct App {
     pub call_history: CallHistoryState,
     pub log: LogState,
     pub last_call_reason: Option<String>,
+    pub command: CommandState,
     pub(crate) phone: Box<dyn Phone>,
     pub quit: bool,
+    pub quit_confirm: bool,
     pub switch_to: bool,
     pub edit_profile: bool,
     pub theme: Theme,
@@ -158,6 +172,7 @@ impl App {
             tick: 0,
             phone,
             quit: false,
+            quit_confirm: false,
             switch_to: false,
             dial: DialState {
                 input: String::new(),
@@ -165,7 +180,7 @@ impl App {
                 dtmf: String::new(),
                 draft: String::new(),
                 history: crate::history::load(),
-                mode: InputMode::Dial,
+                mode: InputMode::Normal,
                 nav_idx: 0,
                 query: String::new(),
                 selected: 0,
@@ -189,8 +204,16 @@ impl App {
                 baresip_path: baresip_log_path,
                 show_baresip: false,
                 baresip_lines: Vec::new(),
+                visible_height: 0,
             },
             last_call_reason: None,
+            command: CommandState {
+                active: false,
+                input: String::new(),
+                error: None,
+                tab_prefix: None,
+                tab_index: 0,
+            },
             edit_profile: false,
             theme,
         }
