@@ -1,19 +1,27 @@
 #!/bin/sh
 # ringo-tmux — pick profiles via fzf and open each in a tmux pane
 #
-# Usage: ringo-tmux
-# Requires: ringo, tmux, fzf
+# Usage: ringo-tmux [query]
+# Requires: ringo, tmux, fzf, jq
 
 set -e
 
 # Dependency checks
-for cmd in tmux fzf ringo; do
+for cmd in tmux fzf jq ringo; do
     command -v "$cmd" > /dev/null 2>&1 || { echo "ringo-tmux: '$cmd' not found" >&2; exit 1; }
 done
 
-# Profile selection via fzf multi-select
-profiles=$(ringo list --plain | fzf --multi --prompt="ringo profiles > " --header="Tab to select, Enter to confirm")
-[ -z "$profiles" ] && exit 0
+# Profile selection via fzf multi-select (show name + aor, return name only)
+selections=$(ringo list --json | jq -r '.[] | "\(.name) · \(.aor)"' | fzf --multi \
+    --delimiter=' · ' \
+    --prompt="ringo profiles > " \
+    --header="Tab=toggle  Ctrl-A=all  Ctrl-D=none  Enter=confirm" \
+    --bind 'ctrl-a:select-all,ctrl-d:deselect-all' \
+    --query="${1:-}")
+[ -z "$selections" ] && exit 0
+
+# Extract profile names (first column)
+profiles=$(printf '%s\n' "$selections" | cut -d'·' -f1 | sed 's/ *$//')
 
 SESSION="ringo"
 first=1
