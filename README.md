@@ -14,7 +14,8 @@ ringo is a SIP softphone with a full-featured ratatui TUI, built on top of bares
 - **Profile picker** — fuzzy-search profile selector with inline create / edit / delete
 - **Headless baresip** — spawns baresip without its built-in stdio UI, no terminal clutter
 - **ratatui TUI** — status bar, command bar (`:` with tab-completion), Normal/Dial mode split, call list, DTMF, hold/resume, mute
-- **Blind & attended transfer** — full call transfer support
+- **Contact book** — TOML-based contacts with fuzzy number matching, inline add/edit/delete, `$EDITOR` integration
+- **Blind & attended transfer** — full call transfer support with contact picker
 - **Call history** — per-profile JSONL log with redial support
 - **Dial history** — persistent global history with fuzzy search (Ctrl+R)
 - **MWI** — message waiting indicator
@@ -133,7 +134,7 @@ ringo list --plain # one name per line (for scripting)
 | `t` | Blind transfer |
 | `T` | Attended transfer |
 | `0-9` `*` `#` | DTMF tones (during active call) |
-| `Tab` | Switch active call (when multiple calls) |
+| `f` / `Tab` | Open contacts (Tab switches calls when multiple active) |
 | `e` | Open event log |
 | `l` | Open baresip log |
 | `c` | Open call history |
@@ -154,7 +155,32 @@ ringo list --plain # one name per line (for scripting)
 | `←` / `→` | Move cursor |
 | `Home` / `End` | Jump to start / end |
 | `↑` / `↓` | Navigate dial history |
+| `Tab` | Open contacts |
 | `Ctrl+R` | Fuzzy search dial history |
+
+### TUI — Transfer mode
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Execute transfer |
+| `Tab` | Open contacts |
+| `Esc` | Cancel |
+| `↑` / `↓` | Navigate dial history |
+| `Ctrl+R` | Fuzzy search dial history |
+
+### TUI — Contacts overlay
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate |
+| `g` / `G` | Jump to top / bottom |
+| `Enter` | Select number (dial or transfer) |
+| `/` | Search |
+| `a` | Add new contact |
+| `e` | Edit selected contact |
+| `d` | Delete selected contact (with confirmation) |
+| `E` | Open contacts in `$EDITOR` |
+| `f` / `Esc` | Close |
 
 ### Command bar
 
@@ -166,7 +192,7 @@ ringo list --plain # one name per line (for scripting)
 | `Esc` | Close |
 | `Backspace` | Delete character / close (when empty) |
 
-Available commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`, `transfer <uri>`, `events`, `log`, `history`, `edit`, `switch`, `help`, `quit`
+Available commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`, `transfer <uri>`, `contacts`, `events`, `log`, `history`, `edit`, `switch`, `help`, `quit`
 
 ### Call history view
 
@@ -274,6 +300,22 @@ call_max_calls = "8"
 
 All keys are optional; omitting a key falls back to auto-detection.
 
+### Contacts
+
+Contacts are stored at `~/.config/ringo/contacts.toml`. Contact names are resolved in the call list and call history. Phone numbers are matched across formats (local `01555...`, international `+491555...`, without plus `491555...`).
+
+```toml
+[[contacts]]
+name = "Alice"
+numbers = ["+491555123456", "alice.work"]
+
+[[contacts]]
+name = "Bob"
+numbers = ["021198765"]
+```
+
+You can manage contacts directly in the TUI (`f` or `Tab` → `a`/`e`/`d`) or edit the file with `$EDITOR` (`E` in the contacts overlay).
+
 ### Hooks
 
 Run shell commands when certain events occur. Each hook receives environment variables with context about the event.
@@ -332,6 +374,7 @@ mwi          = true                   # message waiting indicator (default: true
 | Path | Description |
 |------|-------------|
 | `~/.config/ringo/ringo.toml` | Global config |
+| `~/.config/ringo/contacts.toml` | Contact book |
 | `~/.config/ringo/profiles/<name>/profile.toml` | Profile config |
 | `~/.config/ringo/profiles/<name>/call_history` | Per-profile call history (JSONL) |
 | `~/.local/share/ringo/history` | Global dial history |
