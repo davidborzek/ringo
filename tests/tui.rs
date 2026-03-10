@@ -19,6 +19,7 @@ fn test_app() -> (App, tokio::sync::mpsc::Receiver<(String, String)>) {
         Theme::default(),
         Vec::new(),
         ringo::profile::Profile::default(),
+        Vec::new(),
     );
     (app, cmd_rx)
 }

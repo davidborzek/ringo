@@ -33,7 +33,11 @@ impl super::app::App {
             || matches!(
                 self.transfer_mode,
                 TransferMode::BlindInput(_) | TransferMode::AttendedInput(_)
-            );
+            )
+            || (self.contacts_state.show && self.contacts_state.search_mode)
+            || (self.contacts_state.show
+                && self.contacts_state.form.mode != super::app::ContactFormMode::None)
+            || (self.call_history.show && self.call_history.search_mode);
         if !in_text_input {
             match key.code {
                 KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
@@ -59,6 +63,12 @@ impl super::app::App {
         // History search popup
         if self.dial.mode == InputMode::HistorySearch {
             self.handle_history_search(key);
+            return;
+        }
+
+        // Contacts overlay
+        if self.contacts_state.show {
+            self.handle_contacts_key(key);
             return;
         }
 
@@ -171,8 +181,18 @@ impl super::app::App {
                 self.call_history.show = true;
                 self.log.show = false;
                 self.log.show_baresip = false;
+                self.contacts_state.show = false;
                 self.refresh_call_history();
                 self.log.scroll = 0;
+            }
+            KeyCode::Char('f') if !ctrl => {
+                self.contacts_state.show = true;
+                self.contacts_state.selected = 0;
+                self.contacts_state.search_query.clear();
+                self.contacts_state.search_mode = false;
+                self.log.show = false;
+                self.log.show_baresip = false;
+                self.call_history.show = false;
             }
             KeyCode::Char('r') if ctrl => {
                 self.dial.draft = self.dial.input.clone();

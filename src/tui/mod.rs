@@ -1,6 +1,7 @@
 mod app;
 mod call;
 mod call_history;
+mod contacts;
 mod dial;
 mod handler;
 pub mod ui;
@@ -36,6 +37,7 @@ pub fn run(
     theme: crate::config::Theme,
     hooks: Vec<crate::config::Hook>,
     profile: crate::profile::Profile,
+    contacts: Vec<crate::contacts::Contact>,
 ) -> Result<Option<String>> {
     let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
     let (cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(32);
@@ -97,6 +99,7 @@ pub fn run(
         theme,
         hooks,
         profile,
+        contacts,
     );
 
     let aor = app.account_aor.clone();
@@ -109,6 +112,19 @@ pub fn run(
     let mut do_restart = false;
     loop {
         render_loop(&mut terminal, &mut app, &msg_rx)?;
+
+        if app.edit_contacts {
+            app.edit_contacts = false;
+            app.quit = false;
+
+            open_contacts_editor(&mut terminal)?;
+
+            app.contacts = crate::contacts::load();
+            app.contacts_state.selected = 0;
+            app.contacts_state.search_query.clear();
+            app.contacts_state.search_mode = false;
+            continue;
+        }
 
         if !app.edit_profile {
             break;
@@ -158,6 +174,47 @@ pub fn run(
     }
 
     Ok(None)
+}
+
+// ─── Contacts editor ─────────────────────────────────────────────────────────
+
+fn open_contacts_editor(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> anyhow::Result<()> {
+    use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
+    use std::process::Command;
+
+    let Some(path) = crate::contacts::contacts_path() else {
+        return Ok(());
+    };
+
+    if !path.exists() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(
+            &path,
+            "# ringo contacts\n\
+             # [[contacts]]\n\
+             # name = \"Alice\"\n\
+             # numbers = [\"+49123456789\", \"alice.work\"]\n",
+        )?;
+    }
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
+
+    crossterm::terminal::disable_raw_mode()?;
+    crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+
+    let status = Command::new(&editor).arg(&path).status();
+
+    crossterm::terminal::enable_raw_mode()?;
+    crossterm::execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+    terminal.clear()?;
+
+    status
+        .map(|_| ())
+        .map_err(|e| anyhow::anyhow!("Failed to open editor '{}': {}", editor, e))
 }
 
 // ─── Render loop ──────────────────────────────────────────────────────────────

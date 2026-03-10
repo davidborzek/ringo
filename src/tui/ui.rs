@@ -21,7 +21,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let inner = outer.inner(area);
     f.render_widget(outer, area);
 
-    let log_visible = app.log.show || app.log.show_baresip || app.call_history.show;
+    let log_visible =
+        app.log.show || app.log.show_baresip || app.call_history.show || app.contacts_state.show;
     let mut constraints = vec![
         Constraint::Min(6),    // [0] calls
         Constraint::Length(1), // [1] spacer
@@ -55,7 +56,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if log_visible {
         let log_idx = 4;
         app.log.visible_height = chunks[log_idx].height.saturating_sub(1) as usize;
-        if app.log.show_baresip {
+        if app.contacts_state.show {
+            super::contacts::render(f, app, chunks[log_idx]);
+        } else if app.log.show_baresip {
             super::log::render_baresip_log(f, app, chunks[log_idx]);
         } else if app.call_history.show {
             super::call_history::render(f, app, chunks[log_idx]);
@@ -199,7 +202,17 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             }
             InputMode::HistorySearch => String::new(),
             InputMode::Normal => {
-                if app.call_history.show {
+                if app.contacts_state.show {
+                    if app.contacts_state.delete_confirm.is_some() {
+                        String::new() // title shows y/n prompt
+                    } else if app.contacts_state.form.mode != super::app::ContactFormMode::None {
+                        String::new() // form has its own hints
+                    } else if app.contacts_state.search_mode {
+                        "[Enter] confirm  [Esc] cancel".to_string()
+                    } else {
+                        "[↑/↓] nav  [Enter] dial  [/] search  [a] add  [e] edit  [d] del  [E] $EDITOR  [:] cmd  [f/Esc] close  [q] quit".to_string()
+                    }
+                } else if app.call_history.show {
                     if app.call_history.search_mode {
                         "[Enter] confirm  [Esc] cancel".to_string()
                     } else {
@@ -234,6 +247,7 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                     parts.push("[e] events");
                     parts.push("[l] log");
                     parts.push("[c] history");
+                    parts.push("[f] contacts");
                     parts.push("[:] cmd");
                     parts.push("[q] quit");
                     parts.join("  ")

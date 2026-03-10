@@ -3,8 +3,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use super::app::App;
 
 pub const COMMANDS: &[&str] = &[
-    "accept", "dial", "edit", "events", "hangup", "help", "history", "hold", "log", "mute", "quit",
-    "resume", "switch", "transfer", "xfer",
+    "accept", "contacts", "dial", "edit", "events", "hangup", "help", "history", "hold", "log",
+    "mute", "quit", "resume", "switch", "transfer", "xfer",
 ];
 
 impl App {
@@ -111,9 +111,21 @@ impl App {
                 if self.call_history.show {
                     self.log.show = false;
                     self.log.show_baresip = false;
+                    self.contacts_state.show = false;
                     self.refresh_call_history();
                 }
                 self.log.scroll = 0;
+            }
+            "contacts" | "f" => {
+                self.contacts_state.show = !self.contacts_state.show;
+                if self.contacts_state.show {
+                    self.contacts_state.selected = 0;
+                    self.contacts_state.search_query.clear();
+                    self.contacts_state.search_mode = false;
+                    self.log.show = false;
+                    self.log.show_baresip = false;
+                    self.call_history.show = false;
+                }
             }
             "edit" => {
                 if !self.has_any_call() {
@@ -129,7 +141,7 @@ impl App {
                 self.quit = true;
             }
             "help" | "?" => {
-                self.push_log("Commands: dial <n>, hangup, accept, hold, resume, mute, transfer <uri>, events, log, history, edit, switch, quit");
+                self.push_log("Commands: dial <n>, hangup, accept, hold, resume, mute, transfer <uri>, events, log, history, contacts, edit, switch, quit");
                 self.log.show = true;
                 self.log.show_baresip = false;
                 self.call_history.show = false;
