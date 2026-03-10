@@ -132,6 +132,14 @@ pub struct CommandState {
     pub tab_index: usize,
 }
 
+/// Where a contact picker selection should be applied.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum ContactPickerTarget {
+    #[default]
+    Dial,
+    Transfer,
+}
+
 pub struct ContactsState {
     pub show: bool,
     pub selected: usize,
@@ -140,6 +148,8 @@ pub struct ContactsState {
     pub form: ContactFormState,
     /// Contact index pending deletion (waiting for y/n confirmation).
     pub delete_confirm: Option<usize>,
+    /// Where the selected number should go when Enter is pressed.
+    pub target: ContactPickerTarget,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -275,6 +285,7 @@ impl App {
                 search_query: String::new(),
                 search_mode: false,
                 delete_confirm: None,
+                target: ContactPickerTarget::Dial,
                 form: ContactFormState {
                     mode: ContactFormMode::None,
                     field: ContactFormField::Name,

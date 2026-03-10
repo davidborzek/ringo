@@ -161,8 +161,18 @@ impl super::app::App {
             {
                 self.send_dtmf(c);
             }
-            KeyCode::Tab => {
+            KeyCode::Tab if self.calls.len() > 1 => {
                 self.switch_line();
+            }
+            KeyCode::Tab => {
+                self.contacts_state.show = true;
+                self.contacts_state.selected = 0;
+                self.contacts_state.search_query.clear();
+                self.contacts_state.search_mode = false;
+                self.contacts_state.target = super::app::ContactPickerTarget::Dial;
+                self.log.show = false;
+                self.log.show_baresip = false;
+                self.call_history.show = false;
             }
             KeyCode::Char('e') if !ctrl => {
                 self.log.show = true;
@@ -190,6 +200,7 @@ impl super::app::App {
                 self.contacts_state.selected = 0;
                 self.contacts_state.search_query.clear();
                 self.contacts_state.search_mode = false;
+                self.contacts_state.target = super::app::ContactPickerTarget::Dial;
                 self.log.show = false;
                 self.log.show_baresip = false;
                 self.call_history.show = false;

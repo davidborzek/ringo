@@ -78,6 +78,13 @@ impl super::app::App {
                     }
                 }
             }
+            KeyCode::Tab => {
+                self.contacts_state.show = true;
+                self.contacts_state.selected = 0;
+                self.contacts_state.search_query.clear();
+                self.contacts_state.search_mode = false;
+                self.contacts_state.target = super::app::ContactPickerTarget::Transfer;
+            }
             KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => {
                 let current = self.transfer_input_get();
                 self.dial.draft = current;

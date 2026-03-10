@@ -173,8 +173,15 @@ impl super::app::App {
             KeyCode::Enter => {
                 if let Some(entry) = entries.get(self.contacts_state.selected) {
                     let number = self.contacts[entry.contact_idx].numbers[entry.number_idx].clone();
-                    self.dial_set(number);
-                    self.dial.mode = super::app::InputMode::Dial;
+                    match self.contacts_state.target {
+                        super::app::ContactPickerTarget::Dial => {
+                            self.dial_set(number);
+                            self.dial.mode = super::app::InputMode::Dial;
+                        }
+                        super::app::ContactPickerTarget::Transfer => {
+                            self.transfer_input_set(number);
+                        }
+                    }
                     self.contacts_state.show = false;
                     self.contacts_state.search_query.clear();
                     self.contacts_state.search_mode = false;

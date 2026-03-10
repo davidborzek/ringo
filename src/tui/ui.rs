@@ -193,12 +193,12 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let text = match &app.transfer_mode {
         TransferMode::BlindInput(_) | TransferMode::AttendedInput(_) => {
-            "[Enter] send  [Esc] cancel".to_string()
+            "[Enter] send  [Tab] contacts  [Esc] cancel".to_string()
         }
         TransferMode::AttendedPending => "[X] execute transfer  [Esc] abort".to_string(),
         TransferMode::None => match app.dial.mode {
             InputMode::Dial | InputMode::HistoryNav => {
-                "[Enter] dial  [Esc] cancel  [↑/↓] history  [^R] search".to_string()
+                "[Enter] dial  [Tab] contacts  [Esc] cancel  [↑/↓] history  [^R] search".to_string()
             }
             InputMode::HistorySearch => String::new(),
             InputMode::Normal => {
