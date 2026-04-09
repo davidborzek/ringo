@@ -96,7 +96,10 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             "◌ Registering",
             Style::default().fg(app.theme.attention.get()),
         ),
-        RegStatus::Unknown => ("○ Connecting", Style::default().fg(app.theme.subtle.get())),
+        RegStatus::Unknown => (
+            "○ Connecting",
+            Style::default().fg(app.theme.attention.get()),
+        ),
     };
     spans.push(Span::styled(reg_text, reg_style));
 

@@ -4,8 +4,6 @@ use std::{
     net::TcpListener,
     path::PathBuf,
     process::{Child, Command, Stdio},
-    thread,
-    time::Duration,
 };
 
 use crate::profile::Profile;
@@ -60,33 +58,6 @@ impl Instance {
             Info,
             "baresip spawned pid={} port={} tmpdir={}",
             child.id(),
-            port,
-            tmp_dir.display()
-        );
-
-        if let Err(e) = wait_for_port(port, Duration::from_secs(5)) {
-            crate::rlog!(
-                Error,
-                "baresip port {} not ready, tmpdir={}",
-                port,
-                tmp_dir.display()
-            );
-            // child dropped after this block — Drop kills & cleans up
-            let mut instance = Self {
-                port,
-                log_path,
-                child,
-                tmp_dir,
-            };
-            let _ = instance.child.kill();
-            let _ = instance.child.wait();
-            let _ = fs::remove_dir_all(&instance.tmp_dir);
-            return Err(e);
-        }
-
-        crate::rlog!(
-            Info,
-            "baresip ready on port {} tmpdir={}",
             port,
             tmp_dir.display()
         );
@@ -317,22 +288,4 @@ fn detect_codecs(module_path: &str) -> Vec<String> {
 fn pick_free_port() -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0").context("Failed to bind for port discovery")?;
     Ok(listener.local_addr()?.port())
-}
-
-/// Poll TCP port until it accepts a connection or timeout elapses.
-fn wait_for_port(port: u16, timeout: Duration) -> Result<()> {
-    let start = std::time::Instant::now();
-    loop {
-        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return Ok(());
-        }
-        if start.elapsed() >= timeout {
-            anyhow::bail!(
-                "Timed out waiting for baresip on port {}. See log: {:?}",
-                port,
-                std::path::PathBuf::from(format!("/tmp/ringo-*-*/baresip.log"))
-            );
-        }
-        thread::sleep(Duration::from_millis(200));
-    }
 }
