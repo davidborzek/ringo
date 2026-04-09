@@ -11,7 +11,7 @@ use crate::profile;
 pub fn run(name: Option<String>, notify: bool) -> Result<()> {
     let mut current = match name {
         Some(n) => n,
-        None => pick_profile()?,
+        None => pick_profile(None)?,
     };
 
     loop {
@@ -64,14 +64,14 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
 /// Open the interactive profile picker; loops until a profile is selected to start.
 /// Manages the terminal lifecycle; stays in alternate screen on success so the
 /// TUI can take over seamlessly.
-pub fn pick_profile() -> Result<String> {
+pub fn pick_profile(focus: Option<&str>) -> Result<String> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = pick_profile_loop(&mut terminal);
+    let result = pick_profile_loop(&mut terminal, focus);
 
     if result.is_err() {
         let _ = disable_raw_mode();
@@ -81,9 +81,12 @@ pub fn pick_profile() -> Result<String> {
     result
 }
 
-fn pick_profile_loop(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<String> {
+fn pick_profile_loop(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    initial_focus: Option<&str>,
+) -> Result<String> {
     use crate::picker::{PickerAction, PickerItem};
-    let mut focus: Option<String> = None;
+    let mut focus: Option<String> = initial_focus.map(|s| s.to_string());
     loop {
         let config = crate::config::load();
         let theme = &config.theme;
