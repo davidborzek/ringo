@@ -119,6 +119,11 @@ impl super::app::App {
                 self.switch_to = true;
                 self.quit = true;
             }
+            KeyCode::Esc => {
+                self.phone.hangup_all();
+                self.switch_to = true;
+                self.quit = true;
+            }
             KeyCode::Char('d') if !ctrl => {
                 self.dial.mode = InputMode::Dial;
                 self.command.error = None;
