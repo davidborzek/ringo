@@ -37,6 +37,9 @@ cargo-husky = { version = "1", default-features = false, features = [
 	"user-hooks",
 ] }
 
+[package.metadata.dist]
+formula = "ringo"
+
 [package.metadata.wix]
 upgrade-guid = "B62619E6-4C68-4431-809B-5FD0BC5BF089"
 path-guid = "BBE3712D-B0DE-4F38-A2D4-D638263D3BB3"
