@@ -451,6 +451,16 @@ cargo test        # run tests
 cargo clippy      # lint
 ```
 
+## Releasing
+
+Bump `version` in `Cargo.toml`, commit, then push a matching tag:
+
+```sh
+git tag v0.7.2 && git push --tags
+```
+
+CI ([cargo-dist](https://opensource.axo.dev/cargo-dist/)) builds the release, creates the GitHub Release, and publishes the Homebrew formula and MSI.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

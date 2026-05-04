@@ -6,6 +6,7 @@ description = "A terminal SIP softphone built on baresip"
 license = "MIT"
 authors = ["David Borzek <mail@davidborzek.de>"]
 repository = "https://github.com/davidborzek/ringo"
+homepage = "https://github.com/davidborzek/ringo"
 keywords = ["sip", "voip", "baresip", "tui", "phone"]
 categories = ["command-line-utilities"]
 rust-version = "1.85"
@@ -32,4 +33,17 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tera = "1"
 
 [dev-dependencies]
-cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }
+cargo-husky = { version = "1", default-features = false, features = [
+	"user-hooks",
+] }
+
+[package.metadata.wix]
+upgrade-guid = "B62619E6-4C68-4431-809B-5FD0BC5BF089"
+path-guid = "BBE3712D-B0DE-4F38-A2D4-D638263D3BB3"
+license = false
+eula = false
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
