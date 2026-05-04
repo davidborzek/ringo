@@ -81,6 +81,73 @@ impl Phone for BaresipPhone {
         self.send("atransferabort", "");
     }
     fn add_header(&self, key: &str, value: &str) {
-        self.send("uaaddheader", &format!("{}={} 0", key, value));
+        self.send(
+            "uaaddheader",
+            &format!("{}={} 0", key, uri_header_escape(value)),
+        );
+    }
+}
+
+/// Percent-encode a SIP header value for the `uaaddheader` baresip command.
+///
+/// Why: baresip's command parser splits params on the first space, so a raw
+/// space silently truncates the value. baresip then runs the value through
+/// `uri_header_unescape`, which only accepts the RFC 3261 `hvalue` charset
+/// (alnum, unreserved marks, and `[ ] / ? : + $`). Anything outside that set
+/// must be `%HH`-encoded so it survives the round trip.
+fn uri_header_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        if is_hvalue(b) {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{:02X}", b));
+        }
+    }
+    out
+}
+
+fn is_hvalue(b: u8) -> bool {
+    b.is_ascii_alphanumeric()
+        || matches!(
+            b,
+            b'-' | b'_'
+                | b'.'
+                | b'!'
+                | b'~'
+                | b'*'
+                | b'\''
+                | b'('
+                | b')'
+                | b'['
+                | b']'
+                | b'/'
+                | b'?'
+                | b':'
+                | b'+'
+                | b'$'
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::uri_header_escape;
+
+    #[test]
+    fn passes_through_hvalue_chars() {
+        assert_eq!(uri_header_escape("Foo-Bar_1.0"), "Foo-Bar_1.0");
+        assert_eq!(uri_header_escape("a[b]/c?d:e+f$"), "a[b]/c?d:e+f$");
+    }
+
+    #[test]
+    fn escapes_spaces_and_specials() {
+        assert_eq!(uri_header_escape("Foo Bar"), "Foo%20Bar");
+        assert_eq!(uri_header_escape("a=b;c,d"), "a%3Db%3Bc%2Cd");
+        assert_eq!(uri_header_escape("100%"), "100%25");
+    }
+
+    #[test]
+    fn escapes_non_ascii() {
+        assert_eq!(uri_header_escape("ä"), "%C3%A4");
     }
 }
