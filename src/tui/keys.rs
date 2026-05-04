@@ -16,7 +16,7 @@ impl super::app::App {
         // Quit confirmation captures all input
         if self.quit_confirm {
             match key.code {
-                KeyCode::Char('y') => {
+                KeyCode::Char('y') | KeyCode::Enter => {
                     self.phone.hangup_all();
                     self.quit = true;
                 }
@@ -115,6 +115,11 @@ impl super::app::App {
                 self.quit = true;
             }
             KeyCode::Char('p') if ctrl => {
+                self.phone.hangup_all();
+                self.switch_to = true;
+                self.quit = true;
+            }
+            KeyCode::Esc => {
                 self.phone.hangup_all();
                 self.switch_to = true;
                 self.quit = true;

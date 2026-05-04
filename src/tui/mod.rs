@@ -168,7 +168,7 @@ pub fn run(
     }
 
     if app.switch_to {
-        match crate::app::pick_profile() {
+        match crate::app::pick_profile(Some(&app.profile_name)) {
             Ok(name) => return Ok(Some(name)),
             Err(_) => {}
         }
