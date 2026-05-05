@@ -1,6 +1,6 @@
 [package]
 name = "ringo-phone"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2024"
 description = "A terminal SIP softphone built on baresip"
 license = "MIT"
