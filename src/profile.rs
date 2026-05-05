@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::PathBuf};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::{collections::HashMap, fmt, fs, path::PathBuf};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Profile {
@@ -15,8 +15,8 @@ pub struct Profile {
     pub media_enc: Option<String>,
     pub regint: Option<u32>,
     pub notes: Option<String>,
-    #[serde(default)]
-    pub custom_headers: HashMap<String, String>,
+    #[serde(default, deserialize_with = "deserialize_custom_headers")]
+    pub custom_headers: Vec<(String, String)>,
     #[serde(default = "default_true")]
     pub notify: bool,
     #[serde(default = "default_true")]
@@ -27,6 +27,47 @@ pub struct Profile {
 
 fn default_true() -> bool {
     true
+}
+
+/// Accepts both the legacy table form (`[custom_headers] X-Foo = "bar"`)
+/// and the multi-value array form (`[["X-Foo","bar"], ["X-Foo","baz"]]`).
+fn deserialize_custom_headers<'de, D>(d: D) -> Result<Vec<(String, String)>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct V;
+
+    impl<'de> serde::de::Visitor<'de> for V {
+        type Value = Vec<(String, String)>;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a table {key=value} or an array [[key, value], ...]")
+        }
+
+        fn visit_map<M: serde::de::MapAccess<'de>>(
+            self,
+            mut map: M,
+        ) -> Result<Self::Value, M::Error> {
+            let mut out = Vec::with_capacity(map.size_hint().unwrap_or(0));
+            while let Some(entry) = map.next_entry::<String, String>()? {
+                out.push(entry);
+            }
+            Ok(out)
+        }
+
+        fn visit_seq<S: serde::de::SeqAccess<'de>>(
+            self,
+            mut seq: S,
+        ) -> Result<Self::Value, S::Error> {
+            let mut out = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+            while let Some(pair) = seq.next_element::<(String, String)>()? {
+                out.push(pair);
+            }
+            Ok(out)
+        }
+    }
+
+    d.deserialize_any(V)
 }
 
 impl Profile {
@@ -169,4 +210,83 @@ pub fn save(name: &str, profile: &Profile) -> Result<()> {
     fs::write(dir.join("profile.toml"), toml_str)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BASE: &str = r#"
+        username = "u"
+        password = "p"
+        domain   = "d"
+    "#;
+
+    fn parse(extra: &str) -> Profile {
+        let raw = format!("{BASE}\n{extra}");
+        toml::from_str::<Profile>(&raw).expect("valid profile")
+    }
+
+    #[test]
+    fn legacy_table_form_loads() {
+        let p = parse(
+            r#"
+            [custom_headers]
+            "X-Foo" = "bar"
+        "#,
+        );
+        assert_eq!(p.custom_headers, vec![("X-Foo".into(), "bar".into())]);
+    }
+
+    #[test]
+    fn legacy_inline_table_form_loads() {
+        let p = parse(r#"custom_headers = { "X-Foo" = "bar" }"#);
+        assert_eq!(p.custom_headers, vec![("X-Foo".into(), "bar".into())]);
+    }
+
+    #[test]
+    fn new_array_form_loads_with_duplicates() {
+        let p = parse(
+            r#"
+            custom_headers = [
+              ["History-Info", "<sip:1@x.com>;index=1"],
+              ["History-Info", "<sip:2@x.com>;index=2"],
+            ]
+        "#,
+        );
+        assert_eq!(
+            p.custom_headers,
+            vec![
+                ("History-Info".into(), "<sip:1@x.com>;index=1".into()),
+                ("History-Info".into(), "<sip:2@x.com>;index=2".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_field_defaults_to_empty() {
+        let p = parse("");
+        assert!(p.custom_headers.is_empty());
+    }
+
+    #[test]
+    fn save_emits_array_form_and_reload_matches() {
+        let original = Profile {
+            username: "u".into(),
+            password: "p".into(),
+            domain: "d".into(),
+            custom_headers: vec![
+                ("History-Info".into(), "<sip:1@x.com>;index=1".into()),
+                ("History-Info".into(), "<sip:2@x.com>;index=2".into()),
+            ],
+            ..Default::default()
+        };
+        let serialized = toml::to_string_pretty(&original).expect("serialize");
+        assert!(
+            !serialized.contains("[custom_headers]"),
+            "save() must not emit legacy table form, got:\n{serialized}"
+        );
+        let reloaded: Profile = toml::from_str(&serialized).expect("re-parse");
+        assert_eq!(reloaded.custom_headers, original.custom_headers);
+    }
 }

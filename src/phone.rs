@@ -131,7 +131,7 @@ fn is_hvalue(b: u8) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::uri_header_escape;
+    use super::*;
 
     #[test]
     fn passes_through_hvalue_chars() {
@@ -149,5 +149,44 @@ mod tests {
     #[test]
     fn escapes_non_ascii() {
         assert_eq!(uri_header_escape("ä"), "%C3%A4");
+    }
+
+    fn make_phone() -> (BaresipPhone, tokio::sync::mpsc::Receiver<(String, String)>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        (BaresipPhone::new(tx), rx)
+    }
+
+    #[test]
+    fn add_header_emits_uaaddheader_with_ua_index_zero() {
+        let (phone, mut rx) = make_phone();
+        phone.add_header("X-Foo", "bar");
+        let (cmd, params) = rx.try_recv().expect("one message");
+        assert_eq!(cmd, "uaaddheader");
+        assert_eq!(params, "X-Foo=bar 0");
+    }
+
+    #[test]
+    fn add_header_encodes_unsafe_chars_in_value() {
+        let (phone, mut rx) = make_phone();
+        phone.add_header("History-Info", "<sip:1@x.com>;index=1");
+        let (_, params) = rx.try_recv().expect("one message");
+        // The trailing " 0" must remain a literal space — it's baresip's
+        // separator between value and ua-index. Everything outside hvalue
+        // (here: < > @ ; =) is percent-encoded.
+        assert_eq!(params, "History-Info=%3Csip:1%40x.com%3E%3Bindex%3D1 0");
+    }
+
+    #[test]
+    fn add_header_preserves_order_across_multiple_calls() {
+        let (phone, mut rx) = make_phone();
+        phone.add_header("History-Info", "<sip:1@x.com>;index=1");
+        phone.add_header("History-Info", "<sip:2@x.com>;index=2");
+        phone.add_header("X-Other", "hi");
+
+        let msgs: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0].1, "History-Info=%3Csip:1%40x.com%3E%3Bindex%3D1 0");
+        assert_eq!(msgs[1].1, "History-Info=%3Csip:2%40x.com%3E%3Bindex%3D2 0");
+        assert_eq!(msgs[2].1, "X-Other=hi 0");
     }
 }

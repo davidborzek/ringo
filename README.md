@@ -367,7 +367,22 @@ stun_server  = "stun:stun.example.com" # optional
 media_enc    = "dtls_srtp"            # optional
 notify       = true                   # desktop notifications (default: true)
 mwi          = true                   # message waiting indicator (default: true)
+
+# Optional custom SIP headers added to every outgoing INVITE.
+# Order is preserved; duplicate keys are allowed (e.g. RFC 4244 History-Info).
+# Values are percent-encoded for the `uaaddheader` baresip command —
+# write them as plain text, no manual %-escaping needed.
+custom_headers = [
+  ["History-Info", "<sip:1@example.com>;index=1"],
+  ["History-Info", "<sip:2@example.com>;index=1.1"],
+  ["X-Trace-Id",   "abc-123"],
+]
 ```
+
+> The legacy table form (`[custom_headers]` with `key = "value"`) is still
+> accepted on load for backwards compatibility, but it cannot express
+> duplicate keys. Saving via the TUI migrates a profile to the array form
+> automatically.
 
 ## File locations
 
