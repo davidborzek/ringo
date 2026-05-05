@@ -12,7 +12,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use std::{collections::HashMap, io, path::Path};
+use std::{io, path::Path};
 
 use crate::{config::Theme, profile::Profile};
 use field::*;
@@ -36,7 +36,7 @@ enum Action {
 
 struct FormState {
     fields: Vec<Field>,
-    custom_headers: HashMap<String, String>,
+    custom_headers: Vec<(String, String)>,
     focused: usize,
     error: Option<String>,
     is_new: bool,

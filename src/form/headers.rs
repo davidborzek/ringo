@@ -13,16 +13,13 @@ use crate::config::Theme;
 
 pub(crate) fn run_headers_submenu(
     terminal: &mut Term,
-    headers: &mut std::collections::HashMap<String, String>,
+    headers: &mut Vec<(String, String)>,
     theme: &Theme,
 ) -> Result<()> {
-    let mut entries: Vec<(TextField, TextField)> = {
-        let mut keys: Vec<&String> = headers.keys().collect();
-        keys.sort();
-        keys.into_iter()
-            .map(|k| (TextField::new(k), TextField::new(&headers[k])))
-            .collect()
-    };
+    let mut entries: Vec<(TextField, TextField)> = headers
+        .iter()
+        .map(|(k, v)| (TextField::new(k), TextField::new(v)))
+        .collect();
     let mut focused: usize = 0;
     let mut on_value = false;
 
@@ -184,7 +181,7 @@ pub(crate) fn run_headers_submenu(
         let k = key_tf.value();
         let v = val_tf.value();
         if !k.is_empty() {
-            headers.insert(k, v);
+            headers.push((k, v));
         }
     }
 

@@ -33,7 +33,7 @@ pub fn run(
     call_history_path: Option<PathBuf>,
     notify: bool,
     regint: Option<u32>,
-    custom_headers: std::collections::HashMap<String, String>,
+    custom_headers: Vec<(String, String)>,
     theme: crate::config::Theme,
     hooks: Vec<crate::config::Hook>,
     profile: crate::profile::Profile,
