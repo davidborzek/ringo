@@ -23,3 +23,5 @@ targets = [
 ]
 # Publish jobs to run in CI
 publish-jobs = ["homebrew"]
+# Don't run dist on PRs
+pr-run-mode = "skip"
