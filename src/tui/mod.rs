@@ -101,13 +101,21 @@ pub fn run(
         hooks,
         profile,
         contacts,
+        custom_headers
+            .into_iter()
+            .map(|(k, v)| (k, crate::header::HeaderTemplate::new(v)))
+            .collect(),
     );
 
     let aor = app.account_aor.clone();
     app.phone.register(&aor, regint.unwrap_or(3600));
 
-    for (key, value) in &custom_headers {
-        app.phone.add_header(key, value);
+    // Add only static headers at startup. Dynamic templates (e.g. `$uuid`)
+    // are re-added per call by App::dial so each call gets a fresh value.
+    for (key, tpl) in &app.custom_headers {
+        if !tpl.is_dynamic() {
+            app.phone.add_header(key, tpl.raw());
+        }
     }
 
     let mut do_restart = false;

@@ -1,4 +1,7 @@
-use crate::{config::Hook, config::Theme, contacts::Contact, phone::Phone, profile::Profile};
+use crate::{
+    config::Hook, config::Theme, contacts::Contact, header::HeaderContext, header::HeaderTemplate,
+    phone::Phone, profile::Profile,
+};
 use std::{collections::VecDeque, path::PathBuf, time::Instant};
 
 // ─── State types ──────────────────────────────────────────────────────────────
@@ -204,6 +207,10 @@ pub struct App {
     pub profile: Profile,
     pub contacts: Vec<Contact>,
     pub contacts_state: ContactsState,
+    /// Custom SIP headers configured for the active profile. Dynamic
+    /// templates (e.g. containing `$uuid`) are re-rendered per call by
+    /// [`Self::dial`].
+    pub custom_headers: Vec<(String, HeaderTemplate)>,
 }
 
 impl App {
@@ -218,6 +225,7 @@ impl App {
         hooks: Vec<Hook>,
         profile: Profile,
         contacts: Vec<Contact>,
+        custom_headers: Vec<(String, HeaderTemplate)>,
     ) -> Self {
         Self {
             profile_name,
@@ -294,6 +302,32 @@ impl App {
                     cursor: 0,
                 },
             },
+            custom_headers,
+        }
+    }
+
+    /// Place an outbound call, re-rendering dynamic custom headers so each
+    /// call gets fresh placeholder values.
+    pub fn dial(&mut self, target: &str) {
+        self.refresh_dynamic_headers();
+        self.phone.dial(target);
+    }
+
+    fn refresh_dynamic_headers(&self) {
+        use std::collections::HashSet;
+
+        let ctx = HeaderContext::for_call();
+        let mut removed: HashSet<&str> = HashSet::new();
+        for (key, tpl) in &self.custom_headers {
+            if !tpl.is_dynamic() {
+                continue;
+            }
+            // `uarmheader` removes all headers with the given name, so only
+            // emit it once per key — subsequent occurrences just re-add.
+            if removed.insert(key.as_str()) {
+                self.phone.rm_header(key);
+            }
+            self.phone.add_header(key, &tpl.render(&ctx));
         }
     }
 

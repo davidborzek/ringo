@@ -28,7 +28,7 @@ impl super::app::App {
                 }
                 if !self.dial.input.is_empty() {
                     let target = self.dial.input.clone();
-                    self.phone.dial(&target);
+                    self.dial(&target);
                     crate::history::push(&mut self.dial.history, target);
                     self.dial_clear();
                 }
@@ -374,6 +374,7 @@ mod tests {
         fn attended_transfer_exec(&self) {}
         fn attended_transfer_abort(&self) {}
         fn add_header(&self, _: &str, _: &str) {}
+        fn rm_header(&self, _: &str) {}
     }
 
     fn test_app() -> App {
@@ -387,6 +388,7 @@ mod tests {
             crate::config::Theme::default(),
             Vec::new(),
             crate::profile::Profile::default(),
+            Vec::new(),
             Vec::new(),
         )
     }

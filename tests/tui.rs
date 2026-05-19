@@ -20,6 +20,7 @@ fn test_app() -> (App, tokio::sync::mpsc::Receiver<(String, String)>) {
         Vec::new(),
         ringo::profile::Profile::default(),
         Vec::new(),
+        Vec::new(),
     );
     (app, cmd_rx)
 }

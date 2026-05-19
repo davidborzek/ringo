@@ -5,6 +5,7 @@ pub mod config;
 pub mod contacts;
 pub mod event;
 pub mod form;
+pub mod header;
 pub mod history;
 pub mod hooks;
 pub mod log;

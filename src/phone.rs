@@ -16,6 +16,7 @@ pub trait Phone: Send {
     fn attended_transfer_exec(&self);
     fn attended_transfer_abort(&self);
     fn add_header(&self, key: &str, value: &str);
+    fn rm_header(&self, key: &str);
 }
 
 // ─── Baresip implementation ───────────────────────────────────────────────────
@@ -85,6 +86,9 @@ impl Phone for BaresipPhone {
             "uaaddheader",
             &format!("{}={} 0", key, uri_header_escape(value)),
         );
+    }
+    fn rm_header(&self, key: &str) {
+        self.send("uarmheader", &format!("{} 0", key));
     }
 }
 
