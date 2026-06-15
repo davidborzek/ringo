@@ -44,6 +44,9 @@ pub enum AppEvent {
         class: String,
         type_: String,
     },
+    BaresipConnectFailed {
+        reason: String,
+    },
 }
 
 impl From<BaresipMessage> for AppEvent {

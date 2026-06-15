@@ -57,6 +57,10 @@ impl super::app::App {
             AppEvent::Unknown { class, type_ } => {
                 self.push_log(format!("[{}] {}", class, type_));
             }
+            AppEvent::BaresipConnectFailed { reason } => {
+                self.reg_status = RegStatus::Failed(format!("baresip unreachable: {}", reason));
+                self.push_log(format!("✗ Cannot connect to baresip: {}", reason));
+            }
         }
     }
 }

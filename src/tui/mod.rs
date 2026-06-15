@@ -18,10 +18,72 @@ pub use app::{App, CallDirection, CallState, RegStatus, TransferMode};
 use anyhow::Result;
 use crossterm::event::{self as ct_event, Event};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{io, path::PathBuf, sync::mpsc};
+use std::{io, path::PathBuf, sync::mpsc, time::Duration};
 use tokio::{net::TcpStream, sync::mpsc as tokio_mpsc};
 
 use crate::{client, phone::BaresipPhone};
+
+/// Connect to baresip's ctrl_tcp port (retrying within `connect_timeout`),
+/// then spawn reader/writer tasks and return. On connect timeout, sends
+/// `AppEvent::BaresipConnectFailed` and returns without spawning.
+async fn run_baresip_io(
+    port: u16,
+    connect_timeout: Duration,
+    baresip_log_path: Option<PathBuf>,
+    msg_tx: mpsc::Sender<AppEvent>,
+    mut cmd_rx: tokio_mpsc::Receiver<(String, String)>,
+) {
+    use tokio::time::{Instant, sleep};
+
+    let deadline = Instant::now() + connect_timeout;
+    let stream = loop {
+        match TcpStream::connect(("127.0.0.1", port)).await {
+            Ok(s) => break s,
+            Err(e) if Instant::now() >= deadline => {
+                let reason = match baresip_log_path.as_ref() {
+                    Some(p) => format!(
+                        "Could not connect on port {} ({}). See log: {}",
+                        port,
+                        e,
+                        p.display()
+                    ),
+                    None => format!("Could not connect on port {} ({})", port, e),
+                };
+                crate::rlog!(Error, "{}", reason);
+                let _ = msg_tx.send(AppEvent::BaresipConnectFailed { reason });
+                return;
+            }
+            Err(_) => sleep(Duration::from_millis(100)).await,
+        }
+    };
+
+    let (mut reader, mut writer) = stream.into_split();
+
+    tokio::spawn(async move {
+        loop {
+            match client::read_message(&mut reader).await {
+                Ok(msg) => {
+                    if msg_tx.send(AppEvent::from(msg)).is_err() {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    crate::rlog!(Error, "tcp reader: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    tokio::spawn(async move {
+        while let Some((cmd, params)) = cmd_rx.recv().await {
+            if let Err(e) = client::write_command(&mut writer, &cmd, &params).await {
+                crate::rlog!(Error, "tcp writer: {} (cmd={})", e, cmd);
+                break;
+            }
+        }
+    });
+}
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
@@ -46,41 +108,15 @@ pub fn run(
         .enable_all()
         .build()?;
 
-    // Connect to baresip ctrl_tcp
-    let stream = rt.block_on(TcpStream::connect(("127.0.0.1", port)))?;
-    let (read_half, write_half) = stream.into_split();
-
     let phone = BaresipPhone::new(cmd_tx);
 
-    // TCP reader task: baresip → msg_tx (converts BaresipMessage → AppEvent)
-    rt.spawn(async move {
-        let mut reader = read_half;
-        loop {
-            match client::read_message(&mut reader).await {
-                Ok(msg) => {
-                    if msg_tx.send(AppEvent::from(msg)).is_err() {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    crate::rlog!(Error, "tcp reader: {}", e);
-                    break;
-                }
-            }
-        }
-    });
-
-    // TCP writer task: cmd_rx → baresip
-    rt.spawn(async move {
-        let mut writer = write_half;
-        let mut rx = cmd_rx;
-        while let Some((cmd, params)) = rx.recv().await {
-            if let Err(e) = client::write_command(&mut writer, &cmd, &params).await {
-                crate::rlog!(Error, "tcp writer: {} (cmd={})", e, cmd);
-                break;
-            }
-        }
-    });
+    rt.spawn(run_baresip_io(
+        port,
+        Duration::from_secs(10),
+        baresip_log_path.clone(),
+        msg_tx.clone(),
+        cmd_rx,
+    ));
 
     // Set up terminal
     crossterm::terminal::enable_raw_mode()?;
@@ -249,4 +285,53 @@ fn render_loop(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pick an OS-assigned ephemeral port and immediately drop the listener,
+    /// so connect attempts will fail with "connection refused".
+    fn unbound_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        port
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connect_failure_emits_baresip_connect_failed() {
+        let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
+        let (_cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(1);
+        let port = unbound_port();
+        let log_path = PathBuf::from("/tmp/ringo-test/baresip.log");
+
+        run_baresip_io(
+            port,
+            Duration::from_millis(150),
+            Some(log_path.clone()),
+            msg_tx,
+            cmd_rx,
+        )
+        .await;
+
+        let event = msg_rx.try_recv().expect("expected an AppEvent");
+        match event {
+            AppEvent::BaresipConnectFailed { reason } => {
+                assert!(
+                    reason.contains(&format!("port {}", port)),
+                    "reason: {reason}"
+                );
+                assert!(reason.contains("See log:"), "reason: {reason}");
+                assert!(
+                    reason.contains(log_path.to_str().unwrap()),
+                    "reason: {reason}"
+                );
+                println!("UI will see: {reason}");
+            }
+            other => panic!("expected BaresipConnectFailed, got {other:?}"),
+        }
+        assert!(msg_rx.try_recv().is_err(), "no further events expected");
+    }
 }
