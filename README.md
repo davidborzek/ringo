@@ -374,11 +374,12 @@ mwi          = true                   # message waiting indicator (default: true
 # write them as plain text, no manual %-escaping needed.
 #
 # Placeholders are substituted per outgoing call:
-#   $uuid  →  a fresh UUIDv4, shared across all headers in the same INVITE
+#   ${uuid}  →  a fresh UUIDv4, shared across all headers in the same INVITE
+# Use $$ for a literal `$` (so a literal `${uuid}` is written `$${uuid}`).
 custom_headers = [
   ["History-Info", "<sip:1@example.com>;index=1"],
   ["History-Info", "<sip:2@example.com>;index=1.1"],
-  ["X-Trace-Id",   "call-$uuid"],
+  ["X-Trace-Id",   "call-${uuid}"],
 ]
 ```
 
