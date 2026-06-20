@@ -114,6 +114,7 @@ fn setup(
     App,
     mpsc::Receiver<AppEvent>,
     mpsc::Receiver<crate::control::RemoteRequest>,
+    Option<crate::control::Registration>,
 )> {
     let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
     let (cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(32);
@@ -133,8 +134,30 @@ fn setup(
         cmd_rx,
     ));
 
-    // Accept remote-control commands on the per-session Unix socket.
-    rt.spawn(crate::control::serve(p.control_socket, remote_tx));
+    // Bind the per-session control socket synchronously (within the runtime),
+    // then register — so the registry entry never advertises a socket that
+    // isn't yet connectable. On bind failure, surface it and run without remote
+    // control (no phantom registry entry is left behind).
+    let control = {
+        let _enter = rt.enter();
+        match crate::control::bind(&p.control_socket) {
+            Ok(listener) => {
+                let info = crate::control::session_info(
+                    &p.profile_name,
+                    &p.account_aor,
+                    &p.control_socket,
+                );
+                let guard = crate::control::register(&info);
+                rt.spawn(crate::control::serve(listener, remote_tx));
+                Some(guard)
+            }
+            Err(e) => {
+                crate::rlog!(Error, "remote control unavailable: {}", e);
+                eprintln!("warning: remote control unavailable: {e}");
+                None
+            }
+        }
+    };
 
     let app = App::new(
         p.profile_name,
@@ -164,11 +187,11 @@ fn setup(
         }
     }
 
-    Ok((rt, app, msg_rx, remote_rx))
+    Ok((rt, app, msg_rx, remote_rx, control))
 }
 
 pub fn run(params: SessionParams) -> Result<Option<String>> {
-    let (rt, mut app, msg_rx, remote_rx) = setup(params)?;
+    let (rt, mut app, msg_rx, remote_rx, _control) = setup(params)?;
 
     // Set up terminal
     crossterm::terminal::enable_raw_mode()?;
@@ -253,7 +276,7 @@ pub fn run_headless(params: SessionParams) -> Result<()> {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let profile_name = params.profile_name.clone();
-    let (rt, mut app, msg_rx, remote_rx) = setup(params)?;
+    let (rt, mut app, msg_rx, remote_rx, _control) = setup(params)?;
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_signal = stop.clone();

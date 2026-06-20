@@ -41,13 +41,9 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     let options = baresip_options(&config.baresip);
     let instance = crate::baresip::Instance::spawn(name, &account, &options)?;
 
-    // Expose this session for remote control via `ringo control …`. The guard
-    // removes the registry entry and socket when this session ends.
+    // The control socket is bound and registered inside the session setup,
+    // *after* the socket is connectable — see `tui::setup`.
     let control_socket = crate::control::socket_path(name)?;
-    let _control_reg = crate::control::register(name, &prof.aor(), &control_socket);
-    if let Err(e) = &_control_reg {
-        crate::rlog!(Warn, "remote control unavailable: {}", e);
-    }
 
     let contacts = crate::contacts::load();
 

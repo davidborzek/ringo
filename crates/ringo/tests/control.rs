@@ -13,7 +13,11 @@ fn socket_roundtrip_forwards_allowed_and_rejects_denied() {
     let (tx, rx) = mpsc::channel::<RemoteRequest>();
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.spawn(control::serve(sock.clone(), tx));
+    {
+        let _enter = rt.enter();
+        let listener = control::bind(&sock).unwrap();
+        rt.spawn(control::serve(listener, tx));
+    }
 
     // Stand in for the render loop: echo the command back as success.
     thread::spawn(move || {

@@ -181,29 +181,63 @@ impl Drop for Registration {
     }
 }
 
-/// Write the registry entry for a starting session and return a guard that
-/// cleans up the registry file and socket on drop.
-pub fn register(profile: &str, aor: &str, socket_path: &Path) -> Result<Registration> {
-    let info = SessionInfo {
+/// Build the registry entry for this process's session.
+pub fn session_info(profile: &str, aor: &str, socket_path: &Path) -> SessionInfo {
+    SessionInfo {
         profile: profile.to_string(),
         pid: std::process::id(),
         socket_path: socket_path.to_path_buf(),
         aor: aor.to_string(),
         started_at: chrono::Local::now().to_rfc3339(),
-    };
-    let registry_path = registry_path(profile, info.pid)?;
-    fs::write(&registry_path, serde_json::to_vec_pretty(&info)?)
-        .context("Failed to write session registry")?;
-    set_mode(&registry_path, 0o600);
-    Ok(Registration {
-        registry_path,
-        socket_path: socket_path.to_path_buf(),
-    })
+    }
 }
 
-/// True if a session's socket currently accepts connections.
-fn is_alive(socket_path: &Path) -> bool {
-    std::os::unix::net::UnixStream::connect(socket_path).is_ok()
+/// Write the registry entry for an already-bound session and return a guard
+/// that removes the registry file and socket on drop.
+///
+/// Call this only *after* the control socket is bound (see [`bind`]): the entry
+/// must never advertise a socket that isn't yet connectable, or a concurrent
+/// `list_running`/`reap_stale` would treat the session as dead and delete it.
+/// The returned guard always cleans up the socket, even if the registry write
+/// failed.
+pub fn register(info: &SessionInfo) -> Registration {
+    let registry_path = registry_path(&info.profile, info.pid).ok();
+    if let Some(path) = &registry_path {
+        match serde_json::to_vec_pretty(info) {
+            Ok(bytes) => {
+                if let Err(e) = fs::write(path, bytes) {
+                    crate::rlog!(Warn, "session registry write failed: {}", e);
+                } else {
+                    set_mode(path, 0o600);
+                }
+            }
+            Err(e) => crate::rlog!(Warn, "session registry encode failed: {}", e),
+        }
+    }
+    Registration {
+        registry_path: registry_path.unwrap_or_default(),
+        socket_path: info.socket_path.clone(),
+    }
+}
+
+/// Liveness of a session, probed by connecting to its socket.
+enum Liveness {
+    Alive,
+    /// Socket missing or refusing — the session is gone; safe to reap.
+    Dead,
+    /// Transient connect error (e.g. fd exhaustion) — leave the entry alone.
+    Unknown,
+}
+
+fn probe(socket_path: &Path) -> Liveness {
+    use std::io::ErrorKind;
+    match std::os::unix::net::UnixStream::connect(socket_path) {
+        Ok(_) => Liveness::Alive,
+        Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused) => {
+            Liveness::Dead
+        }
+        Err(_) => Liveness::Unknown,
+    }
 }
 
 /// Remove the registry + socket files for a dead session.
@@ -232,10 +266,11 @@ pub fn list_running() -> Vec<SessionInfo> {
         let Ok(info) = serde_json::from_slice::<SessionInfo>(&bytes) else {
             continue;
         };
-        if is_alive(&info.socket_path) {
-            out.push(info);
-        } else {
-            reap(&info);
+        match probe(&info.socket_path) {
+            Liveness::Alive => out.push(info),
+            Liveness::Dead => reap(&info),
+            // Transient error: neither list nor reap — try again next time.
+            Liveness::Unknown => {}
         }
     }
     out.sort_by(|a, b| a.profile.cmp(&b.profile));
@@ -249,32 +284,22 @@ pub fn reap_stale() {
 
 // ─── Server (session side) ──────────────────────────────────────────────────────
 
-/// Bind the control socket and forward incoming commands to `tx`.
-/// Runs until the runtime is shut down. On bind failure, logs and returns —
-/// the session keeps running, only remote control is unavailable.
-pub async fn serve(socket_path: PathBuf, tx: std::sync::mpsc::Sender<RemoteRequest>) {
-    // Clear any stale socket file from a previous crash before binding.
-    let _ = fs::remove_file(&socket_path);
+/// Bind the control socket (0600), clearing any stale socket file first.
+/// Must be called within a tokio runtime context. Binding synchronously — and
+/// registering only afterwards — guarantees the registry entry never points at
+/// a socket that isn't yet connectable.
+pub fn bind(socket_path: &Path) -> Result<tokio::net::UnixListener> {
+    let _ = fs::remove_file(socket_path);
+    let listener = tokio::net::UnixListener::bind(socket_path)
+        .with_context(|| format!("bind control socket at {}", socket_path.display()))?;
+    set_mode(socket_path, 0o600);
+    Ok(listener)
+}
 
-    let listener = match tokio::net::UnixListener::bind(&socket_path) {
-        Ok(l) => l,
-        Err(e) => {
-            crate::rlog!(
-                Error,
-                "control socket bind failed ({}): {}",
-                socket_path.display(),
-                e
-            );
-            return;
-        }
-    };
-    set_mode(&socket_path, 0o600);
-    crate::rlog!(
-        Info,
-        "control socket listening at {}",
-        socket_path.display()
-    );
-
+/// Accept connections on a bound control socket and forward commands to `tx`.
+/// Runs until the runtime is shut down.
+pub async fn serve(listener: tokio::net::UnixListener, tx: std::sync::mpsc::Sender<RemoteRequest>) {
+    crate::rlog!(Info, "control socket listening");
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
