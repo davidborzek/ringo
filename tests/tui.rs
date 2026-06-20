@@ -392,8 +392,30 @@ fn status_returns_structured_json() {
 
     assert_eq!(v["registration"], "registered");
     assert_eq!(v["muted"], false);
+    assert!(v["last_call"].is_null(), "no call closed yet");
     let calls = v["calls"].as_array().unwrap();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0]["state"], "established");
     assert_eq!(calls[0]["peer"], "sip:a@b");
+}
+
+#[test]
+fn status_exposes_last_call_after_close() {
+    let (mut app, _rx) = test_app();
+    app.handle_message(evt(
+        "CALL_OUTGOING",
+        "",
+        json!({"id": "1", "peeruri": "sip:bob@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(evt("CALL_CLOSED", "486 Busy Here", json!({"id": "1"})));
+
+    let v: Value = serde_json::from_str(&app.dispatch("status", "").unwrap()).unwrap();
+    assert_eq!(v["calls"].as_array().unwrap().len(), 0);
+    let lc = &v["last_call"];
+    assert_eq!(lc["peer"], "sip:bob@b");
+    assert_eq!(lc["direction"], "outgoing");
+    assert_eq!(lc["reason"], "486 Busy Here");
+    assert_eq!(lc["error"], true);
+    assert_eq!(lc["answered"], true);
 }

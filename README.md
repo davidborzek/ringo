@@ -129,8 +129,10 @@ once. Commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`,
 `dtmf <digits>`, `transfer <uri>`, `status`. `ctl` is an alias for `control`.
 
 Add `--json` (`-j`) for machine-readable output — `list` emits an array of
-sessions, `status` a structured object, and every other command an
-`{ "ok", "data", "error" }` envelope. The exit code reflects success.
+sessions, `status` a structured object (registration, active `calls`, and the
+most recently closed call under `last_call` with its reason/duration), and every
+other command an `{ "ok", "data", "error" }` envelope. The exit code reflects
+success.
 
 ```sh
 ringo control list --json

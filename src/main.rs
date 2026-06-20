@@ -253,6 +253,25 @@ fn print_status_text(data: &str) {
         let state = c.get("state").and_then(|x| x.as_str()).unwrap_or("");
         println!("  [{idx}] {dir} {peer} {state}");
     }
+    if let Some(lc) = v.get("last_call").filter(|x| !x.is_null()) {
+        let field = |k: &str| lc.get(k).and_then(|x| x.as_str()).unwrap_or("");
+        let answered = lc
+            .get("answered")
+            .and_then(|x| x.as_bool())
+            .unwrap_or(false);
+        let secs = lc
+            .get("duration_secs")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        println!(
+            "last_call: {} {} — {} ({}, {}s)",
+            field("direction"),
+            field("peer"),
+            field("reason"),
+            if answered { "answered" } else { "unanswered" },
+            secs,
+        );
+    }
 }
 
 /// Resolve a target string to exactly one running session. A purely numeric

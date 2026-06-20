@@ -223,12 +223,23 @@ impl App {
                 })
             })
             .collect();
+        let last_call = self.last_call.as_ref().map(|lc| {
+            serde_json::json!({
+                "peer": lc.peer,
+                "direction": lc.direction,
+                "reason": lc.reason,
+                "error": lc.error,
+                "duration_secs": lc.duration_secs,
+                "answered": lc.answered,
+            })
+        });
         serde_json::json!({
             "profile": self.profile_name,
             "account": self.account_aor,
             "registration": registration,
             "muted": self.muted,
             "calls": calls,
+            "last_call": last_call,
         })
         .to_string()
     }
