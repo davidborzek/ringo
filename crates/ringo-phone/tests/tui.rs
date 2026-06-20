@@ -328,3 +328,113 @@ fn attended_pending_esc_aborts_transfer() {
     let (cmd, _) = cmd_rx.try_recv().unwrap();
     assert_eq!(cmd, "atransferabort");
 }
+
+// ─── DTMF dispatch ──────────────────────────────────────────────────────────────
+
+#[test]
+fn dtmf_sends_sndcode_per_digit_during_call() {
+    let (mut app, mut cmd_rx) = test_app();
+    app.handle_message(evt(
+        "CALL_INCOMING",
+        "",
+        json!({"id": "1", "peeruri": "sip:a@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+
+    let res = app.dispatch("dtmf", "1 2#");
+    assert!(res.is_ok(), "{res:?}");
+
+    let sent: Vec<String> = std::iter::from_fn(|| cmd_rx.try_recv().ok())
+        .filter(|(cmd, _)| cmd == "sndcode")
+        .map(|(_, params)| params)
+        .collect();
+    assert_eq!(sent, vec!["1", "2", "#"]);
+}
+
+#[test]
+fn dtmf_without_active_call_errors() {
+    let (mut app, _rx) = test_app();
+    assert_eq!(app.dispatch("dtmf", "123"), Err("No active call".into()));
+}
+
+#[test]
+fn dtmf_rejects_invalid_digit() {
+    let (mut app, _rx) = test_app();
+    app.handle_message(evt(
+        "CALL_INCOMING",
+        "",
+        json!({"id": "1", "peeruri": "sip:a@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    let err = app.dispatch("dtmf", "12x").unwrap_err();
+    assert!(err.contains("Invalid DTMF"), "{err}");
+}
+
+// ─── status JSON ─────────────────────────────────────────────────────────────
+
+#[test]
+fn status_returns_structured_json() {
+    let (mut app, _rx) = test_app();
+    app.handle_message(evt(
+        "REGISTER_OK",
+        "",
+        json!({"accountaor": "sip:user@example.com"}),
+    ));
+    app.handle_message(evt(
+        "CALL_INCOMING",
+        "",
+        json!({"id": "1", "peeruri": "sip:a@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+
+    let out = app.dispatch("status", "").unwrap();
+    let v: Value = serde_json::from_str(&out).expect("status must be valid JSON");
+
+    assert_eq!(v["registration"], "registered");
+    assert_eq!(v["muted"], false);
+    assert!(v["last_call"].is_null(), "no call closed yet");
+    let calls = v["calls"].as_array().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["state"], "established");
+    assert_eq!(calls[0]["peer"], "sip:a@b");
+}
+
+#[test]
+fn status_exposes_last_call_after_close() {
+    let (mut app, _rx) = test_app();
+    app.handle_message(evt(
+        "CALL_OUTGOING",
+        "",
+        json!({"id": "1", "peeruri": "sip:bob@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(evt("CALL_CLOSED", "486 Busy Here", json!({"id": "1"})));
+
+    let v: Value = serde_json::from_str(&app.dispatch("status", "").unwrap()).unwrap();
+    assert_eq!(v["calls"].as_array().unwrap().len(), 0);
+    let lc = &v["last_call"];
+    assert_eq!(lc["peer"], "sip:bob@b");
+    assert_eq!(lc["direction"], "outgoing");
+    assert_eq!(lc["reason"], "486 Busy Here");
+    assert_eq!(lc["error"], true);
+    assert_eq!(lc["answered"], true);
+}
+
+#[test]
+fn shutdown_hangs_up_and_sets_quit() {
+    let (mut app, mut cmd_rx) = test_app();
+    app.handle_message(evt(
+        "CALL_INCOMING",
+        "",
+        json!({"id": "1", "peeruri": "sip:a@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+
+    assert!(app.dispatch("shutdown", "").is_ok());
+    assert!(app.quit);
+
+    let cmds: Vec<String> = std::iter::from_fn(|| cmd_rx.try_recv().ok())
+        .map(|(c, _)| c)
+        .collect();
+    assert!(cmds.contains(&"hangupall".to_string()));
+}

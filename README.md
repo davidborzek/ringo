@@ -65,7 +65,7 @@ cargo install ringo-phone
 **From GitHub (no clone needed):**
 
 ```sh
-cargo install --git https://github.com/davidborzek/ringo
+cargo install --git https://github.com/davidborzek/ringo ringo-phone
 ```
 
 **Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are available on the
@@ -74,7 +74,7 @@ cargo install --git https://github.com/davidborzek/ringo
 **From source:**
 
 ```sh
-cargo install --path . --root ~/.local
+cargo install --path crates/ringo-phone --root ~/.local
 ```
 
 Or build and install system-wide:
@@ -105,6 +105,52 @@ ringo              # open profile picker (default)
 ringo start <name> # launch a specific profile directly
 ringo list         # list all profiles
 ringo list --plain # one name per line (for scripting)
+```
+
+### Remote control
+
+Control a running session from another terminal (or a script) over a per-session
+Unix socket:
+
+```sh
+ringo control list                  # list running sessions: PID, profile, account
+ringo control -t <target> <command> [args]
+
+# examples
+ringo control -t work dial 4711     # target by profile name
+ringo control -t 215709 hangup      # target by PID (for awkward names or duplicates)
+ringo control -t work dtmf 123#     # send DTMF tones into the active call
+ringo control -t work status        # registration + active calls
+```
+
+`<target>` is a profile name or a PID. Use the PID (shown in `ringo control list`)
+when a profile name is awkward to type or when the same profile runs more than
+once. Commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`,
+`dtmf <digits>`, `transfer <uri>`, `status`, `shutdown`. `ctl` is an alias for
+`control`.
+
+#### Headless sessions
+
+For scripting and automated testing, run a session without the TUI — it still
+binds the control socket and registers, so you drive it entirely via
+`ringo control`:
+
+```sh
+ringo start --headless work &        # no terminal needed; runs in the background
+ringo control -t work status         # ...drive it...
+ringo control -t work shutdown       # stop it cleanly (or Ctrl-C the process)
+```
+
+Add `--json` (`-j`) for machine-readable output — `list` emits an array of
+sessions, `status` a structured object (registration, active `calls`, and the
+most recently closed call under `last_call` with its reason/duration), and every
+other command an `{ "ok", "data", "error" }` envelope. The exit code reflects
+success.
+
+```sh
+ringo control list --json
+ringo control -t work status --json
+ringo control -t work dial 4711 --json   # {"ok":true,"data":"Dialing 4711","error":null}
 ```
 
 ## Keybindings
@@ -192,7 +238,7 @@ ringo list --plain # one name per line (for scripting)
 | `Esc` | Close |
 | `Backspace` | Delete character / close (when empty) |
 
-Available commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`, `transfer <uri>`, `contacts`, `events`, `log`, `history`, `edit`, `switch`, `help`, `quit`
+Available commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`, `dtmf <digits>`, `transfer <uri>`, `contacts`, `events`, `log`, `history`, `edit`, `switch`, `help`, `quit`
 
 ### Call history view
 
@@ -464,10 +510,13 @@ cat ~/.config/ringo/profiles/<name>/call_history | jq .
 
 Contributions are welcome. Please open an issue before submitting large changes so we can discuss the approach first.
 
+The repo is a cargo workspace (`crates/ringo-core` — the baresip engine —
+and `crates/ringo-phone` — the TUI softphone):
+
 ```sh
-cargo build       # build
-cargo test        # run tests
-cargo clippy      # lint
+cargo build --workspace   # build all crates
+cargo test --workspace    # run all tests
+cargo clippy --workspace  # lint
 ```
 
 ## License

@@ -8,21 +8,25 @@ use std::{fs, io};
 
 use crate::profile;
 
-pub fn run(name: Option<String>, notify: bool) -> Result<()> {
+pub fn run(name: Option<String>, notify: bool, headless: bool) -> Result<()> {
+    // Clean up registry entries from sessions that are no longer reachable.
+    crate::control::reap_stale();
+
     let mut current = match name {
         Some(n) => n,
+        None if headless => bail!("--headless requires a profile name"),
         None => pick_profile(None)?,
     };
 
     loop {
-        match run_one(&current, notify)? {
+        match run_one(&current, notify, headless)? {
             Some(next) => current = next,
             None => return Ok(()),
         }
     }
 }
 
-fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
+fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     crate::log::init(name);
 
     let dir = profile::profile_dir(name)?;
@@ -31,11 +35,18 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
     }
 
     let prof = profile::load(name)?;
-    let instance = crate::baresip::Instance::spawn(name, &prof)?;
+    let config = crate::config::load();
+
+    let account = account_from(&prof);
+    let options = baresip_options(&config.baresip);
+    let instance = crate::baresip::Instance::spawn(name, &account, &options)?;
+
+    // The control socket is bound and registered inside the session setup,
+    // *after* the socket is connectable — see `tui::setup`.
+    let control_socket = crate::control::socket_path(name)?;
 
     let contacts = crate::contacts::load();
 
-    let config = crate::config::load();
     crate::hooks::run(
         &config.hooks,
         crate::config::HookEvent::ProfileLoaded,
@@ -45,20 +56,63 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
     );
     let theme = config.theme;
     let hooks = config.hooks;
-    crate::tui::run(
-        name.to_string(),
-        prof.aor(),
-        instance.port,
-        Some(instance.log_path.clone()),
-        Some(dir.join("call_history")),
-        notify && prof.notify,
-        prof.regint,
-        prof.custom_headers.clone(),
+    let params = crate::tui::SessionParams {
+        profile_name: name.to_string(),
+        account_aor: prof.aor(),
+        port: instance.port,
+        control_socket,
+        baresip_log_path: Some(instance.log_path.clone()),
+        call_history_path: Some(dir.join("call_history")),
+        notify: notify && prof.notify,
+        regint: prof.regint,
+        custom_headers: prof.custom_headers.clone(),
         theme,
         hooks,
-        prof,
+        profile: prof,
         contacts,
-    )
+    };
+
+    if headless {
+        crate::tui::run_headless(params)?;
+        Ok(None)
+    } else {
+        crate::tui::run(params)
+    }
+}
+
+/// Map a ringo profile to the backend-neutral account the engine registers.
+fn account_from(p: &profile::Profile) -> crate::baresip::Account {
+    crate::baresip::Account {
+        username: p.username.clone(),
+        domain: p.domain.clone(),
+        password: p.password.clone(),
+        display_name: p.display_name.clone(),
+        transport: p.transport.clone(),
+        auth_user: p.auth_user.clone(),
+        outbound: p.outbound.clone(),
+        stun_server: p.stun_server.clone(),
+        media_enc: p.media_enc.clone(),
+        regint: p.regint,
+        mwi: p.mwi,
+    }
+}
+
+/// Map ringo's `[baresip]` config section to the engine's backend options.
+fn baresip_options(c: &crate::config::BaresipConfig) -> crate::baresip::BaresipOptions {
+    crate::baresip::BaresipOptions {
+        module_path: c.module_path.clone(),
+        audio_driver: c.audio_driver.clone(),
+        audio_player_device: c.audio_player_device.clone(),
+        audio_source_device: c.audio_source_device.clone(),
+        audio_alert_device: c.audio_alert_device.clone(),
+        sip_cafile: c.sip_cafile.clone(),
+        sip_capath: c.sip_capath.clone(),
+        extra: c
+            .extra
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    }
 }
 
 /// Open the interactive profile picker; loops until a profile is selected to start.

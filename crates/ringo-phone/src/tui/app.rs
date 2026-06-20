@@ -37,6 +37,18 @@ pub struct Call {
     pub started_at: Option<Instant>,
 }
 
+/// A snapshot of the most recently closed call, retained after it leaves
+/// `calls` so a status poller can see how (and why) the last call ended.
+#[derive(Debug, Clone)]
+pub struct LastCall {
+    pub peer: String,
+    pub direction: String, // "outgoing" | "incoming"
+    pub reason: String,
+    pub error: bool,
+    pub duration_secs: u64,
+    pub answered: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputMode {
     Normal,        // Default — single keys are shortcuts
@@ -195,6 +207,9 @@ pub struct App {
     pub call_history: CallHistoryState,
     pub log: LogState,
     pub last_call_reason: Option<String>,
+    /// Richer snapshot of the last closed call, exposed via the remote `status`
+    /// command (set for every close, not just errors).
+    pub last_call: Option<LastCall>,
     pub command: CommandState,
     pub(crate) phone: Box<dyn Phone>,
     pub quit: bool,
@@ -274,6 +289,7 @@ impl App {
                 visible_height: 0,
             },
             last_call_reason: None,
+            last_call: None,
             command: CommandState {
                 active: false,
                 input: String::new(),

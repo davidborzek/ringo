@@ -89,6 +89,7 @@ impl super::app::App {
     }
 
     pub(super) fn handle_call_closed(&mut self, call_id: String, reason: String, error: bool) {
+        let mut closed: Option<super::app::LastCall> = None;
         if let Some(call) = self.calls.iter().find(|c| c.id == call_id) {
             if call.direction == CallDirection::Incoming && call.started_at.is_none() {
                 self.notify("Missed call", &call.peer.clone());
@@ -98,6 +99,14 @@ impl super::app::App {
                 CallDirection::Incoming => "incoming",
             };
             let duration_secs = call.started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0);
+            closed = Some(super::app::LastCall {
+                peer: call.peer.clone(),
+                direction: direction.to_string(),
+                reason: reason.clone(),
+                error,
+                duration_secs,
+                answered: call.started_at.is_some(),
+            });
             crate::hooks::run(
                 &self.hooks,
                 crate::config::HookEvent::CallEnded,
@@ -121,6 +130,9 @@ impl super::app::App {
             if let Some(entry) = log_entry {
                 self.push_log(entry);
             }
+        }
+        if let Some(lc) = closed {
+            self.last_call = Some(lc);
         }
         if error {
             self.last_call_reason = Some(reason);
