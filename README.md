@@ -65,7 +65,7 @@ cargo install ringo-phone
 **From GitHub (no clone needed):**
 
 ```sh
-cargo install --git https://github.com/davidborzek/ringo
+cargo install --git https://github.com/davidborzek/ringo ringo-phone
 ```
 
 **Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are available on the
@@ -74,7 +74,7 @@ cargo install --git https://github.com/davidborzek/ringo
 **From source:**
 
 ```sh
-cargo install --path . --root ~/.local
+cargo install --path crates/ringo --root ~/.local
 ```
 
 Or build and install system-wide:
@@ -510,10 +510,13 @@ cat ~/.config/ringo/profiles/<name>/call_history | jq .
 
 Contributions are welcome. Please open an issue before submitting large changes so we can discuss the approach first.
 
+The repo is a cargo workspace (`crates/ringo-core` — the baresip engine —
+and `crates/ringo` — the TUI softphone):
+
 ```sh
-cargo build       # build
-cargo test        # run tests
-cargo clippy      # lint
+cargo build --workspace   # build all crates
+cargo test --workspace    # run all tests
+cargo clippy --workspace  # lint
 ```
 
 ## License
