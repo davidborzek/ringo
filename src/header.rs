@@ -61,7 +61,7 @@ fn expand(s: &str, mut sub: impl FnMut(&str) -> Option<String>) -> String {
                     let name = &stripped[..end];
                     match sub(name) {
                         Some(value) => out.push_str(&value),
-                        None => out.push_str(&rest[..idx + 2 + end + 1]),
+                        None => out.push_str(&rest[idx..idx + 2 + end + 1]),
                     }
                     rest = &stripped[end + 1..];
                 }
@@ -162,6 +162,17 @@ mod tests {
     fn render_does_not_match_token_prefix() {
         let ctx = HeaderContext { uuid: "X".into() };
         assert_eq!(HeaderTemplate::new("${uuid2}").render(&ctx), "${uuid2}");
+    }
+
+    #[test]
+    fn render_keeps_prefix_before_unknown_placeholder() {
+        let ctx = HeaderContext { uuid: "X".into() };
+        // The text before an unknown `${...}` must not be duplicated.
+        assert_eq!(HeaderTemplate::new("x-${trace}").render(&ctx), "x-${trace}");
+        assert_eq!(
+            HeaderTemplate::new("a${uuid}b-${trace}").render(&ctx),
+            "aXb-${trace}"
+        );
     }
 
     #[test]
