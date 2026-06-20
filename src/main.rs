@@ -5,6 +5,7 @@ mod config;
 mod contacts;
 mod event;
 mod form;
+mod header;
 mod history;
 mod hooks;
 mod log;

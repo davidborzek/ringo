@@ -1,4 +1,7 @@
-use crate::{config::Hook, config::Theme, contacts::Contact, phone::Phone, profile::Profile};
+use crate::{
+    config::Hook, config::Theme, contacts::Contact, header::HeaderContext, header::HeaderTemplate,
+    phone::Phone, profile::Profile,
+};
 use std::{collections::VecDeque, path::PathBuf, time::Instant};
 
 // ─── State types ──────────────────────────────────────────────────────────────
@@ -204,6 +207,10 @@ pub struct App {
     pub profile: Profile,
     pub contacts: Vec<Contact>,
     pub contacts_state: ContactsState,
+    /// Custom SIP headers configured for the active profile. Dynamic
+    /// templates (e.g. containing `$uuid`) are re-rendered per call by
+    /// [`Self::dial`].
+    pub custom_headers: Vec<(String, HeaderTemplate)>,
 }
 
 impl App {
@@ -218,6 +225,7 @@ impl App {
         hooks: Vec<Hook>,
         profile: Profile,
         contacts: Vec<Contact>,
+        custom_headers: Vec<(String, HeaderTemplate)>,
     ) -> Self {
         Self {
             profile_name,
@@ -294,6 +302,39 @@ impl App {
                     cursor: 0,
                 },
             },
+            custom_headers,
+        }
+    }
+
+    /// Place an outbound call, re-rendering dynamic custom headers so each
+    /// call gets fresh placeholder values.
+    pub fn dial(&mut self, target: &str) {
+        self.refresh_dynamic_headers();
+        self.phone.dial(target);
+    }
+
+    fn refresh_dynamic_headers(&self) {
+        use std::collections::HashSet;
+
+        let ctx = HeaderContext::for_call();
+        // `uarmheader` removes *all* headers with a given name, so once any
+        // template for a key is dynamic we must re-add every header for that
+        // key — including static ones (e.g. duplicate History-Info entries) —
+        // or the statics added at startup would be lost after the first dial.
+        let dynamic_keys: HashSet<&str> = self
+            .custom_headers
+            .iter()
+            .filter(|(_, tpl)| tpl.is_dynamic())
+            .map(|(key, _)| key.as_str())
+            .collect();
+
+        for key in &dynamic_keys {
+            self.phone.rm_header(key);
+        }
+        for (key, tpl) in &self.custom_headers {
+            if dynamic_keys.contains(key.as_str()) {
+                self.phone.add_header(key, &tpl.render(&ctx));
+            }
         }
     }
 
@@ -319,5 +360,97 @@ impl App {
                 self.log.baresip_lines = content.lines().map(|l| l.to_string()).collect();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::phone::Phone;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct RecordingPhone {
+        log: Arc<Mutex<Vec<String>>>,
+    }
+    impl Phone for RecordingPhone {
+        fn register(&self, _: &str, _: u32) {}
+        fn dial(&self, _: &str) {}
+        fn hangup(&self) {}
+        fn hangup_all(&self) {}
+        fn accept(&self) {}
+        fn hold(&self) {}
+        fn resume(&self) {}
+        fn mute(&self) {}
+        fn send_dtmf(&self, _: char) {}
+        fn switch_line(&self, _: usize) {}
+        fn transfer(&self, _: &str) {}
+        fn attended_transfer_start(&self, _: &str) {}
+        fn attended_transfer_exec(&self) {}
+        fn attended_transfer_abort(&self) {}
+        fn add_header(&self, key: &str, value: &str) {
+            self.log.lock().unwrap().push(format!("add {key}={value}"));
+        }
+        fn rm_header(&self, key: &str) {
+            self.log.lock().unwrap().push(format!("rm {key}"));
+        }
+    }
+
+    fn app_with_headers(headers: Vec<(&str, &str)>, phone: RecordingPhone) -> App {
+        App::new(
+            "test".into(),
+            "sip:test@example.com".into(),
+            None,
+            None,
+            false,
+            Box::new(phone),
+            Theme::default(),
+            Vec::new(),
+            Profile::default(),
+            Vec::new(),
+            headers
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), HeaderTemplate::new(v)))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn refresh_re_adds_static_headers_sharing_a_dynamic_key() {
+        let phone = RecordingPhone::default();
+        let app = app_with_headers(
+            vec![
+                ("History-Info", "<sip:1@example.com>;index=1"),
+                ("History-Info", "call-${uuid}"),
+                ("X-Static", "keep-me"),
+            ],
+            phone.clone(),
+        );
+
+        app.refresh_dynamic_headers();
+
+        let log = phone.log.lock().unwrap().clone();
+        assert_eq!(
+            log,
+            vec![
+                "rm History-Info".to_string(),
+                "add History-Info=<sip:1@example.com>;index=1".to_string(),
+                // dynamic value is a fresh UUID; assert only that it was re-added
+                log[2].clone(),
+            ]
+        );
+        assert!(log[2].starts_with("add History-Info=call-"));
+        // A key with no dynamic template is left untouched (added once at startup).
+        assert!(!log.iter().any(|l| l.contains("X-Static")));
+    }
+
+    #[test]
+    fn refresh_ignores_keys_without_dynamic_templates() {
+        let phone = RecordingPhone::default();
+        let app = app_with_headers(vec![("X-Static", "keep-me")], phone.clone());
+
+        app.refresh_dynamic_headers();
+
+        assert!(phone.log.lock().unwrap().is_empty());
     }
 }

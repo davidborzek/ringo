@@ -372,10 +372,14 @@ mwi          = true                   # message waiting indicator (default: true
 # Order is preserved; duplicate keys are allowed (e.g. RFC 4244 History-Info).
 # Values are percent-encoded for the `uaaddheader` baresip command —
 # write them as plain text, no manual %-escaping needed.
+#
+# Placeholders are substituted per outgoing call:
+#   ${uuid}  →  a fresh UUIDv4, shared across all headers in the same INVITE
+# Use $$ for a literal `$` (so a literal `${uuid}` is written `$${uuid}`).
 custom_headers = [
   ["History-Info", "<sip:1@example.com>;index=1"],
   ["History-Info", "<sip:2@example.com>;index=1.1"],
-  ["X-Trace-Id",   "abc-123"],
+  ["X-Trace-Id",   "call-${uuid}"],
 ]
 ```
 
