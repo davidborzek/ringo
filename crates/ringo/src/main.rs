@@ -1,17 +1,17 @@
+// Shared backend/protocol/engine from `ringo-core`, re-exported at the crate
+// root so `crate::client`, `crate::baresip`, `crate::rlog!` etc. keep working.
+pub use ringo_core::rlog;
+pub use ringo_core::{baresip, client, event, log, phone};
+
 mod app;
-mod baresip;
-mod client;
 mod config;
 mod contacts;
 mod control;
-mod event;
 mod form;
 mod header;
 mod history;
 mod hooks;
-mod log;
 mod notify;
-mod phone;
 mod picker;
 mod profile;
 mod tui;

@@ -1,0 +1,18 @@
+[package]
+name = "ringo-core"
+version = "0.8.0"
+edition = "2024"
+license = "MIT"
+description = "Shared baresip backend, ctrl_tcp protocol and call engine for the ringo tools"
+rust-version = "1.85"
+
+[lib]
+name = "ringo_core"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tera = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }

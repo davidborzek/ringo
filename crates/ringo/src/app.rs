@@ -35,7 +35,11 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     }
 
     let prof = profile::load(name)?;
-    let instance = crate::baresip::Instance::spawn(name, &prof)?;
+    let config = crate::config::load();
+
+    let account = account_from(&prof);
+    let options = baresip_options(&config.baresip);
+    let instance = crate::baresip::Instance::spawn(name, &account, &options)?;
 
     // Expose this session for remote control via `ringo control …`. The guard
     // removes the registry entry and socket when this session ends.
@@ -47,7 +51,6 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
 
     let contacts = crate::contacts::load();
 
-    let config = crate::config::load();
     crate::hooks::run(
         &config.hooks,
         crate::config::HookEvent::ProfileLoaded,
@@ -78,6 +81,41 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
         Ok(None)
     } else {
         crate::tui::run(params)
+    }
+}
+
+/// Map a ringo profile to the backend-neutral account the engine registers.
+fn account_from(p: &profile::Profile) -> crate::baresip::Account {
+    crate::baresip::Account {
+        username: p.username.clone(),
+        domain: p.domain.clone(),
+        password: p.password.clone(),
+        display_name: p.display_name.clone(),
+        transport: p.transport.clone(),
+        auth_user: p.auth_user.clone(),
+        outbound: p.outbound.clone(),
+        stun_server: p.stun_server.clone(),
+        media_enc: p.media_enc.clone(),
+        regint: p.regint,
+        mwi: p.mwi,
+    }
+}
+
+/// Map ringo's `[baresip]` config section to the engine's backend options.
+fn baresip_options(c: &crate::config::BaresipConfig) -> crate::baresip::BaresipOptions {
+    crate::baresip::BaresipOptions {
+        module_path: c.module_path.clone(),
+        audio_driver: c.audio_driver.clone(),
+        audio_player_device: c.audio_player_device.clone(),
+        audio_source_device: c.audio_source_device.clone(),
+        audio_alert_device: c.audio_alert_device.clone(),
+        sip_cafile: c.sip_cafile.clone(),
+        sip_capath: c.sip_capath.clone(),
+        extra: c
+            .extra
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
     }
 }
 
