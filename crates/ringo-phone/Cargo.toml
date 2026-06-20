@@ -1,14 +1,14 @@
 [package]
 name = "ringo-phone"
-version = "0.8.0"
-edition = "2024"
 description = "A terminal SIP softphone built on baresip"
-license = "MIT"
-authors = ["David Borzek <mail@davidborzek.de>"]
-repository = "https://github.com/davidborzek/ringo"
 keywords = ["sip", "voip", "baresip", "tui", "phone"]
 categories = ["command-line-utilities"]
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 
 [lib]
 name = "ringo"
@@ -19,7 +19,7 @@ name = "ringo"
 path = "src/main.rs"
 
 [dependencies]
-ringo-core = { path = "../ringo-core", version = "0.8.0" }
+ringo-core.workspace = true
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
 serde = { version = "1", features = ["derive"] }

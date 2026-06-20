@@ -1,10 +1,12 @@
 [package]
 name = "ringo-core"
-version = "0.8.0"
-edition = "2024"
-license = "MIT"
 description = "Shared baresip backend, ctrl_tcp protocol and call engine for the ringo tools"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 
 [lib]
 name = "ringo_core"
