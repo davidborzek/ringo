@@ -126,7 +126,20 @@ ringo control -t work status        # registration + active calls
 `<target>` is a profile name or a PID. Use the PID (shown in `ringo control list`)
 when a profile name is awkward to type or when the same profile runs more than
 once. Commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`,
-`dtmf <digits>`, `transfer <uri>`, `status`. `ctl` is an alias for `control`.
+`dtmf <digits>`, `transfer <uri>`, `status`, `shutdown`. `ctl` is an alias for
+`control`.
+
+#### Headless sessions
+
+For scripting and automated testing, run a session without the TUI — it still
+binds the control socket and registers, so you drive it entirely via
+`ringo control`:
+
+```sh
+ringo start --headless work &        # no terminal needed; runs in the background
+ringo control -t work status         # ...drive it...
+ringo control -t work shutdown       # stop it cleanly (or Ctrl-C the process)
+```
 
 Add `--json` (`-j`) for machine-readable output — `list` emits an array of
 sessions, `status` a structured object (registration, active `calls`, and the

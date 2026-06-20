@@ -8,24 +8,25 @@ use std::{fs, io};
 
 use crate::profile;
 
-pub fn run(name: Option<String>, notify: bool) -> Result<()> {
+pub fn run(name: Option<String>, notify: bool, headless: bool) -> Result<()> {
     // Clean up registry entries from sessions that are no longer reachable.
     crate::control::reap_stale();
 
     let mut current = match name {
         Some(n) => n,
+        None if headless => bail!("--headless requires a profile name"),
         None => pick_profile(None)?,
     };
 
     loop {
-        match run_one(&current, notify)? {
+        match run_one(&current, notify, headless)? {
             Some(next) => current = next,
             None => return Ok(()),
         }
     }
 }
 
-fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
+fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     crate::log::init(name);
 
     let dir = profile::profile_dir(name)?;
@@ -56,21 +57,28 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
     );
     let theme = config.theme;
     let hooks = config.hooks;
-    crate::tui::run(
-        name.to_string(),
-        prof.aor(),
-        instance.port,
+    let params = crate::tui::SessionParams {
+        profile_name: name.to_string(),
+        account_aor: prof.aor(),
+        port: instance.port,
         control_socket,
-        Some(instance.log_path.clone()),
-        Some(dir.join("call_history")),
-        notify && prof.notify,
-        prof.regint,
-        prof.custom_headers.clone(),
+        baresip_log_path: Some(instance.log_path.clone()),
+        call_history_path: Some(dir.join("call_history")),
+        notify: notify && prof.notify,
+        regint: prof.regint,
+        custom_headers: prof.custom_headers.clone(),
         theme,
         hooks,
-        prof,
+        profile: prof,
         contacts,
-    )
+    };
+
+    if headless {
+        crate::tui::run_headless(params)?;
+        Ok(None)
+    } else {
+        crate::tui::run(params)
+    }
 }
 
 /// Open the interactive profile picker; loops until a profile is selected to start.

@@ -419,3 +419,22 @@ fn status_exposes_last_call_after_close() {
     assert_eq!(lc["error"], true);
     assert_eq!(lc["answered"], true);
 }
+
+#[test]
+fn shutdown_hangs_up_and_sets_quit() {
+    let (mut app, mut cmd_rx) = test_app();
+    app.handle_message(evt(
+        "CALL_INCOMING",
+        "",
+        json!({"id": "1", "peeruri": "sip:a@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+
+    assert!(app.dispatch("shutdown", "").is_ok());
+    assert!(app.quit);
+
+    let cmds: Vec<String> = std::iter::from_fn(|| cmd_rx.try_recv().ok())
+        .map(|(c, _)| c)
+        .collect();
+    assert!(cmds.contains(&"hangupall".to_string()));
+}

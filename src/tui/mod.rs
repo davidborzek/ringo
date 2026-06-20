@@ -87,21 +87,34 @@ async fn run_baresip_io(
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
-pub fn run(
-    profile_name: String,
-    account_aor: String,
-    port: u16,
-    control_socket: PathBuf,
-    baresip_log_path: Option<PathBuf>,
-    call_history_path: Option<PathBuf>,
-    notify: bool,
-    regint: Option<u32>,
-    custom_headers: Vec<(String, String)>,
-    theme: crate::config::Theme,
-    hooks: Vec<crate::config::Hook>,
-    profile: crate::profile::Profile,
-    contacts: Vec<crate::contacts::Contact>,
-) -> Result<Option<String>> {
+/// Parameters shared by [`run`] and [`run_headless`] to build a session.
+pub struct SessionParams {
+    pub profile_name: String,
+    pub account_aor: String,
+    pub port: u16,
+    pub control_socket: PathBuf,
+    pub baresip_log_path: Option<PathBuf>,
+    pub call_history_path: Option<PathBuf>,
+    pub notify: bool,
+    pub regint: Option<u32>,
+    pub custom_headers: Vec<(String, String)>,
+    pub theme: crate::config::Theme,
+    pub hooks: Vec<crate::config::Hook>,
+    pub profile: crate::profile::Profile,
+    pub contacts: Vec<crate::contacts::Contact>,
+}
+
+/// Build the tokio runtime, spawn the baresip I/O + control-socket tasks, and
+/// construct the [`App`] with registration + static headers already issued.
+/// Shared by the TUI and headless entry points.
+fn setup(
+    p: SessionParams,
+) -> Result<(
+    tokio::runtime::Runtime,
+    App,
+    mpsc::Receiver<AppEvent>,
+    mpsc::Receiver<crate::control::RemoteRequest>,
+)> {
     let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
     let (cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(32);
     let (remote_tx, remote_rx) = mpsc::channel::<crate::control::RemoteRequest>();
@@ -113,43 +126,35 @@ pub fn run(
     let phone = BaresipPhone::new(cmd_tx);
 
     rt.spawn(run_baresip_io(
-        port,
+        p.port,
         Duration::from_secs(10),
-        baresip_log_path.clone(),
-        msg_tx.clone(),
+        p.baresip_log_path.clone(),
+        msg_tx,
         cmd_rx,
     ));
 
     // Accept remote-control commands on the per-session Unix socket.
-    rt.spawn(crate::control::serve(control_socket, remote_tx));
+    rt.spawn(crate::control::serve(p.control_socket, remote_tx));
 
-    // Set up terminal
-    crossterm::terminal::enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
-
-    let mut app = App::new(
-        profile_name,
-        account_aor,
-        baresip_log_path,
-        call_history_path,
-        notify,
+    let app = App::new(
+        p.profile_name,
+        p.account_aor,
+        p.baresip_log_path,
+        p.call_history_path,
+        p.notify,
         Box::new(phone),
-        theme,
-        hooks,
-        profile,
-        contacts,
-        custom_headers
+        p.theme,
+        p.hooks,
+        p.profile,
+        p.contacts,
+        p.custom_headers
             .into_iter()
             .map(|(k, v)| (k, crate::header::HeaderTemplate::new(v)))
             .collect(),
     );
 
     let aor = app.account_aor.clone();
-    app.phone.register(&aor, regint.unwrap_or(3600));
+    app.phone.register(&aor, p.regint.unwrap_or(3600));
 
     // Add only static headers at startup. Dynamic templates (e.g. `$uuid`)
     // are re-added per call by App::dial so each call gets a fresh value.
@@ -158,6 +163,20 @@ pub fn run(
             app.phone.add_header(key, tpl.raw());
         }
     }
+
+    Ok((rt, app, msg_rx, remote_rx))
+}
+
+pub fn run(params: SessionParams) -> Result<Option<String>> {
+    let (rt, mut app, msg_rx, remote_rx) = setup(params)?;
+
+    // Set up terminal
+    crossterm::terminal::enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
 
     let mut do_restart = false;
     loop {
@@ -224,6 +243,59 @@ pub fn run(
     }
 
     Ok(None)
+}
+
+/// Run a session without a TUI: process baresip events and remote-control
+/// commands until a remote `shutdown` (sets `app.quit`) or Ctrl-C. Intended for
+/// automated/headless telephony testing driven via `ringo control`.
+pub fn run_headless(params: SessionParams) -> Result<()> {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let profile_name = params.profile_name.clone();
+    let (rt, mut app, msg_rx, remote_rx) = setup(params)?;
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_signal = stop.clone();
+    rt.spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            stop_signal.store(true, Ordering::SeqCst);
+        }
+    });
+
+    println!(
+        "ringo headless: profile '{}' (pid {}) — drive via `ringo control -t {} …`, Ctrl-C to stop",
+        profile_name,
+        std::process::id(),
+        profile_name
+    );
+
+    loop {
+        while let Ok(event) = msg_rx.try_recv() {
+            app.handle_message(event);
+        }
+        while let Ok(req) = remote_rx.try_recv() {
+            let resp = match app.dispatch(&req.command, &req.params) {
+                Ok(data) => crate::control::ControlResponse::ok(data),
+                Err(e) => crate::control::ControlResponse::err(e),
+            };
+            let _ = req.reply.send(resp);
+        }
+        // `app.quit` is set by the remote `shutdown` command.
+        if app.quit || stop.load(Ordering::SeqCst) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+
+    // Hang up active calls, then give the I/O tasks a brief moment to flush —
+    // the BYE to baresip and the `shutdown` ack back to the client — before the
+    // runtime is torn down.
+    app.phone.hangup_all();
+    std::thread::sleep(Duration::from_millis(150));
+    rt.shutdown_background();
+    println!("ringo headless: stopped");
+    Ok(())
 }
 
 // ─── Contacts editor ─────────────────────────────────────────────────────────
@@ -306,6 +378,10 @@ fn render_loop(
                 Err(e) => crate::control::ControlResponse::err(e),
             };
             let _ = req.reply.send(resp);
+        }
+        // A remote `shutdown` sets `app.quit` outside the key handler.
+        if app.quit {
+            break;
         }
     }
     Ok(())

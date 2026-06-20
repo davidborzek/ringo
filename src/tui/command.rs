@@ -186,6 +186,12 @@ impl App {
                 Ok(format!("Sent DTMF {}", digits.iter().collect::<String>()))
             }
             "status" => Ok(self.status_json()),
+            "shutdown" => {
+                // Hang up everything and signal the session loop to exit.
+                self.phone.hangup_all();
+                self.quit = true;
+                Ok("Shutting down".into())
+            }
             _ => Err(format!("Unknown command: {cmd}")),
         }
     }

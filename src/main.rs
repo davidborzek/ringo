@@ -48,7 +48,8 @@ fn target_candidates() -> Vec<CompletionCandidate> {
 /// Completion candidates for the `control` command name.
 fn control_command_candidates() -> Vec<CompletionCandidate> {
     [
-        "dial", "hangup", "accept", "hold", "resume", "mute", "dtmf", "transfer", "status", "list",
+        "dial", "hangup", "accept", "hold", "resume", "mute", "dtmf", "transfer", "status",
+        "shutdown", "list",
     ]
     .iter()
     .map(|c| CompletionCandidate::new(*c))
@@ -78,6 +79,9 @@ enum Commands {
         /// Disable desktop notifications
         #[arg(long)]
         no_notify: bool,
+        /// Run without the TUI; drive the session via `ringo control`
+        #[arg(long)]
+        headless: bool,
     },
 
     /// List all profiles
@@ -131,8 +135,13 @@ fn main() -> Result<()> {
     match cli.command.unwrap_or(Commands::Start {
         profile: None,
         no_notify: false,
+        headless: false,
     }) {
-        Commands::Start { profile, no_notify } => app::run(profile, !no_notify)?,
+        Commands::Start {
+            profile,
+            no_notify,
+            headless,
+        } => app::run(profile, !no_notify, headless)?,
         Commands::List {
             plain,
             format,
