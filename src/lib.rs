@@ -3,6 +3,7 @@ pub mod baresip;
 pub mod client;
 pub mod config;
 pub mod contacts;
+pub mod control;
 pub mod event;
 pub mod form;
 pub mod header;

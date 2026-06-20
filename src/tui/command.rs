@@ -3,8 +3,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use super::app::App;
 
 pub const COMMANDS: &[&str] = &[
-    "accept", "contacts", "dial", "edit", "events", "hangup", "help", "history", "hold", "log",
-    "mute", "quit", "resume", "switch", "transfer", "xfer",
+    "accept", "contacts", "dial", "dtmf", "edit", "events", "hangup", "help", "history", "hold",
+    "log", "mute", "quit", "resume", "switch", "transfer", "xfer",
 ];
 
 impl App {
@@ -25,69 +25,6 @@ impl App {
             "q" | "quit" => {
                 self.phone.hangup_all();
                 self.quit = true;
-            }
-            "d" | "dial" => {
-                if arg.is_empty() {
-                    self.command.error = Some("Usage: dial <number>".into());
-                } else {
-                    self.phone.dial(arg);
-                    crate::history::push(&mut self.dial.history, arg.to_string());
-                }
-            }
-            "hangup" => {
-                if self.has_any_call() {
-                    self.phone.hangup();
-                } else {
-                    self.command.error = Some("No active call".into());
-                }
-            }
-            "a" | "accept" => {
-                if self.has_incoming_ringing() {
-                    self.phone.accept();
-                } else {
-                    self.command.error = Some("No incoming call".into());
-                }
-            }
-            "hold" => {
-                if self.in_active_call() {
-                    self.phone.hold();
-                    let idx = self.selected_call;
-                    if let Some(c) = self.calls.get_mut(idx) {
-                        c.state = super::app::CallState::OnHold;
-                    }
-                } else {
-                    self.command.error = Some("No active call".into());
-                }
-            }
-            "resume" => {
-                if self.selected_call_on_hold() {
-                    self.phone.resume();
-                    let idx = self.selected_call;
-                    if let Some(c) = self.calls.get_mut(idx) {
-                        c.state = super::app::CallState::Established;
-                    }
-                } else {
-                    self.command.error = Some("No call on hold".into());
-                }
-            }
-            "mute" => {
-                if self.in_active_call() {
-                    self.muted = !self.muted;
-                    self.phone.mute();
-                } else {
-                    self.command.error = Some("No active call".into());
-                }
-            }
-            "xfer" | "transfer" => {
-                if arg.is_empty() {
-                    self.command.error = Some("Usage: transfer <uri>".into());
-                } else if self.in_active_call() {
-                    let aor = self.account_aor.clone();
-                    let uri = normalize_sip_uri(arg, &aor);
-                    self.phone.transfer(&uri);
-                } else {
-                    self.command.error = Some("No active call".into());
-                }
             }
             "events" | "e" => {
                 self.log.show = !self.log.show;
@@ -141,16 +78,149 @@ impl App {
                 self.quit = true;
             }
             "help" | "?" => {
-                self.push_log("Commands: dial <n>, hangup, accept, hold, resume, mute, transfer <uri>, events, log, history, contacts, edit, switch, quit");
+                self.push_log("Commands: dial <n>, hangup, accept, hold, resume, mute, dtmf <digits>, transfer <uri>, events, log, history, contacts, edit, switch, quit");
                 self.log.show = true;
                 self.log.show_baresip = false;
                 self.call_history.show = false;
                 self.log.scroll = 0;
             }
+            // Call-control commands are shared with remote control via `dispatch`.
             _ => {
-                self.command.error = Some(format!("Unknown command: {}", cmd));
+                if let Err(e) = self.dispatch(cmd, arg) {
+                    self.command.error = Some(e);
+                }
             }
         }
+    }
+
+    /// Execute a call-control command. Shared by the command line and by remote
+    /// control (`ringo control …`). Returns a human-readable success message,
+    /// or an error string for the caller to surface.
+    pub fn dispatch(&mut self, cmd: &str, arg: &str) -> Result<String, String> {
+        match cmd {
+            "d" | "dial" => {
+                if arg.is_empty() {
+                    return Err("Usage: dial <number>".into());
+                }
+                // `App::dial` re-renders dynamic custom headers (e.g. `$uuid`).
+                self.dial(arg);
+                crate::history::push(&mut self.dial.history, arg.to_string());
+                Ok(format!("Dialing {arg}"))
+            }
+            "hangup" => {
+                if self.has_any_call() {
+                    self.phone.hangup();
+                    Ok("Hung up".into())
+                } else {
+                    Err("No active call".into())
+                }
+            }
+            "a" | "accept" => {
+                if self.has_incoming_ringing() {
+                    self.phone.accept();
+                    Ok("Accepted".into())
+                } else {
+                    Err("No incoming call".into())
+                }
+            }
+            "hold" => {
+                if self.in_active_call() {
+                    self.phone.hold();
+                    let idx = self.selected_call;
+                    if let Some(c) = self.calls.get_mut(idx) {
+                        c.state = super::app::CallState::OnHold;
+                    }
+                    Ok("On hold".into())
+                } else {
+                    Err("No active call".into())
+                }
+            }
+            "resume" => {
+                if self.selected_call_on_hold() {
+                    self.phone.resume();
+                    let idx = self.selected_call;
+                    if let Some(c) = self.calls.get_mut(idx) {
+                        c.state = super::app::CallState::Established;
+                    }
+                    Ok("Resumed".into())
+                } else {
+                    Err("No call on hold".into())
+                }
+            }
+            "mute" => {
+                if self.in_active_call() {
+                    self.muted = !self.muted;
+                    self.phone.mute();
+                    Ok(if self.muted { "Muted" } else { "Unmuted" }.into())
+                } else {
+                    Err("No active call".into())
+                }
+            }
+            "xfer" | "transfer" => {
+                if arg.is_empty() {
+                    Err("Usage: transfer <uri>".into())
+                } else if self.in_active_call() {
+                    let aor = self.account_aor.clone();
+                    let uri = normalize_sip_uri(arg, &aor);
+                    self.phone.transfer(&uri);
+                    Ok(format!("Transferring to {uri}"))
+                } else {
+                    Err("No active call".into())
+                }
+            }
+            "dtmf" => {
+                if arg.is_empty() {
+                    return Err("Usage: dtmf <digits>".into());
+                }
+                if !self.in_active_call() {
+                    return Err("No active call".into());
+                }
+                // Whitespace is allowed for readability (e.g. "1 2 3#").
+                let digits: Vec<char> = arg.chars().filter(|c| !c.is_whitespace()).collect();
+                if let Some(bad) = digits.iter().find(|c| !is_dtmf_digit(**c)) {
+                    return Err(format!("Invalid DTMF digit: {bad}"));
+                }
+                for c in &digits {
+                    self.send_dtmf(*c);
+                }
+                Ok(format!("Sent DTMF {}", digits.iter().collect::<String>()))
+            }
+            "status" => Ok(self.status_text()),
+            _ => Err(format!("Unknown command: {cmd}")),
+        }
+    }
+
+    /// A plain-text snapshot of registration and active calls, returned for the
+    /// remote `status` command.
+    fn status_text(&self) -> String {
+        use super::app::{CallDirection, CallState, RegStatus};
+        let reg = match &self.reg_status {
+            RegStatus::Unknown => "unknown".to_string(),
+            RegStatus::Registering => "registering".to_string(),
+            RegStatus::Ok => "registered".to_string(),
+            RegStatus::Failed(r) => format!("failed: {r}"),
+        };
+        let mut out = format!(
+            "profile: {}\naccount: {}\nregistration: {}\nmuted: {}\ncalls: {}",
+            self.profile_name,
+            self.account_aor,
+            reg,
+            self.muted,
+            self.calls.len()
+        );
+        for (i, c) in self.calls.iter().enumerate() {
+            let dir = match c.direction {
+                CallDirection::Outgoing => "out",
+                CallDirection::Incoming => "in",
+            };
+            let state = match c.state {
+                CallState::Ringing => "ringing",
+                CallState::Established => "established",
+                CallState::OnHold => "on-hold",
+            };
+            out.push_str(&format!("\n  [{i}] {dir} {} {state}", c.peer));
+        }
+        out
     }
 
     pub fn cycle_completion(&mut self) {
@@ -243,4 +313,9 @@ fn normalize_sip_uri(input: &str, account_aor: &str) -> String {
     } else {
         format!("sip:{}@{}", input, domain)
     }
+}
+
+/// Valid DTMF symbols: digits, `*`, `#`, and the tones A–D (either case).
+fn is_dtmf_digit(c: char) -> bool {
+    c.is_ascii_digit() || matches!(c, '*' | '#' | 'A'..='D' | 'a'..='d')
 }

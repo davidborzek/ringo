@@ -328,3 +328,44 @@ fn attended_pending_esc_aborts_transfer() {
     let (cmd, _) = cmd_rx.try_recv().unwrap();
     assert_eq!(cmd, "atransferabort");
 }
+
+// ─── DTMF dispatch ──────────────────────────────────────────────────────────────
+
+#[test]
+fn dtmf_sends_sndcode_per_digit_during_call() {
+    let (mut app, mut cmd_rx) = test_app();
+    app.handle_message(evt(
+        "CALL_INCOMING",
+        "",
+        json!({"id": "1", "peeruri": "sip:a@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+
+    let res = app.dispatch("dtmf", "1 2#");
+    assert!(res.is_ok(), "{res:?}");
+
+    let sent: Vec<String> = std::iter::from_fn(|| cmd_rx.try_recv().ok())
+        .filter(|(cmd, _)| cmd == "sndcode")
+        .map(|(_, params)| params)
+        .collect();
+    assert_eq!(sent, vec!["1", "2", "#"]);
+}
+
+#[test]
+fn dtmf_without_active_call_errors() {
+    let (mut app, _rx) = test_app();
+    assert_eq!(app.dispatch("dtmf", "123"), Err("No active call".into()));
+}
+
+#[test]
+fn dtmf_rejects_invalid_digit() {
+    let (mut app, _rx) = test_app();
+    app.handle_message(evt(
+        "CALL_INCOMING",
+        "",
+        json!({"id": "1", "peeruri": "sip:a@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    let err = app.dispatch("dtmf", "12x").unwrap_err();
+    assert!(err.contains("Invalid DTMF"), "{err}");
+}

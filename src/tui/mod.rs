@@ -91,6 +91,7 @@ pub fn run(
     profile_name: String,
     account_aor: String,
     port: u16,
+    control_socket: PathBuf,
     baresip_log_path: Option<PathBuf>,
     call_history_path: Option<PathBuf>,
     notify: bool,
@@ -103,6 +104,7 @@ pub fn run(
 ) -> Result<Option<String>> {
     let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
     let (cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(32);
+    let (remote_tx, remote_rx) = mpsc::channel::<crate::control::RemoteRequest>();
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -117,6 +119,9 @@ pub fn run(
         msg_tx.clone(),
         cmd_rx,
     ));
+
+    // Accept remote-control commands on the per-session Unix socket.
+    rt.spawn(crate::control::serve(control_socket, remote_tx));
 
     // Set up terminal
     crossterm::terminal::enable_raw_mode()?;
@@ -156,7 +161,7 @@ pub fn run(
 
     let mut do_restart = false;
     loop {
-        render_loop(&mut terminal, &mut app, &msg_rx)?;
+        render_loop(&mut terminal, &mut app, &msg_rx, &remote_rx)?;
 
         if app.edit_contacts {
             app.edit_contacts = false;
@@ -268,6 +273,7 @@ fn render_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     msg_rx: &mpsc::Receiver<AppEvent>,
+    remote_rx: &mpsc::Receiver<crate::control::RemoteRequest>,
 ) -> Result<()> {
     use std::time::Duration;
     loop {
@@ -290,6 +296,16 @@ fn render_loop(
 
         while let Ok(event) = msg_rx.try_recv() {
             app.handle_message(event);
+        }
+
+        // Dispatch any remote-control commands through the same path as the
+        // command line, replying to the waiting socket connection.
+        while let Ok(req) = remote_rx.try_recv() {
+            let resp = match app.dispatch(&req.command, &req.params) {
+                Ok(data) => crate::control::ControlResponse::ok(data),
+                Err(e) => crate::control::ControlResponse::err(e),
+            };
+            let _ = req.reply.send(resp);
         }
     }
     Ok(())

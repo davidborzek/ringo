@@ -9,6 +9,9 @@ use std::{fs, io};
 use crate::profile;
 
 pub fn run(name: Option<String>, notify: bool) -> Result<()> {
+    // Clean up registry entries from sessions that are no longer reachable.
+    crate::control::reap_stale();
+
     let mut current = match name {
         Some(n) => n,
         None => pick_profile(None)?,
@@ -33,6 +36,14 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
     let prof = profile::load(name)?;
     let instance = crate::baresip::Instance::spawn(name, &prof)?;
 
+    // Expose this session for remote control via `ringo control …`. The guard
+    // removes the registry entry and socket when this session ends.
+    let control_socket = crate::control::socket_path(name)?;
+    let _control_reg = crate::control::register(name, &prof.aor(), &control_socket);
+    if let Err(e) = &_control_reg {
+        crate::rlog!(Warn, "remote control unavailable: {}", e);
+    }
+
     let contacts = crate::contacts::load();
 
     let config = crate::config::load();
@@ -49,6 +60,7 @@ fn run_one(name: &str, notify: bool) -> Result<Option<String>> {
         name.to_string(),
         prof.aor(),
         instance.port,
+        control_socket,
         Some(instance.log_path.clone()),
         Some(dir.join("call_history")),
         notify && prof.notify,

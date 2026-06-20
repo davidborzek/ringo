@@ -107,6 +107,27 @@ ringo list         # list all profiles
 ringo list --plain # one name per line (for scripting)
 ```
 
+### Remote control
+
+Control a running session from another terminal (or a script) over a per-session
+Unix socket:
+
+```sh
+ringo control list                  # list running sessions: PID, profile, account
+ringo control -t <target> <command> [args]
+
+# examples
+ringo control -t work dial 4711     # target by profile name
+ringo control -t 215709 hangup      # target by PID (for awkward names or duplicates)
+ringo control -t work dtmf 123#     # send DTMF tones into the active call
+ringo control -t work status        # registration + active calls
+```
+
+`<target>` is a profile name or a PID. Use the PID (shown in `ringo control list`)
+when a profile name is awkward to type or when the same profile runs more than
+once. Commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`,
+`dtmf <digits>`, `transfer <uri>`, `status`. `ctl` is an alias for `control`.
+
 ## Keybindings
 
 ### Profile picker
@@ -192,7 +213,7 @@ ringo list --plain # one name per line (for scripting)
 | `Esc` | Close |
 | `Backspace` | Delete character / close (when empty) |
 
-Available commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`, `transfer <uri>`, `contacts`, `events`, `log`, `history`, `edit`, `switch`, `help`, `quit`
+Available commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`, `dtmf <digits>`, `transfer <uri>`, `contacts`, `events`, `log`, `history`, `edit`, `switch`, `help`, `quit`
 
 ### Call history view
 
