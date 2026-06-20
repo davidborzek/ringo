@@ -110,13 +110,16 @@ enum Commands {
         #[arg(short = 't', long, add = ArgValueCandidates::new(target_candidates))]
         target: Option<String>,
 
-        /// Command: dial, hangup, accept, hold, resume, mute, transfer, status, list
+        /// Command: dial, hangup, accept, hold, resume, mute, dtmf, transfer, status, list
         #[arg(add = ArgValueCandidates::new(control_command_candidates))]
         command: String,
 
         /// Command arguments (e.g. the number for `dial`, URI for `transfer`)
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
+
+        /// Output as JSON
+        #[arg(short, long)]
+        json: bool,
     },
 }
 
@@ -139,42 +142,116 @@ fn main() -> Result<()> {
             target,
             command,
             args,
-        } => run_control(target, command, args)?,
+            json,
+        } => run_control(target, command, args, json)?,
     }
 
     Ok(())
 }
 
-fn run_control(target: Option<String>, command: String, args: Vec<String>) -> Result<()> {
+fn run_control(
+    target: Option<String>,
+    command: String,
+    args: Vec<String>,
+    json: bool,
+) -> Result<()> {
     // `list` enumerates sessions and needs no target.
     if command == "list" {
         let sessions = control::list_running();
-        if sessions.is_empty() {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&sessions)?);
+        } else if sessions.is_empty() {
             println!("No running ringo sessions.");
         } else {
-            for s in sessions {
+            for s in &sessions {
                 println!("{}\t{}\t{}", s.pid, s.profile, s.aor);
             }
         }
         return Ok(());
     }
 
-    let target = target.ok_or_else(|| {
-        anyhow::anyhow!("Missing target. Use `-t <profile|pid>` (see `ringo control list`).")
-    })?;
-
-    let info = resolve_session(&target)?;
-    let params = args.join(" ");
-    let resp = control::send(&info.socket_path, &command, &params)?;
-    if resp.ok {
-        if !resp.data.is_empty() {
-            println!("{}", resp.data);
+    let target = match target {
+        Some(t) => t,
+        None => {
+            return control_error(
+                json,
+                "Missing target. Use `-t <profile|pid>` (see `ringo control list`).",
+            );
         }
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
+    };
+    let info = match resolve_session(&target) {
+        Ok(i) => i,
+        Err(e) => return control_error(json, &e.to_string()),
+    };
+
+    let resp = control::send(&info.socket_path, &command, &args.join(" "))?;
+
+    if json {
+        // `status` returns a structured object in `data`; everything else a
+        // plain message string. Embed accordingly under a uniform envelope.
+        let data = if command == "status" {
+            serde_json::from_str(&resp.data).unwrap_or_else(|_| serde_json::json!(resp.data))
+        } else {
+            serde_json::json!(resp.data)
+        };
+        let envelope = serde_json::json!({
+            "ok": resp.ok,
+            "data": data,
+            "error": resp.error,
+        });
+        println!("{}", serde_json::to_string_pretty(&envelope)?);
+        if !resp.ok {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
+
+    if !resp.ok {
+        return Err(anyhow::anyhow!(
             resp.error.unwrap_or_else(|| "command failed".into())
-        ))
+        ));
+    }
+    if command == "status" {
+        print_status_text(&resp.data);
+    } else if !resp.data.is_empty() {
+        println!("{}", resp.data);
+    }
+    Ok(())
+}
+
+/// Report a client-side control error, as a JSON envelope on stdout (exit 1) in
+/// JSON mode, or as a plain anyhow error otherwise.
+fn control_error(json: bool, msg: &str) -> Result<()> {
+    if json {
+        let envelope = serde_json::json!({"ok": false, "data": null, "error": msg});
+        println!("{}", serde_json::to_string_pretty(&envelope)?);
+        std::process::exit(1);
+    }
+    Err(anyhow::anyhow!(msg.to_string()))
+}
+
+/// Render the structured `status` payload as human-readable text.
+fn print_status_text(data: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
+        println!("{data}");
+        return;
+    };
+    let str_field = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("");
+    let calls = v.get("calls").and_then(|c| c.as_array());
+    println!("profile: {}", str_field("profile"));
+    println!("account: {}", str_field("account"));
+    println!("registration: {}", str_field("registration"));
+    println!(
+        "muted: {}",
+        v.get("muted").and_then(|x| x.as_bool()).unwrap_or(false)
+    );
+    println!("calls: {}", calls.map(|c| c.len()).unwrap_or(0));
+    for c in calls.into_iter().flatten() {
+        let idx = c.get("index").and_then(|x| x.as_u64()).unwrap_or(0);
+        let dir = c.get("direction").and_then(|x| x.as_str()).unwrap_or("");
+        let peer = c.get("peer").and_then(|x| x.as_str()).unwrap_or("");
+        let state = c.get("state").and_then(|x| x.as_str()).unwrap_or("");
+        println!("  [{idx}] {dir} {peer} {state}");
     }
 }
 

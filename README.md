@@ -128,6 +128,16 @@ when a profile name is awkward to type or when the same profile runs more than
 once. Commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`,
 `dtmf <digits>`, `transfer <uri>`, `status`. `ctl` is an alias for `control`.
 
+Add `--json` (`-j`) for machine-readable output — `list` emits an array of
+sessions, `status` a structured object, and every other command an
+`{ "ok", "data", "error" }` envelope. The exit code reflects success.
+
+```sh
+ringo control list --json
+ringo control -t work status --json
+ringo control -t work dial 4711 --json   # {"ok":true,"data":"Dialing 4711","error":null}
+```
+
 ## Keybindings
 
 ### Profile picker

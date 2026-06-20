@@ -185,42 +185,52 @@ impl App {
                 }
                 Ok(format!("Sent DTMF {}", digits.iter().collect::<String>()))
             }
-            "status" => Ok(self.status_text()),
+            "status" => Ok(self.status_json()),
             _ => Err(format!("Unknown command: {cmd}")),
         }
     }
 
-    /// A plain-text snapshot of registration and active calls, returned for the
-    /// remote `status` command.
-    fn status_text(&self) -> String {
+    /// A structured snapshot of registration and active calls, returned (as a
+    /// compact JSON string) for the remote `status` command. The CLI renders it
+    /// as text or re-emits it as JSON depending on `--json`.
+    fn status_json(&self) -> String {
         use super::app::{CallDirection, CallState, RegStatus};
-        let reg = match &self.reg_status {
+        let registration = match &self.reg_status {
             RegStatus::Unknown => "unknown".to_string(),
             RegStatus::Registering => "registering".to_string(),
             RegStatus::Ok => "registered".to_string(),
             RegStatus::Failed(r) => format!("failed: {r}"),
         };
-        let mut out = format!(
-            "profile: {}\naccount: {}\nregistration: {}\nmuted: {}\ncalls: {}",
-            self.profile_name,
-            self.account_aor,
-            reg,
-            self.muted,
-            self.calls.len()
-        );
-        for (i, c) in self.calls.iter().enumerate() {
-            let dir = match c.direction {
-                CallDirection::Outgoing => "out",
-                CallDirection::Incoming => "in",
-            };
-            let state = match c.state {
-                CallState::Ringing => "ringing",
-                CallState::Established => "established",
-                CallState::OnHold => "on-hold",
-            };
-            out.push_str(&format!("\n  [{i}] {dir} {} {state}", c.peer));
-        }
-        out
+        let calls: Vec<serde_json::Value> = self
+            .calls
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let direction = match c.direction {
+                    CallDirection::Outgoing => "out",
+                    CallDirection::Incoming => "in",
+                };
+                let state = match c.state {
+                    CallState::Ringing => "ringing",
+                    CallState::Established => "established",
+                    CallState::OnHold => "on-hold",
+                };
+                serde_json::json!({
+                    "index": i,
+                    "direction": direction,
+                    "peer": c.peer,
+                    "state": state,
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "profile": self.profile_name,
+            "account": self.account_aor,
+            "registration": registration,
+            "muted": self.muted,
+            "calls": calls,
+        })
+        .to_string()
     }
 
     pub fn cycle_completion(&mut self) {

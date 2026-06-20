@@ -369,3 +369,31 @@ fn dtmf_rejects_invalid_digit() {
     let err = app.dispatch("dtmf", "12x").unwrap_err();
     assert!(err.contains("Invalid DTMF"), "{err}");
 }
+
+// ─── status JSON ─────────────────────────────────────────────────────────────
+
+#[test]
+fn status_returns_structured_json() {
+    let (mut app, _rx) = test_app();
+    app.handle_message(evt(
+        "REGISTER_OK",
+        "",
+        json!({"accountaor": "sip:user@example.com"}),
+    ));
+    app.handle_message(evt(
+        "CALL_INCOMING",
+        "",
+        json!({"id": "1", "peeruri": "sip:a@b"}),
+    ));
+    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+
+    let out = app.dispatch("status", "").unwrap();
+    let v: Value = serde_json::from_str(&out).expect("status must be valid JSON");
+
+    assert_eq!(v["registration"], "registered");
+    assert_eq!(v["muted"], false);
+    let calls = v["calls"].as_array().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["state"], "established");
+    assert_eq!(calls[0]["peer"], "sip:a@b");
+}
