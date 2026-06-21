@@ -8,3 +8,4 @@ pub mod client;
 pub mod event;
 pub mod log;
 pub mod phone;
+pub mod siptrace;

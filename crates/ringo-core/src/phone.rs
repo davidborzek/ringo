@@ -35,6 +35,13 @@ impl BaresipPhone {
             crate::rlog!(Warn, "cmd dropped: {} ({})", cmd, e);
         }
     }
+
+    /// Switch the audio source at runtime (baresip `ausrc <driver,device>`),
+    /// e.g. `ausine,440` to send a tone, `aufile,/path.wav` to play a file, or
+    /// `aubridge,default` to go silent. Applies to the active call.
+    pub fn set_audio_source(&self, spec: &str) {
+        self.send("ausrc", spec);
+    }
 }
 
 impl Phone for BaresipPhone {

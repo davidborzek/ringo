@@ -94,6 +94,7 @@ fn account_from(p: &profile::Profile) -> crate::baresip::Account {
         media_enc: p.media_enc.clone(),
         regint: p.regint,
         mwi: p.mwi,
+        dtmf_mode: None, // ringo-phone uses baresip's default (real, clocked audio device)
     }
 }
 
@@ -112,6 +113,7 @@ fn baresip_options(c: &crate::config::BaresipConfig) -> crate::baresip::BaresipO
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
+        ..Default::default()
     }
 }
 

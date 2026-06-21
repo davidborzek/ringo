@@ -1,0 +1,6 @@
+# Keep the Docker build context small/fast.
+target
+.git
+.github
+**/*.env
+**/.cargo-husky
