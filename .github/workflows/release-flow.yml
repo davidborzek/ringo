@@ -100,13 +100,27 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        id: cliff
+        with:
+          config: cliff.toml
+          # Scope to ringo-flow's own tag series and crate paths (override the
+          # workspace `tag_pattern`); single-quote the glob so the shell doesn't
+          # expand it before git-cliff sees it.
+          args: --latest --strip header --tag-pattern '^ringo-flow-v' --include-path 'crates/ringo-flow/**'
+
       - uses: actions/download-artifact@v4
 
       - uses: softprops/action-gh-release@v2
         with:
           # Mark beta/rc tags (those with a `-` in the version) as pre-releases.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
+          body: ${{ steps.cliff.outputs.content }}
           files: |
             ringo-flow-x86_64-unknown-linux-gnu/ringo-flow-x86_64-unknown-linux-gnu
             ringo-flow-aarch64-unknown-linux-gnu/ringo-flow-aarch64-unknown-linux-gnu
