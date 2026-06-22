@@ -3,14 +3,14 @@
 //! functions. Every verb converts Rhai values and delegates to [`crate::engine`].
 
 use super::convert;
-use super::host::Registry;
+use super::host::{Registry, SkipMarker};
 use super::types::{Agent, Assertion, HttpMock, HttpResponse, MockRequest, PathPattern, Peer};
 use crate::engine::audio::AudioSpec;
 use crate::engine::ctx::{CallState, Ctx};
 use crate::engine::mock_server::{self, PathMatcher, Responder};
-use crate::engine::{assertion, audio, http};
+use crate::engine::{ScenarioInfo, assertion, audio, http};
 use crate::runtime::report::Event;
-use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map, NativeCallContext};
+use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map, NativeCallContext, Position};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -1201,7 +1201,27 @@ fn register_globals(
         ["name: string", "body: Fn", "()"],
         "/// Register a named scenario, run in isolation (fresh agents, torn down\n\
          /// after). The body may take the `setup()` context: `|ctx| { … }`.",
-        move |name: &str, body: FnPtr| r.add_scenario(name.to_string(), body)
+        move |name: &str, body: FnPtr| r.add_scenario(
+            ScenarioInfo {
+                name: name.to_string(),
+                ..Default::default()
+            },
+            body
+        )
+    );
+    let r = registry.clone();
+    reg!(
+        engine,
+        "scenario",
+        ["name: string", "options: map", "body: Fn", "()"],
+        "/// Register a scenario with options `#{ tags: [\"smoke\"], skip: true|\"reason\",\n\
+         /// only: true }`. `--tag`/`--exclude-tag` filter by tag; a skipped scenario is\n\
+         /// reported but not run; if any scenario sets `only`, only those run.",
+        move |name: &str, options: Map, body: FnPtr| -> Result<(), Box<EvalAltResult>> {
+            let info = convert::scenario_info_from_map(name, &options)?;
+            r.add_scenario(info, body);
+            Ok(())
+        }
     );
     let r = registry.clone();
     reg!(
@@ -1219,5 +1239,35 @@ fn register_globals(
         ["body: Fn", "()"],
         "/// Run after each scenario (even on failure); receives the `setup` context.",
         move |body: FnPtr| r.set_teardown(body)
+    );
+
+    // skip([reason]) — abort the current scenario as *skipped* (reported, not
+    // failed). Useful for runtime/env-gated conditions: `if env(...) != ... { skip(...) }`.
+    reg!(
+        engine,
+        "skip",
+        ["reason: string", "()"],
+        "/// Skip the current scenario at runtime with a reason (reported, not failed);\n\
+         /// e.g. `if env(\"STAGE\") != \"prod\" { skip(\"prod only\") }`.",
+        |reason: &str| -> Result<(), Box<EvalAltResult>> {
+            Err(Box::new(EvalAltResult::ErrorRuntime(
+                Dynamic::from(SkipMarker {
+                    reason: Some(reason.to_string()),
+                }),
+                Position::NONE,
+            )))
+        }
+    );
+    reg!(
+        engine,
+        "skip",
+        ["()"],
+        "/// Skip the current scenario at runtime (reported, not failed).",
+        || -> Result<(), Box<EvalAltResult>> {
+            Err(Box::new(EvalAltResult::ErrorRuntime(
+                Dynamic::from(SkipMarker { reason: None }),
+                Position::NONE,
+            )))
+        }
     );
 }

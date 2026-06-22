@@ -76,6 +76,12 @@ enum Commands {
         /// with `re:` for a regex, e.g. `re:^transfer`
         #[arg(long = "scenario", value_name = "PATTERN", add = ArgValueCandidates::new(scenario_candidates))]
         scenario: Option<String>,
+        /// Run only scenarios carrying one of these tags (repeatable; comma-separated)
+        #[arg(long = "tag", value_name = "TAG", value_delimiter = ',')]
+        tag: Vec<String>,
+        /// Skip scenarios carrying any of these tags (repeatable; comma-separated)
+        #[arg(long = "exclude-tag", value_name = "TAG", value_delimiter = ',')]
+        exclude_tag: Vec<String>,
         /// Print each agent's baresip log (SIP signaling) at the end
         #[arg(long)]
         logs: bool,
@@ -159,6 +165,8 @@ fn main() -> Result<()> {
             set,
             env_file,
             scenario,
+            tag,
+            exclude_tag,
             logs,
             save_audio,
             json,
@@ -183,7 +191,12 @@ fn main() -> Result<()> {
                 save_audio,
                 insecure_http,
             };
-            script::run(&paths, output, overrides, scenario, &env_file)
+            let filters = engine::Filters {
+                name: scenario,
+                tags: tag,
+                exclude_tags: exclude_tag,
+            };
+            script::run(&paths, output, overrides, filters, &env_file)
         }
         Commands::Check { file } => script::check(&file),
         Commands::Definitions { out } => script::write_definitions(&out),

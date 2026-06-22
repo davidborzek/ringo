@@ -2,17 +2,25 @@
 //! and knows how to run the top-level pass and a single scenario. The neutral
 //! [`crate::engine::run`] drives it.
 
-use crate::engine::{ScriptHost, TopLevel};
-use rhai::{AST, Dynamic, Engine, FnPtr, Scope};
+use crate::engine::{ScenarioInfo, ScenarioResult, ScriptHost, TopLevel};
+use rhai::{AST, Dynamic, Engine, EvalAltResult, FnPtr, Scope};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
+
+/// Thrown by the `skip(...)` verb to abort a scenario as *skipped* (not failed).
+/// Carried inside a Rhai `ErrorRuntime` so [`run_one`] can tell it apart from a
+/// real error.
+#[derive(Clone)]
+pub(super) struct SkipMarker {
+    pub(super) reason: Option<String>,
+}
 
 /// Scenario/`setup`/`teardown` closures registered during the top-level pass.
 /// Shared (via `Arc`) between the registering Rhai functions and the host.
 #[derive(Default)]
 pub(super) struct Registry {
-    scenarios: Mutex<Vec<(String, FnPtr)>>,
+    scenarios: Mutex<Vec<(ScenarioInfo, FnPtr)>>,
     setup: Mutex<Option<FnPtr>>,
     teardown: Mutex<Option<FnPtr>>,
     // Engine + AST for running closures on worker threads (the `parallel` verb),
@@ -23,8 +31,8 @@ pub(super) struct Registry {
 }
 
 impl Registry {
-    pub(super) fn add_scenario(&self, name: String, body: FnPtr) {
-        self.scenarios.lock().unwrap().push((name, body));
+    pub(super) fn add_scenario(&self, info: ScenarioInfo, body: FnPtr) {
+        self.scenarios.lock().unwrap().push((info, body));
     }
     pub(super) fn set_setup(&self, body: FnPtr) {
         *self.setup.lock().unwrap() = Some(body);
@@ -32,7 +40,7 @@ impl Registry {
     pub(super) fn set_teardown(&self, body: FnPtr) {
         *self.teardown.lock().unwrap() = Some(body);
     }
-    fn take_scenarios(&self) -> Vec<(String, FnPtr)> {
+    fn take_scenarios(&self) -> Vec<(ScenarioInfo, FnPtr)> {
         std::mem::take(&mut self.scenarios.lock().unwrap())
     }
     fn setup_fn(&self) -> Option<FnPtr> {
@@ -58,7 +66,7 @@ pub(super) struct RhaiHost {
     registry: Arc<Registry>,
     overrides: HashMap<String, String>,
     // Cached from the top-level pass, used by `run_scenario`.
-    scenarios: Vec<(String, FnPtr)>,
+    scenarios: Vec<(ScenarioInfo, FnPtr)>,
     setup: Option<FnPtr>,
     teardown: Option<FnPtr>,
 }
@@ -100,15 +108,19 @@ impl ScriptHost for RhaiHost {
             TopLevel::Single(top.map(|_| ()).map_err(|e| e.to_string()))
         } else {
             TopLevel::Suite {
-                names: self.scenarios.iter().map(|(n, _)| n.clone()).collect(),
+                scenarios: self
+                    .scenarios
+                    .iter()
+                    .map(|(info, _)| info.clone())
+                    .collect(),
                 top_error: top.err().map(|e| e.to_string()),
             }
         }
     }
 
-    fn run_scenario(&mut self, name: &str) -> Result<(), String> {
-        let Some((_, body)) = self.scenarios.iter().find(|(n, _)| n == name) else {
-            return Err(format!("scenario `{name}` not registered"));
+    fn run_scenario(&mut self, name: &str) -> ScenarioResult {
+        let Some((_, body)) = self.scenarios.iter().find(|(info, _)| info.name == name) else {
+            return ScenarioResult::Failed(format!("scenario `{name}` not registered"));
         };
         let body = body.clone();
         run_one(&self.engine, &self.ast, &self.setup, &self.teardown, &body)
@@ -116,18 +128,21 @@ impl ScriptHost for RhaiHost {
 }
 
 /// Run one scenario: `setup()` → body → `teardown()` (the latter even on
-/// failure). `setup`'s return value is the `ctx` passed to body/teardown.
+/// failure). `setup`'s return value is the `ctx` passed to body/teardown. A
+/// `skip(...)` thrown in `setup` or the body yields [`ScenarioResult::Skipped`].
 fn run_one(
     engine: &Engine,
     ast: &AST,
     setup: &Option<FnPtr>,
     teardown: &Option<FnPtr>,
     body: &FnPtr,
-) -> Result<(), String> {
+) -> ScenarioResult {
     let ctx = match setup {
-        Some(s) => s
-            .call::<Dynamic>(engine, ast, ())
-            .map_err(|e| format!("setup: {e}"))?,
+        Some(s) => match s.call::<Dynamic>(engine, ast, ()) {
+            Ok(ctx) => ctx,
+            // Skip in setup: nothing was run, so no teardown is needed.
+            Err(e) => return classify_error(&e, "setup"),
+        },
         None => Dynamic::UNIT,
     };
     let result = call_with_ctx(engine, ast, body, ctx.clone());
@@ -135,12 +150,39 @@ fn run_one(
         // Teardown runs regardless; its own error shouldn't mask the body's.
         let _ = call_with_ctx(engine, ast, t, ctx);
     }
-    result
+    match result {
+        Ok(()) => ScenarioResult::Passed,
+        Err(e) => classify_error(&e, ""),
+    }
+}
+
+/// Turn a Rhai error into a [`ScenarioResult`]: a `skip(...)` marker becomes
+/// `Skipped`, anything else `Failed` (prefixed with `where` for context, e.g.
+/// `setup`).
+fn classify_error(e: &EvalAltResult, where_: &str) -> ScenarioResult {
+    // `skip(...)` is thrown inside the body/setup closure, so Rhai wraps it in
+    // `ErrorInFunctionCall`; unwrap to the innermost error before inspecting it.
+    if let EvalAltResult::ErrorRuntime(d, _) = e.unwrap_inner()
+        && let Some(marker) = d.clone().try_cast::<SkipMarker>()
+    {
+        return ScenarioResult::Skipped(marker.reason);
+    }
+    if where_.is_empty() {
+        ScenarioResult::Failed(e.to_string())
+    } else {
+        ScenarioResult::Failed(format!("{where_}: {e}"))
+    }
 }
 
 /// Call a scenario/teardown closure, passing `ctx` only if it takes a parameter
-/// (so both `|| …` and `|ctx| …` work).
-fn call_with_ctx(engine: &Engine, ast: &AST, f: &FnPtr, ctx: Dynamic) -> Result<(), String> {
+/// (so both `|| …` and `|ctx| …` work). Returns the raw Rhai error so the caller
+/// can tell a `skip(...)` apart from a real failure.
+fn call_with_ctx(
+    engine: &Engine,
+    ast: &AST,
+    f: &FnPtr,
+    ctx: Dynamic,
+) -> Result<(), Box<EvalAltResult>> {
     let takes_arg = ast
         .iter_functions()
         .find(|m| m.name == f.fn_name())
@@ -152,7 +194,7 @@ fn call_with_ctx(engine: &Engine, ast: &AST, f: &FnPtr, ctx: Dynamic) -> Result<
     } else {
         f.call::<Dynamic>(engine, ast, ())
     };
-    res.map(|_| ()).map_err(|e| e.to_string())
+    res.map(|_| ())
 }
 
 /// Names registered via `scenario("name", …)` in a file, for `--scenario` shell

@@ -4,7 +4,7 @@
 
 use crate::engine::assertion::Value;
 use crate::engine::mock_server::MockResponse;
-use crate::engine::{AgentInfo, CallState, sip_user_part};
+use crate::engine::{AgentInfo, CallState, ScenarioInfo, sip_user_part};
 use rhai::{Array, Dynamic, EvalAltResult, Map};
 use ringo_core::baresip::Account;
 
@@ -216,6 +216,53 @@ pub(super) fn headers_from_map(map: &Map) -> Result<Vec<(String, String)>, Box<E
         }
     }
     Ok(out)
+}
+
+/// A scenario options map → [`ScenarioInfo`]. Shape:
+/// `#{ tags: ["smoke", …], skip: true | "reason", only: true }`. `tags` accepts an
+/// array of strings (a bare string is taken as a single tag); `skip` accepts a bool
+/// or a reason string; `only` is a bool.
+pub(super) fn scenario_info_from_map(
+    name: &str,
+    map: &Map,
+) -> Result<ScenarioInfo, Box<EvalAltResult>> {
+    let tags = match map.get("tags") {
+        None => Vec::new(),
+        Some(d) => {
+            if let Some(arr) = d.clone().try_cast::<Array>() {
+                arr.iter()
+                    .filter_map(|t| t.clone().into_string().ok())
+                    .collect()
+            } else if let Ok(s) = d.clone().into_string() {
+                vec![s]
+            } else {
+                return Err(format!("scenario `{name}`: `tags` must be a string or array").into());
+            }
+        }
+    };
+    let (skip, skip_reason) = match map.get("skip") {
+        None => (false, None),
+        Some(d) => {
+            if let Ok(b) = d.as_bool() {
+                (b, None)
+            } else if let Ok(reason) = d.clone().into_string() {
+                (true, Some(reason))
+            } else {
+                return Err(format!("scenario `{name}`: `skip` must be a bool or string").into());
+            }
+        }
+    };
+    let only = map
+        .get("only")
+        .and_then(|d| d.as_bool().ok())
+        .unwrap_or(false);
+    Ok(ScenarioInfo {
+        name: name.to_string(),
+        tags,
+        skip,
+        skip_reason,
+        only,
+    })
 }
 
 /// A mock-server response map → [`MockResponse`]. Shape:

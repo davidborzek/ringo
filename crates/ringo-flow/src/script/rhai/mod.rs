@@ -45,7 +45,7 @@ pub fn run(
     paths: &[PathBuf],
     output: Output,
     overrides: HashMap<String, String>,
-    only: Option<String>,
+    filters: engine::Filters,
     env_files: &[PathBuf],
 ) -> Result<()> {
     let files = collect_files(paths)?;
@@ -103,7 +103,7 @@ pub fn run(
         })
         .collect();
 
-    engine::run(programs, output, DEFAULT_TIMEOUT, only)
+    engine::run(programs, output, DEFAULT_TIMEOUT, filters)
 }
 
 /// Expand the given paths into `.rhai` files: a file is taken as-is, a directory
