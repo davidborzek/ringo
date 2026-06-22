@@ -1,5 +1,8 @@
 # ringo-flow
 
+[![crates.io](https://img.shields.io/crates/v/ringo-flow)](https://crates.io/crates/ringo-flow)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+
 > Declarative telephony tests for [baresip](https://github.com/baresip/baresip):
 > script SIP call scenarios and assert what happens.
 
