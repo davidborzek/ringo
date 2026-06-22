@@ -42,6 +42,12 @@ Tasks may share captured variables (each gets an independent snapshot,
 so they can't race). Don't overlap `await_until` across tasks; its
 silencing is global.
 
+### `regex(pattern: string) -> PathPattern`
+
+A regex path matcher for `respond`/`on`/`request_count`/… anchored to the
+whole path: `regex("/calls/.*")` matches `/calls/123`. Errors on a bad
+pattern.
+
 ### `scenario(name: string, body: Fn)`
 
 Register a named scenario, run in isolation (fresh agents, torn down
@@ -343,6 +349,10 @@ Build a `200 application/json` response map from `body` (JSON-encoded),
 for `respond`/`on`. `body` may be a map or an array, e.g.
 `json_response(#{ actions: [ … ] })` or `json_response([ … ])`.
 
+### `last_request(mock: HttpMock, path: PathPattern) -> MockRequest`
+
+The most recent request on a `regex(...)` path (errors if none yet).
+
 ### `last_request(mock: HttpMock, path: string) -> MockRequest`
 
 The most recent request on `path` (errors if none yet). Read it after
@@ -359,31 +369,65 @@ under test at it, `respond`/`on` to define routes.
 Start a mock HTTP server with config `#{ port: 8080 }` (omit `port` for a
 free one). Returns a handle; stopped automatically at scenario end.
 
+### `on(mock: HttpMock, method: string, path: PathPattern, responder: Fn)`
+
+Dynamic responder for `method` and a `regex(...)` path.
+
 ### `on(mock: HttpMock, method: string, path: string, responder: Fn)`
 
 Answer `method path` dynamically: the `|req|` closure receives the
 `MockRequest` and returns a response map (e.g. `json_response(#{…})`).
-Must be pure — no agent verbs — as it runs on a worker thread.
+`method` may be `"*"` for any method. Must be pure — no agent verbs — as
+it runs on a worker thread.
+
+### `on(mock: HttpMock, path: PathPattern, responder: Fn)`
+
+Dynamic responder for a `regex(...)` path on any HTTP method.
+
+### `on(mock: HttpMock, path: string, responder: Fn)`
+
+Dynamic responder for `path` on any HTTP method.
 
 ### `query(request: MockRequest, name: string) -> ?`
 
 A query-string parameter value, or `()` if absent.
 
+### `request_count(mock: HttpMock, path: PathPattern) -> int`
+
+How many requests arrived on a `regex(...)` path (any method).
+
 ### `request_count(mock: HttpMock, path: string) -> int`
 
-How many requests arrived on `path`. Poll it with `await_until`, e.g.
+How many requests arrived on `path` (any method). Poll it with
+`await_until`, e.g.
 `await_until(|| assert(hooks.request_count("/voice")).equals(1))`.
+
+### `requests(mock: HttpMock, path: PathPattern) -> array`
+
+All requests on a `regex(...)` path, in arrival order, as `MockRequest`s.
 
 ### `requests(mock: HttpMock, path: string) -> array`
 
 All requests received on `path`, in arrival order, as `MockRequest`s.
 
+### `respond(mock: HttpMock, method: string, path: PathPattern, response: map)`
+
+Static response for `method` and a `regex(...)` path.
+
 ### `respond(mock: HttpMock, method: string, path: string, response: map)`
 
 Register a static response for `method path`: a map
 `#{ status: 200, content_type: "…", headers: #{…}, body: <string|map> }`
-(use `json_response`/`text_response` to build it). Re-register to stage
-the next answer between webhooks.
+(use `json_response`/`text_response` to build it). `method` may be `"*"`
+for any method. Re-register to stage the next answer between webhooks.
+
+### `respond(mock: HttpMock, path: PathPattern, response: map)`
+
+Static response for a `regex(...)` path on any HTTP method.
+
+### `respond(mock: HttpMock, path: string, response: map)`
+
+Static response for `path` on any HTTP method.
 
 ### `stop(mock: HttpMock)`
 

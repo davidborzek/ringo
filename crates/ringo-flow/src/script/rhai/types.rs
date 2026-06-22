@@ -6,7 +6,7 @@ use super::convert;
 use crate::engine::assertion::Assertion as EngineAssertion;
 use crate::engine::ctx::{CallState, Ctx, mark_pending_label};
 use crate::engine::http::{HttpResponse as EngineHttp, json_path_value};
-use crate::engine::mock_server::{MockRequest as EngineMockRequest, MockServerInner};
+use crate::engine::mock_server::{MockRequest as EngineMockRequest, MockServerInner, PathMatcher};
 use crate::engine::sip_user_part;
 use rhai::{Dynamic, EvalAltResult};
 use std::sync::Arc;
@@ -331,24 +331,45 @@ impl HttpMock {
     pub(super) fn port(&mut self) -> i64 {
         self.inner.port() as i64
     }
-    /// Number of requests received on `path` (any method); pair with `await_until`,
-    /// e.g. `await_until(|| assert(hooks.request_count("/voice")).equals(1))`.
+    /// Number of requests whose path matches; pair with `await_until`, e.g.
+    /// `await_until(|| assert(hooks.request_count("/voice")).equals(1))`.
     pub(super) fn request_count(&mut self, path: &str) -> i64 {
-        mark_pending_label(format!("mock requests to {path}"));
-        self.inner.request_count(path)
+        self.count(&PathMatcher::Exact(path.to_string()))
     }
-    /// The most recent request on `path`, for inspection after `await_until`.
+    pub(super) fn request_count_re(&mut self, pat: PathPattern) -> i64 {
+        self.count(&pat.inner)
+    }
+    fn count(&self, m: &PathMatcher) -> i64 {
+        mark_pending_label(format!("mock requests to {}", m.label()));
+        self.inner.request_count(m)
+    }
+    /// The most recent request whose path matches, for inspection after `await_until`.
     pub(super) fn last_request(&mut self, path: &str) -> Result<MockRequest, Box<EvalAltResult>> {
-        self.inner
-            .last_request(path)
-            .map(MockRequest::new)
-            .ok_or_else(|| format!("no request recorded on `{path}`").into())
+        self.last(&PathMatcher::Exact(path.to_string()))
     }
-    /// All requests received on `path`, in arrival order.
+    pub(super) fn last_request_re(
+        &mut self,
+        pat: PathPattern,
+    ) -> Result<MockRequest, Box<EvalAltResult>> {
+        self.last(&pat.inner)
+    }
+    fn last(&self, m: &PathMatcher) -> Result<MockRequest, Box<EvalAltResult>> {
+        self.inner
+            .last_request(m)
+            .map(MockRequest::new)
+            .ok_or_else(|| format!("no request recorded on `{}`", m.label()).into())
+    }
+    /// All requests whose path matches, in arrival order.
     pub(super) fn requests(&mut self, path: &str) -> Dynamic {
+        self.all(&PathMatcher::Exact(path.to_string()))
+    }
+    pub(super) fn requests_re(&mut self, pat: PathPattern) -> Dynamic {
+        self.all(&pat.inner)
+    }
+    fn all(&self, m: &PathMatcher) -> Dynamic {
         let arr: rhai::Array = self
             .inner
-            .requests(path)
+            .requests(m)
             .into_iter()
             .map(|r| Dynamic::from(MockRequest::new(r)))
             .collect();
@@ -358,6 +379,13 @@ impl HttpMock {
     pub(super) fn stop(&mut self) {
         self.inner.shutdown();
     }
+}
+
+/// A path matcher passed to `respond`/`on`/`request_count`/…: either an exact path
+/// (a plain string) or a regex built with `regex(...)`.
+#[derive(Clone)]
+pub(super) struct PathPattern {
+    pub(super) inner: PathMatcher,
 }
 
 /// A request the mock server received, exposed to scenarios. Mirrors

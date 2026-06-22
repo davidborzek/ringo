@@ -31,7 +31,9 @@ the first failure. No sound hardware needed; it's built on the shared
   system recorded the call (e.g. a correlation id carried on an inbound INVITE).
 - **Webhook-driven call control** — stand up a built-in HTTP mock server, let the
   system under test call its webhook for a call, and answer with the actions it
-  should perform (Twilio-style), then assert on the requests it received.
+  should perform (Twilio-style), then assert on the requests it received. Routes
+  match by exact path or `regex(...)`, and by a given method or any (`"*"` / no
+  method argument).
 
 ## How it works
 

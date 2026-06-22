@@ -15,6 +15,7 @@ use axum::body::{Body, to_bytes};
 use axum::extract::State;
 use axum::http::{Request, Response, StatusCode, header};
 use axum::{Router, routing::any};
+use regex::Regex;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
@@ -54,13 +55,56 @@ pub enum Responder {
     Dynamic(Box<dyn Fn(MockRequest) -> Result<MockResponse, String> + Send + Sync>),
 }
 
-type RouteKey = (String, String); // (UPPERCASE method, exact path)
+/// How a route matches a request path: an exact path, or an (anchored) regex.
+#[derive(Clone)]
+pub enum PathMatcher {
+    Exact(String),
+    Regex(Regex),
+}
+
+impl PathMatcher {
+    /// A regex matcher, anchored to the whole path so `"/calls/.*"` matches
+    /// `"/calls/123"` but not a longer string containing it. Errors on a bad pattern.
+    pub fn regex(pattern: &str) -> Result<Self, String> {
+        Regex::new(&format!("^(?:{pattern})$"))
+            .map(PathMatcher::Regex)
+            .map_err(|e| format!("invalid path regex `{pattern}`: {e}"))
+    }
+    /// Whether this matcher accepts `path`.
+    pub fn matches(&self, path: &str) -> bool {
+        match self {
+            PathMatcher::Exact(p) => p == path,
+            PathMatcher::Regex(re) => re.is_match(path),
+        }
+    }
+    /// A stable identity for replace-on-re-register (kind + pattern text).
+    fn identity(&self) -> (u8, &str) {
+        match self {
+            PathMatcher::Exact(p) => (0, p.as_str()),
+            PathMatcher::Regex(re) => (1, re.as_str()),
+        }
+    }
+    /// A human label, e.g. `/voice` or `~^/calls/.*$`.
+    pub fn label(&self) -> String {
+        match self {
+            PathMatcher::Exact(p) => p.clone(),
+            PathMatcher::Regex(re) => format!("~{}", re.as_str()),
+        }
+    }
+}
+
+/// One registered route. `method` is `None` to match any HTTP method.
+struct Route {
+    method: Option<String>, // UPPERCASE, or None = any
+    path: PathMatcher,
+    responder: Arc<Responder>,
+}
 
 /// The shared state of a running mock server. Cheap to clone via `Arc`; the script
 /// handle, the serving task and the [`Ctx`] teardown list all hold one.
 pub struct MockServerInner {
     port: u16,
-    routes: Mutex<HashMap<RouteKey, Arc<Responder>>>,
+    routes: Mutex<Vec<Route>>,
     recorded: Mutex<Vec<MockRequest>>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
 }
@@ -75,46 +119,77 @@ impl MockServerInner {
         format!("http://127.0.0.1:{}", self.port)
     }
 
-    /// Register (or replace) the response for `method path`. Re-registering between
-    /// webhooks is how a deterministic flow stages successive answers.
-    pub fn set_route(&self, method: &str, path: &str, responder: Responder) {
-        self.routes
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(
-                (method.to_uppercase(), path.to_string()),
-                Arc::new(responder),
-            );
+    /// Register (or replace) the responder for `method` (None = any) and `path`.
+    /// Re-registering the same route stages the next answer in place (order kept).
+    pub fn set_route(&self, method: Option<String>, path: PathMatcher, responder: Responder) {
+        let method = method.map(|m| m.to_uppercase());
+        let mut routes = self.routes.lock().unwrap_or_else(|e| e.into_inner());
+        let id = path.identity();
+        if let Some(slot) = routes
+            .iter_mut()
+            .find(|r| r.method == method && r.path.identity() == id)
+        {
+            slot.responder = Arc::new(responder);
+        } else {
+            routes.push(Route {
+                method,
+                path,
+                responder: Arc::new(responder),
+            });
+        }
     }
 
-    /// Number of requests received on `path` (any method) — pollable in `await_until`.
-    pub fn request_count(&self, path: &str) -> i64 {
+    /// The responder for `method path`, by specificity: an exact path beats a regex,
+    /// and within the same path kind an exact method beats an any-method route; ties
+    /// go to the most recently registered route.
+    fn find_responder(&self, method: &str, path: &str) -> Option<Arc<Responder>> {
+        let routes = self.routes.lock().unwrap_or_else(|e| e.into_inner());
+        let mut best: Option<(u8, usize)> = None;
+        for (i, r) in routes.iter().enumerate() {
+            let method_ok = r.method.as_deref().is_none_or(|m| m == method);
+            if !method_ok || !r.path.matches(path) {
+                continue;
+            }
+            let path_rank = match r.path {
+                PathMatcher::Exact(_) => 0,
+                PathMatcher::Regex(_) => 2,
+            };
+            let score = path_rank + u8::from(r.method.is_none());
+            if best.is_none_or(|(bs, bi)| score < bs || (score == bs && i > bi)) {
+                best = Some((score, i));
+            }
+        }
+        best.map(|(_, i)| routes[i].responder.clone())
+    }
+
+    /// Number of recorded requests whose path matches — pollable in `await_until`.
+    pub fn request_count(&self, path: &PathMatcher) -> i64 {
         self.recorded
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .filter(|r| r.path == path)
+            .filter(|r| path.matches(&r.path))
             .count() as i64
     }
 
-    /// The most recent request received on `path`, or `None`.
-    pub fn last_request(&self, path: &str) -> Option<MockRequest> {
+    /// The most recent recorded request whose path matches, or `None`.
+    pub fn last_request(&self, path: &PathMatcher) -> Option<MockRequest> {
         self.recorded
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
             .rev()
-            .find(|r| r.path == path)
+            .find(|r| path.matches(&r.path))
             .cloned()
     }
 
-    /// All requests received on `path`, in arrival order.
-    pub fn requests(&self, path: &str) -> Vec<MockRequest> {
+    /// All recorded requests whose path matches, in arrival order.
+    pub fn requests(&self, path: &PathMatcher) -> Vec<MockRequest> {
         self.recorded
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .iter()
-            .filter(|r| r.path == path)
+            .filter(|r| path.matches(&r.path))
             .cloned()
             .collect()
     }
@@ -162,7 +237,7 @@ pub fn start(ctx: &Arc<Ctx>, port: Option<u16>) -> Result<Arc<MockServerInner>, 
     let (tx, rx) = oneshot::channel::<()>();
     let inner = Arc::new(MockServerInner {
         port: bound_port,
-        routes: Mutex::new(HashMap::new()),
+        routes: Mutex::new(Vec::new()),
         recorded: Mutex::new(Vec::new()),
         shutdown: Mutex::new(Some(tx)),
     });
@@ -228,13 +303,7 @@ async fn serve(State(state): State<Handler>, req: Request<Body>) -> Response<Bod
         .unwrap_or_else(|e| e.into_inner())
         .push(mreq.clone());
 
-    let responder = state
-        .inner
-        .routes
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(&(method.clone(), path.clone()))
-        .cloned();
+    let responder = state.inner.find_responder(&method, &path);
 
     if let Some(ctx) = state.ctx.upgrade() {
         ctx.emit(&Event::MockRequest {
@@ -366,13 +435,25 @@ mod tests {
         (rt, ctx)
     }
 
+    fn exact(p: &str) -> PathMatcher {
+        PathMatcher::Exact(p.into())
+    }
+    fn static_resp(status: u16, body: &str) -> Responder {
+        Responder::Static(MockResponse {
+            status,
+            content_type: Some("text/plain".into()),
+            headers: vec![],
+            body: body.into(),
+        })
+    }
+
     #[test]
     fn static_dynamic_and_unmatched_routes() {
         let (_rt, ctx) = test_ctx();
         let server = start(&ctx, None).unwrap();
         server.set_route(
-            "POST",
-            "/voice",
+            Some("POST".into()),
+            exact("/voice"),
             Responder::Static(MockResponse {
                 status: 200,
                 content_type: Some("application/json".into()),
@@ -382,8 +463,8 @@ mod tests {
         );
         // A dynamic responder echoes the request body back with a 201.
         server.set_route(
-            "POST",
-            "/echo",
+            Some("POST".into()),
+            exact("/echo"),
             Responder::Dynamic(Box::new(|req| {
                 Ok(MockResponse {
                     status: 201,
@@ -395,8 +476,8 @@ mod tests {
         );
         // A failing responder must yield a bare 500 — no error text over HTTP.
         server.set_route(
-            "POST",
-            "/boom",
+            Some("POST".into()),
+            exact("/boom"),
             Responder::Dynamic(Box::new(|_| Err("secret internal detail".into()))),
         );
 
@@ -436,12 +517,75 @@ mod tests {
         assert!(r.text().unwrap().is_empty(), "500 body must be empty");
 
         // Recording: the two POSTs are captured per path; headers are lower-cased.
-        assert_eq!(server.request_count("/voice"), 1);
-        assert_eq!(server.request_count("/echo"), 1);
-        let req = server.last_request("/voice").unwrap();
+        assert_eq!(server.request_count(&exact("/voice")), 1);
+        assert_eq!(server.request_count(&exact("/echo")), 1);
+        let req = server.last_request(&exact("/voice")).unwrap();
         assert_eq!(req.method, "POST");
         assert_eq!(req.headers.get("x-test").map(String::as_str), Some("abc"));
         assert_eq!(req.body, r#"{"event":"incoming_call"}"#);
+
+        server.shutdown();
+    }
+
+    #[test]
+    fn regex_path_and_any_method_routing() {
+        let (_rt, ctx) = test_ctx();
+        let server = start(&ctx, None).unwrap();
+        // Any method on an exact path.
+        server.set_route(None, exact("/any"), static_resp(200, "any"));
+        // A regex path (anchored), POST only.
+        server.set_route(
+            Some("POST".into()),
+            PathMatcher::regex("/calls/.*").unwrap(),
+            static_resp(202, "call"),
+        );
+        // A more specific exact route wins over the regex for the same path.
+        server.set_route(
+            Some("POST".into()),
+            exact("/calls/special"),
+            static_resp(200, "special"),
+        );
+
+        let client = reqwest::blocking::Client::new();
+
+        // Any-method route answers GET and DELETE alike.
+        for m in ["GET", "DELETE"] {
+            let r = client
+                .request(m.parse().unwrap(), format!("{}/any", server.url()))
+                .send()
+                .unwrap();
+            assert_eq!(r.status().as_u16(), 200, "method {m}");
+        }
+
+        // The regex matches concrete sub-paths.
+        let r = client
+            .post(format!("{}/calls/123", server.url()))
+            .send()
+            .unwrap();
+        assert_eq!(r.status().as_u16(), 202);
+        assert_eq!(r.text().unwrap(), "call");
+        let r = client
+            .post(format!("{}/calls/123/extra", server.url()))
+            .send()
+            .unwrap();
+        assert_eq!(r.status().as_u16(), 202);
+        // The exact route is preferred over the regex for its path.
+        let r = client
+            .post(format!("{}/calls/special", server.url()))
+            .send()
+            .unwrap();
+        assert_eq!(r.text().unwrap(), "special");
+        // GET on the POST-only regex route → no match → 404.
+        let r = client
+            .get(format!("{}/calls/123", server.url()))
+            .send()
+            .unwrap();
+        assert_eq!(r.status().as_u16(), 404);
+
+        // A regex matcher also queries the recording (path-only, any method): the
+        // three POSTs plus the unmatched GET all hit /calls/* and were recorded.
+        let re = PathMatcher::regex("/calls/.*").unwrap();
+        assert_eq!(server.request_count(&re), 4);
 
         server.shutdown();
     }

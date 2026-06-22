@@ -33,6 +33,11 @@ hooks.on("POST", "/voice", |req| {
     }
 });
 
+// Routes can match a regex path and/or any HTTP method:
+//   - regex(...) matches per-call status callbacks like /calls/<id>/status
+//   - omitting the method (3 args → 2 args) matches any method
+hooks.on(regex("/calls/.*/status"), |req| text_response("ok"));
+
 // Tell the API under test where to send its webhooks.
 http("PUT", env("API_URL") + "/config?webhook=" + hooks.url + "/voice");
 
