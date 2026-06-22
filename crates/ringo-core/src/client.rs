@@ -42,6 +42,13 @@ pub async fn read_message<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Baresi
         .parse()
         .context("Invalid netstring length (parse)")?;
 
+    // Cap the frame size so a bogus/huge length can't trigger a giant allocation.
+    // baresip's ctrl_tcp messages are tiny; 16 MiB is far above any real one.
+    const MAX_NETSTRING_LEN: usize = 16 * 1024 * 1024;
+    if len > MAX_NETSTRING_LEN {
+        anyhow::bail!("Netstring too large: {len} bytes (max {MAX_NETSTRING_LEN})");
+    }
+
     // Read payload + trailing ','
     let mut payload = vec![0u8; len + 1];
     reader

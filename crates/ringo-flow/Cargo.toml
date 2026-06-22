@@ -1,0 +1,29 @@
+[package]
+name = "ringo-flow"
+description = "Declarative telephony scenario test runner for baresip, built on ringo-core"
+# Versioned independently of the workspace: ringo-flow is pre-1.0 / beta and its
+# scenario API is still unstable, so it does not move in lockstep with ringo-phone.
+version = "0.1.0-beta.1"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ringo-flow"
+path = "src/main.rs"
+
+[dependencies]
+ringo-core.workspace = true
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+clap_complete = { version = "4", features = ["unstable-dynamic"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.13", default-features = false, features = ["default-tls", "charset", "blocking"] }
+rhai = { version = "1", features = ["sync", "metadata", "internals"] }

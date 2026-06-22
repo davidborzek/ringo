@@ -1,523 +1,54 @@
 # ringo
 
-> A terminal SIP softphone built on [baresip](https://github.com/baresip/baresip).
+> A terminal SIP softphone and telephony test runner built on [baresip](https://github.com/baresip/baresip).
 
 [![CI](https://github.com/davidborzek/ringo/actions/workflows/ci.yml/badge.svg)](https://github.com/davidborzek/ringo/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/ringo-phone)](https://crates.io/crates/ringo-phone)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
-ringo is a SIP softphone with a full-featured ratatui TUI, built on top of baresip. It manages multiple accounts side by side — each with its own profile, call history, and configuration — while keeping baresip running headless in the background.
+**ringo** is a cargo workspace of telephony tools built on baresip — a SIP
+softphone you live in, and a scenario runner that drives baresip headless for
+automated call testing, both sharing one engine.
 
-## Features
+## Crates
 
-- **Profile picker** — fuzzy-search profile selector with inline create / edit / delete
-- **Headless baresip** — spawns baresip without its built-in stdio UI, no terminal clutter
-- **ratatui TUI** — status bar, command bar (`:` with tab-completion), Normal/Dial mode split, call list, DTMF, hold/resume, mute
-- **Contact book** — TOML-based contacts with fuzzy number matching, inline add/edit/delete, `$EDITOR` integration
-- **Blind & attended transfer** — full call transfer support with contact picker
-- **Call history** — per-profile JSONL log with redial support
-- **Dial history** — persistent global history with fuzzy search (Ctrl+R)
-- **MWI** — message waiting indicator
-- **Theming** — all UI colors configurable via `ringo.toml`, with ready-made themes
-- **rofi integration** — `scripts/ringo-rofi` for WM keybinds
-- **Multiple instances** — each profile gets its own dynamically assigned port
+| Crate | What it is | Docs |
+|-------|------------|------|
+| [`ringo-phone`](crates/ringo-phone) | The **`ringo` softphone** — a ratatui TUI managing multiple SIP profiles, with calls, contacts, transfers, remote control and headless automation | [README](crates/ringo-phone/README.md) |
+| [`ringo-flow`](crates/ringo-flow) | A **telephony scenario test runner** — bring up SIP agents from a [Rhai](https://rhai.rs) script, drive them, and assert call behaviour (incl. audio) | [README](crates/ringo-flow/README.md) · [API](crates/ringo-flow/docs/scenario-api.md) |
+| [`ringo-core`](crates/ringo-core) | The **shared engine** — baresip spawning, the `ctrl_tcp` wire protocol, the call-event model (internal, no stable API) | [README](crates/ringo-core/README.md) |
 
 ## Requirements
 
-- [baresip](https://github.com/baresip/baresip) >= 3.14 in `$PATH`
-- Rust 1.80+ (for building)
-- rofi (optional, for `scripts/ringo-rofi`)
-
-## Installation
-
-### 1. Install baresip
-
-ringo requires [baresip](https://github.com/baresip/baresip) >= 3.14 to be installed and available in `$PATH`. See [Supported platforms](https://github.com/baresip/baresip/wiki/Supported-platforms) for platform-specific instructions.
-
-On most systems:
-
-```sh
-# Arch Linux
-sudo pacman -S baresip
-
-# Ubuntu / Debian (may need a PPA or manual build for >= 3.14)
-sudo apt install baresip
-
-# macOS
-brew install baresip
-
-# From source
-git clone https://github.com/baresip/baresip.git
-cd baresip && cmake -B build && cmake --build build && sudo cmake --install build
-```
-
-Verify the installation: `baresip -v` should show version 3.14 or later.
-
-### 2. Install ringo
-
-**From crates.io:**
-
-```sh
-cargo install ringo-phone
-```
-
-**From GitHub (no clone needed):**
-
-```sh
-cargo install --git https://github.com/davidborzek/ringo ringo-phone
-```
-
-**Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are available on the
-[releases page](https://github.com/davidborzek/ringo/releases).
-
-**From source:**
-
-```sh
-cargo install --path crates/ringo-phone --root ~/.local
-```
-
-Or build and install system-wide:
-
-```sh
-cargo build --release
-sudo install -m755 target/release/ringo /usr/local/bin/ringo
-```
-
-**rofi script** (optional):
-
-```sh
-cp scripts/ringo-rofi ~/.local/bin/
-```
+- [baresip](https://github.com/baresip/baresip) >= 3.14 in `$PATH` (used by both the softphone and the test runner)
+- Rust 1.85+ to build
 
 ## Quick start
 
-```sh
-ringo        # open profile picker → Ctrl+N to create your first profile
-```
-
-Fill in your SIP credentials in the form, press Enter to save, then select the profile and press Enter to launch.
-
-## Usage
+Install the softphone and open the profile picker:
 
 ```sh
-ringo              # open profile picker (default)
-ringo start <name> # launch a specific profile directly
-ringo list         # list all profiles
-ringo list --plain # one name per line (for scripting)
+cargo install ringo-phone   # installs the `ringo` binary
+ringo                       # Ctrl+N to create your first profile
 ```
 
-### Remote control
+See the [**ringo-phone README**](crates/ringo-phone/README.md) for features,
+installation options, keybindings, configuration, remote control and more. For
+automated call testing, see [**ringo-flow**](crates/ringo-flow/README.md).
 
-Control a running session from another terminal (or a script) over a per-session
-Unix socket:
+## Development
+
+The repo is a cargo workspace; build and test all crates together:
 
 ```sh
-ringo control list                  # list running sessions: PID, profile, account
-ringo control -t <target> <command> [args]
-
-# examples
-ringo control -t work dial 4711     # target by profile name
-ringo control -t 215709 hangup      # target by PID (for awkward names or duplicates)
-ringo control -t work dtmf 123#     # send DTMF tones into the active call
-ringo control -t work status        # registration + active calls
+cargo build --workspace
+cargo test --workspace
+cargo clippy --workspace
 ```
 
-`<target>` is a profile name or a PID. Use the PID (shown in `ringo control list`)
-when a profile name is awkward to type or when the same profile runs more than
-once. Commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`,
-`dtmf <digits>`, `transfer <uri>`, `status`, `shutdown`. `ctl` is an alias for
-`control`.
-
-#### Headless sessions
-
-For scripting and automated testing, run a session without the TUI — it still
-binds the control socket and registers, so you drive it entirely via
-`ringo control`:
-
-```sh
-ringo start --headless work &        # no terminal needed; runs in the background
-ringo control -t work status         # ...drive it...
-ringo control -t work shutdown       # stop it cleanly (or Ctrl-C the process)
-```
-
-Add `--json` (`-j`) for machine-readable output — `list` emits an array of
-sessions, `status` a structured object (registration, active `calls`, and the
-most recently closed call under `last_call` with its reason/duration), and every
-other command an `{ "ok", "data", "error" }` envelope. The exit code reflects
-success.
-
-```sh
-ringo control list --json
-ringo control -t work status --json
-ringo control -t work dial 4711 --json   # {"ok":true,"data":"Dialing 4711","error":null}
-```
-
-## Keybindings
-
-### Profile picker
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Start selected profile |
-| `Ctrl+N` | Create new profile |
-| `Ctrl+E` | Edit selected profile |
-| `Ctrl+Y` | Clone selected profile |
-| `Ctrl+D` | Delete selected profile (confirmation popup) |
-| `↑` / `↓` | Navigate (wrap-around) |
-| `Esc` | Quit |
-
-### TUI — Normal mode (default)
-
-| Key | Action |
-|-----|--------|
-| `d` | Enter Dial mode |
-| `a` | Accept incoming call |
-| `b` / `Del` | Hang up |
-| `h` | Hold |
-| `r` | Resume (when on hold) |
-| `m` | Toggle mute |
-| `t` | Blind transfer |
-| `T` | Attended transfer |
-| `0-9` `*` `#` | DTMF tones (during active call) |
-| `f` / `Tab` | Open contacts (Tab switches calls when multiple active) |
-| `e` | Open event log |
-| `l` | Open baresip log |
-| `c` | Open call history |
-| `Ctrl+R` | Fuzzy search dial history |
-| `Ctrl+E` | Edit profile (no active call) |
-| `Ctrl+P` | Switch profile (returns to picker) |
-| `:` | Open command bar |
-| `q` | Quit (confirmation prompt) |
-| `Ctrl+C` | Quit immediately |
-
-### TUI — Dial mode
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Dial and return to Normal mode |
-| `Esc` | Cancel and return to Normal mode |
-| `Backspace` | Delete character / exit to Normal mode (when empty) |
-| `←` / `→` | Move cursor |
-| `Home` / `End` | Jump to start / end |
-| `↑` / `↓` | Navigate dial history |
-| `Tab` | Open contacts |
-| `Ctrl+R` | Fuzzy search dial history |
-
-### TUI — Transfer mode
-
-| Key | Action |
-|-----|--------|
-| `Enter` | Execute transfer |
-| `Tab` | Open contacts |
-| `Esc` | Cancel |
-| `↑` / `↓` | Navigate dial history |
-| `Ctrl+R` | Fuzzy search dial history |
-
-### TUI — Contacts overlay
-
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate |
-| `g` / `G` | Jump to top / bottom |
-| `Enter` | Select number (dial or transfer) |
-| `/` | Search |
-| `a` | Add new contact |
-| `e` | Edit selected contact |
-| `d` | Delete selected contact (with confirmation) |
-| `E` | Open contacts in `$EDITOR` |
-| `f` / `Esc` | Close |
-
-### Command bar
-
-| Key | Action |
-|-----|--------|
-| `:` | Open command bar (from Normal mode) |
-| `Tab` | Cycle tab-completion |
-| `Enter` | Execute command |
-| `Esc` | Close |
-| `Backspace` | Delete character / close (when empty) |
-
-Available commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`, `dtmf <digits>`, `transfer <uri>`, `contacts`, `events`, `log`, `history`, `edit`, `switch`, `help`, `quit`
-
-### Call history view
-
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Navigate entries |
-| `g` / `G` | Jump to top / bottom |
-| `Enter` | Copy peer to dial input (redial) |
-| `/` | Search |
-| `d` | Delete selected entry |
-| `D` | Clear entire history |
-| `c` / `Esc` | Close |
-
-### Event log / baresip log view
-
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Scroll |
-| `g` / `G` | Jump to top / bottom |
-| `e` | Toggle / switch to event log |
-| `l` | Toggle / switch to baresip log |
-| `c` | Switch to call history |
-| `Esc` | Close |
-
-## Configuration
-
-Global config lives at `~/.config/ringo/ringo.toml`.
-
-### Picker subtitle
-
-```toml
-[picker]
-# Fields shown next to each profile name in the picker.
-# Available: aor, username, domain, display_name, transport,
-#            auth_user, outbound, stun_server, media_enc
-info = ["aor"]   # default
-```
-
-### Theme
-
-All UI colors are configurable. Colors accept named values or `#rrggbb` hex.
-
-| Role | Default | Used for |
-|------|---------|----------|
-| `accent` | `"cyan"` | Logo, picker selection, DTMF input, history popup |
-| `subtle` | `"dark_gray"` | Hints, log text, subtitles, unfocused labels |
-| `success` | `"green"` | Registered status, established call, toggle on |
-| `danger` | `"red"` | Muted indicator, missed calls, registration failed |
-| `attention` | `"yellow"` | Selected call, ringing, MWI, focused form field |
-| `transfer` | `"magenta"` | Transfer mode input |
-
-```toml
-[theme]
-accent    = "cyan"
-subtle    = "dark_gray"
-success   = "green"
-danger    = "red"
-attention = "yellow"
-transfer  = "magenta"
-```
-
-Supported names: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `gray`,
-`dark_gray`, `light_red`, `light_green`, `light_yellow`, `light_blue`, `light_magenta`,
-`light_cyan`, `white`, and hex values like `"#ff8800"`.
-
-Ready-made themes in [`themes/`](themes/):
-[Catppuccin Mocha](themes/catppuccin-mocha.toml) · [Gruvbox](themes/gruvbox.toml) · [Nord](themes/nord.toml) · [Tokyo Night](themes/tokyo-night.toml)
-
-### baresip
-
-ringo auto-detects your system's baresip module path and audio driver. All values can be overridden in `ringo.toml`:
-
-```toml
-[baresip]
-# Path to baresip modules — auto-detected via pkg-config or known system paths.
-# See: https://github.com/baresip/baresip/wiki/Modules
-module_path = "/usr/lib/baresip/modules"
-
-# Audio backend module loaded by baresip.
-# Common values: "alsa", "pulse", "pipewire", "coreaudio"
-# See: https://github.com/baresip/baresip/wiki/Configuration#audio
-audio_driver = "pipewire"
-
-# Audio device names passed to the driver (e.g. "default", "hw:0,0", a PipeWire/PulseAudio sink name).
-# Each can be set independently; all default to "default".
-audio_player_device = "default"
-audio_source_device = "default"
-audio_alert_device  = "default"
-
-# CA certificate file for SIP TLS — auto-detected from common system paths.
-sip_cafile = "/etc/ssl/certs/ca-certificates.crt"
-
-# CA certificate directory for SIP TLS — auto-detected on Linux, disabled on macOS.
-# Set to "" to explicitly disable.
-sip_capath = "/etc/ssl/certs"
-
-# Arbitrary baresip config overrides — appended at the end of the
-# generated config. Last value wins, so these override defaults.
-# ⚠️  Incorrect values can break ringo.
-# See: https://github.com/baresip/baresip/wiki/Configuration
-[baresip.extra]
-dns_server = "10.0.0.1:53"
-call_max_calls = "8"
-```
-
-All keys are optional; omitting a key falls back to auto-detection.
-
-### Contacts
-
-Contacts are stored at `~/.config/ringo/contacts.toml`. Contact names are resolved in the call list and call history. Phone numbers are matched across formats (local `01555...`, international `+491555...`, without plus `491555...`).
-
-```toml
-[[contacts]]
-name = "Alice"
-numbers = ["+491555123456", "alice.work"]
-
-[[contacts]]
-name = "Bob"
-numbers = ["021198765"]
-```
-
-You can manage contacts directly in the TUI (`f` or `Tab` → `a`/`e`/`d`) or edit the file with `$EDITOR` (`E` in the contacts overlay).
-
-### Hooks
-
-Run shell commands when certain events occur. Each hook receives environment variables with context about the event.
-
-```toml
-[[hooks]]
-event = "profile_loaded"
-command = "bash ~/.config/ringo/hooks/on_profile_loaded.sh"
-
-[[hooks]]
-event = "call_incoming"
-command = "notify-send 'ringo' \"Incoming call from $(echo $RINGO_EVENT_DATA | jq -r .number)\""
-
-[[hooks]]
-event = "call_outgoing"
-command = "echo $RINGO_EVENT_DATA >> /tmp/ringo-calls.log"
-```
-
-| Event | Trigger | Event data |
-|-------|---------|------------|
-| `profile_loaded` | After a profile is loaded and baresip is spawned | — |
-| `call_incoming` | Incoming call received | `call_id`, `number`, `display_name` |
-| `call_outgoing` | Outgoing call initiated | `call_id`, `number` |
-| `call_ended` | Call closed/ended | `call_id`, `number`, `direction`, `duration_secs`, `reason`, `error` |
-
-**Environment variables** passed to each hook:
-
-| Variable | Description |
-|----------|-------------|
-| `RINGO_EVENT` | Event name (e.g. `profile_loaded`) |
-| `RINGO_PROFILE` | Profile name |
-| `RINGO_PROFILE_JSON` | Profile data as JSON (excludes `password`) |
-| `RINGO_EVENT_DATA` | Event-specific data as JSON (see table above) |
-
-Hooks run in background threads and do not block the UI. Errors are logged to `/tmp/ringo-<name>.log`.
-
-## Profile config
-
-Profiles are stored as TOML at `~/.config/ringo/profiles/<name>/profile.toml`:
-
-```toml
-username     = "user123"
-password     = "secret"
-domain       = "sip.example.com"
-display_name = "My Name"              # optional
-transport    = "tls"                  # optional: udp, tcp, tls
-outbound     = "sip:proxy.example.com" # optional
-stun_server  = "stun:stun.example.com" # optional
-media_enc    = "dtls_srtp"            # optional
-notify       = true                   # desktop notifications (default: true)
-mwi          = true                   # message waiting indicator (default: true)
-
-# Optional custom SIP headers added to every outgoing INVITE.
-# Order is preserved; duplicate keys are allowed (e.g. RFC 4244 History-Info).
-# Values are percent-encoded for the `uaaddheader` baresip command —
-# write them as plain text, no manual %-escaping needed.
-#
-# Placeholders are substituted per outgoing call:
-#   ${uuid}  →  a fresh UUIDv4, shared across all headers in the same INVITE
-# Use $$ for a literal `$` (so a literal `${uuid}` is written `$${uuid}`).
-custom_headers = [
-  ["History-Info", "<sip:1@example.com>;index=1"],
-  ["History-Info", "<sip:2@example.com>;index=1.1"],
-  ["X-Trace-Id",   "call-${uuid}"],
-]
-```
-
-> The legacy table form (`[custom_headers]` with `key = "value"`) is still
-> accepted on load for backwards compatibility, but it cannot express
-> duplicate keys. Saving via the TUI migrates a profile to the array form
-> automatically.
-
-## File locations
-
-| Path | Description |
-|------|-------------|
-| `~/.config/ringo/ringo.toml` | Global config |
-| `~/.config/ringo/contacts.toml` | Contact book |
-| `~/.config/ringo/profiles/<name>/profile.toml` | Profile config |
-| `~/.config/ringo/profiles/<name>/call_history` | Per-profile call history (JSONL) |
-| `~/.local/share/ringo/history` | Global dial history |
-| `/tmp/ringo-<name>-<ts>/` | Runtime temp dir (auto-cleaned) |
-| `/tmp/ringo-<name>.log` | Application log (hooks, TCP errors, lifecycle) |
-
-## Shell completions
-
-ringo supports dynamic shell completions — profile names are completed from your actual profiles at `~/.config/ringo/profiles/`.
-
-**fish** — add to `~/.config/fish/config.fish`:
-
-```fish
-COMPLETE=fish ringo | source
-```
-
-**bash** — add to `~/.bashrc`:
-
-```bash
-source <(COMPLETE=bash ringo)
-```
-
-**zsh** — add to `~/.zshrc`:
-
-```zsh
-source <(COMPLETE=zsh ringo)
-```
-
-After sourcing, `ringo start <Tab>` will complete profile names.
-
-## rofi integration
-
-```sh
-cp scripts/ringo-rofi ~/.local/bin/
-
-# sway / i3
-bindsym $mod+p exec ringo-rofi
-```
-
-`ringo-rofi` uses `$TERMINAL` if set, otherwise tries `kitty`, `alacritty`, `foot`, `wezterm`, `xterm`.
-
-## tmux integration
-
-```sh
-cp scripts/ringo-tmux ~/.local/bin/
-
-# then just run:
-ringo-tmux
-```
-
-`ringo-tmux` uses `fzf` for multi-select profile picking and opens each
-selected profile in its own tmux pane within a session named `ringo`.
-Requires: `tmux`, `fzf`.
-
-## Call history format
-
-One JSON object per line:
-
-```json
-{"ts":"2024-01-15 14:30:05","dir":"outgoing","peer":"sip:alice@example.com","duration":"02:05:13","duration_secs":7513}
-```
-
-```sh
-cat ~/.config/ringo/profiles/<name>/call_history | jq .
-```
-
-## Contributing
-
-Contributions are welcome. Please open an issue before submitting large changes so we can discuss the approach first.
-
-The repo is a cargo workspace (`crates/ringo-core` — the baresip engine —
-and `crates/ringo-phone` — the TUI softphone):
-
-```sh
-cargo build --workspace   # build all crates
-cargo test --workspace    # run all tests
-cargo clippy --workspace  # lint
-```
+Contributions are welcome. Please open an issue before submitting large changes
+so we can discuss the approach first.
 
 ## License
 

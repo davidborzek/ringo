@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
 use std::{
     fs,
-    net::TcpListener,
+    io::Write,
+    net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
+    time::{Duration, Instant},
 };
 
 // ─── Account & backend options ─────────────────────────────────────────────────
@@ -23,6 +25,11 @@ pub struct Account {
     pub media_enc: Option<String>,
     pub regint: Option<u32>,
     pub mwi: bool,
+    /// DTMF transmission mode (`rtpevent` / `info` / `auto`). `info` sends DTMF as
+    /// SIP INFO, independent of the RTP audio stream — needed where the audio TX
+    /// may be idle (e.g. headless with no clocked source). `None` keeps baresip's
+    /// default.
+    pub dtmf_mode: Option<String>,
 }
 
 /// Overrides for auto-detected baresip backend settings. Any `None`/empty field
@@ -39,6 +46,15 @@ pub struct BaresipOptions {
     pub sip_capath: Option<String>,
     /// Arbitrary extra config lines appended at the end (key, value).
     pub extra: Vec<(String, String)>,
+    /// Enable baresip's SIP trace (`-s`, color disabled via `-c`) so full SIP
+    /// messages — including inbound custom headers, which the ctrl_tcp event API
+    /// does not expose — land in `baresip.log` for parsing (see `siptrace`).
+    pub sip_trace: bool,
+    /// Load the `sndfile` module so every call's decoded audio is recorded to a
+    /// `dump-…-dec.wav` next to the config (the spawn sets the working dir to the
+    /// instance's temp dir). Used by the scenario runner's audio assertions; the
+    /// softphone leaves this off.
+    pub record_audio: bool,
 }
 
 // ─── Instance ────────────────────────────────────────────────────────────────
@@ -79,9 +95,23 @@ impl Instance {
         let log_file = fs::File::create(&log_path).context("Failed to create baresip.log")?;
         let log_file2 = log_file.try_clone()?;
 
-        let child = Command::new("baresip")
-            .arg("-f")
-            .arg(&tmp_dir)
+        let mut cmd = Command::new("baresip");
+        cmd.arg("-f").arg(&tmp_dir);
+        if options.sip_trace {
+            // -s: trace SIP messages to the log; -c: no ANSI colour, so the
+            // trace parses cleanly.
+            cmd.arg("-s").arg("-c");
+        }
+        if options.record_audio {
+            // sndfile records into the working dir; point it at the temp dir so
+            // the `dump-…-dec.wav` files are isolated and cleaned up with it.
+            cmd.current_dir(&tmp_dir);
+        }
+        let child = cmd
+            // No TTY: baresip otherwise prompts on stdin (e.g. for a missing
+            // account password) and blocks startup. /dev/null makes any prompt
+            // fail fast so it can't wedge a headless/CI run.
+            .stdin(Stdio::null())
             .stdout(Stdio::from(log_file))
             .stderr(Stdio::from(log_file2))
             .spawn()
@@ -104,15 +134,44 @@ impl Instance {
     }
 }
 
+impl Instance {
+    /// Stop baresip so it cleans up after itself at the registrar. Sending the
+    /// `quit` command over a short-lived ctrl_tcp connection makes baresip run
+    /// `ua_stop_all(forced=0)` — de-REGISTER (expires=0) for its binding and BYE
+    /// any calls — before exiting. A plain SIGKILL (the fallback) skips that and
+    /// leaves a stale binding at the registrar on every run, which makes inbound
+    /// calls flaky as the registrar forks to dead contacts.
+    ///
+    /// Only removes *this* instance's binding; bindings left by earlier
+    /// hard-killed runs still expire on their own.
+    fn graceful_stop(&mut self) {
+        if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", self.port)) {
+            // netstring-framed `{"command":"quit"}` (see `client::write_command`)
+            let payload = br#"{"command":"quit"}"#;
+            let _ = write!(stream, "{}:", payload.len());
+            let _ = stream.write_all(payload);
+            let _ = stream.write_all(b",");
+            let _ = stream.flush();
+        }
+        // Wait for baresip to de-register and exit; SIGKILL if it overstays.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return, // exited cleanly (de-registered)
+                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                Err(_) => break,
+            }
+        }
+        crate::rlog!(Warn, "baresip did not quit gracefully, killing");
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 impl Drop for Instance {
     fn drop(&mut self) {
         crate::rlog!(Info, "baresip cleanup, removing {}", self.tmp_dir.display());
-        if let Err(e) = self.child.kill() {
-            crate::rlog!(Warn, "baresip kill failed: {}", e);
-        }
-        if let Err(e) = self.child.wait() {
-            crate::rlog!(Warn, "baresip wait failed: {}", e);
-        }
+        self.graceful_stop();
         if let Err(e) = fs::remove_dir_all(&self.tmp_dir) {
             crate::rlog!(
                 Warn,
@@ -164,6 +223,9 @@ fn accounts_line(account: &Account) -> String {
     if let Some(v) = account.regint {
         line.push_str(&format!(";regint={}", v));
     }
+    if let Some(v) = account.dtmf_mode.as_deref().filter(|s| !s.is_empty()) {
+        line.push_str(&format!(";dtmfmode={}", v));
+    }
 
     line
 }
@@ -213,6 +275,7 @@ fn generate_config_content(
     ctx.insert("sip_cafile", &sip_cafile);
     ctx.insert("sip_capath", &sip_capath);
     ctx.insert("mwi", &account.mwi);
+    ctx.insert("record_audio", &overrides.record_audio);
 
     let mut extra_lines: Vec<String> = overrides
         .extra

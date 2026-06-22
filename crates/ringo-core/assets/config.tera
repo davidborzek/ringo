@@ -36,7 +36,8 @@ module              ice.so
 module              srtp.so
 module              dtls_srtp.so
 
-module_app          account.so
+{% if record_audio %}module              sndfile.so
+{% endif %}module_app          account.so
 module_app          menu.so
 module_app          netroam.so
 module_app          ctrl_tcp.so
