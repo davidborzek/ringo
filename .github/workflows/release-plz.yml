@@ -180,3 +180,47 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Homebrew: render the formula templates with the release binaries' checksums and
+  # push them to the tap. Custom (no cargo-dist); reuses the binaries built above.
+  homebrew:
+    name: Update Homebrew tap
+    needs: [release, phone-binaries, flow-binaries]
+    if: needs.release.outputs.phone_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render formulae & push to tap
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}        # to read release assets
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }} # to push to the tap repo
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          PHONE_TAG: ${{ needs.release.outputs.phone_tag }}
+          FLOW_TAG: ${{ needs.release.outputs.flow_tag }}
+        run: |
+          set -euo pipefail
+          sha() { gh release download "$1" -R "$REPO" -p "$2" -O - | sha256sum | cut -d' ' -f1; }
+          # render <template> <base-url> <bin-prefix> <tag> <version> <out>
+          render() {
+            sed \
+              -e '/^# /d' \
+              -e "s|__VERSION__|$5|g" \
+              -e "s|__BASE__|$2|g" \
+              -e "s|__SHA_DARWIN_ARM__|$(sha "$4" "$3-aarch64-apple-darwin")|" \
+              -e "s|__SHA_DARWIN_X64__|$(sha "$4" "$3-x86_64-apple-darwin")|" \
+              -e "s|__SHA_LINUX_ARM__|$(sha "$4" "$3-aarch64-unknown-linux-gnu")|" \
+              -e "s|__SHA_LINUX_X64__|$(sha "$4" "$3-x86_64-unknown-linux-gnu")|" \
+              "$1" > "$6"
+          }
+          rel="https://github.com/${REPO}/releases/download"
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/${OWNER}/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          render .github/homebrew/ringo.rb      "${rel}/${PHONE_TAG}" ringo      "$PHONE_TAG" "${PHONE_TAG#v}"            tap/Formula/ringo.rb
+          render .github/homebrew/ringo-flow.rb "${rel}/${FLOW_TAG}"  ringo-flow "$FLOW_TAG"  "${FLOW_TAG#ringo-flow-v}" tap/Formula/ringo-flow.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula
+          git commit -m "ringo ${PHONE_TAG#v}, ringo-flow ${FLOW_TAG#ringo-flow-v}" || { echo "no changes"; exit 0; }
+          git push
