@@ -282,9 +282,14 @@ fn category(label: &str) -> (u8, &'static str) {
         name,
         "send_audio" | "verify_audio" | "verify_audio_connection" | "tone" | "file" | "silent"
     ) {
-        (4, "Audio")
+        (5, "Audio")
     } else if label.contains("Assertion") {
         (2, "Assertions & matchers")
+    } else if label.contains("HttpMock")
+        || label.contains("MockRequest")
+        || matches!(name, "mock_server" | "json_response" | "text_response")
+    {
+        (4, "HTTP mock server")
     } else if label.contains("HttpResponse") {
         (3, "HTTP")
     } else if label.contains("Agent") || label.contains("Peer") {

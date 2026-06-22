@@ -46,6 +46,18 @@ pub enum Event<'a> {
         url: &'a str,
         status: u16,
     },
+    /// A mock server received an HTTP request (and whether a route matched it).
+    MockRequest {
+        method: &'a str,
+        path: &'a str,
+        matched: bool,
+    },
+    /// A mock responder failed (logged here rather than exposed over HTTP).
+    MockError {
+        method: &'a str,
+        path: &'a str,
+        error: &'a str,
+    },
     Assertion {
         /// Optional `.describe(...)` label, prefixed to the log line; `None` if unset.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -135,6 +147,27 @@ impl Reporter for Human {
                 url,
                 status,
             } if normal => out(None, &format!("HTTP {method} {url} → {status}")),
+            Event::MockRequest {
+                method,
+                path,
+                matched,
+            } if normal => out(
+                None,
+                &format!(
+                    "mock ← {method} {path}{}",
+                    if *matched { "" } else { " (no route → 404)" }
+                ),
+            ),
+            // Responder failures print (to stderr) at every level — they're scenario
+            // bugs the author needs to see, and the HTTP caller only got a bare 500.
+            Event::MockError {
+                method,
+                path,
+                error,
+            } => err(
+                None,
+                &format!("{} mock {method} {path} responder: {error}", fail_mark()),
+            ),
             Event::Assertion {
                 label,
                 expect,

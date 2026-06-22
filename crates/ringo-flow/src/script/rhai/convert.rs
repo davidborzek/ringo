@@ -3,6 +3,7 @@
 //! pairs. This is the only place Rhai value shapes are interpreted.
 
 use crate::engine::assertion::Value;
+use crate::engine::mock_server::MockResponse;
 use crate::engine::{AgentInfo, CallState, sip_user_part};
 use rhai::{Array, Dynamic, EvalAltResult, Map};
 use ringo_core::baresip::Account;
@@ -84,6 +85,35 @@ pub(super) fn json_to_dynamic(v: &serde_json::Value) -> Dynamic {
             }
             Dynamic::from_map(m)
         }
+    }
+}
+
+/// A Rhai value → `serde_json::Value` (for `json_response(...)`): maps become
+/// objects, arrays become arrays, bool/int/float/string map directly, `()` becomes
+/// `null`, and anything else is stringified. Recursive, so nested action lists
+/// serialize as real JSON.
+pub(super) fn dynamic_to_json(d: &Dynamic) -> serde_json::Value {
+    use serde_json::Value as J;
+    if d.is_unit() {
+        J::Null
+    } else if let Ok(b) = d.as_bool() {
+        J::Bool(b)
+    } else if let Ok(i) = d.as_int() {
+        J::Number(i.into())
+    } else if let Ok(f) = d.as_float() {
+        serde_json::Number::from_f64(f).map_or(J::Null, J::Number)
+    } else if let Some(arr) = d.clone().try_cast::<Array>() {
+        J::Array(arr.iter().map(dynamic_to_json).collect())
+    } else if let Some(map) = d.clone().try_cast::<Map>() {
+        J::Object(
+            map.iter()
+                .map(|(k, v)| (k.to_string(), dynamic_to_json(v)))
+                .collect(),
+        )
+    } else if let Ok(s) = d.clone().into_string() {
+        J::String(s)
+    } else {
+        J::String(d.to_string())
     }
 }
 
@@ -186,6 +216,38 @@ pub(super) fn headers_from_map(map: &Map) -> Result<Vec<(String, String)>, Box<E
         }
     }
     Ok(out)
+}
+
+/// A mock-server response map → [`MockResponse`]. Shape:
+/// `#{ status: 200, content_type: "…", headers: #{…}, body: <string|map> }`.
+/// `status` defaults to 200; `body` defaults to empty; a map `body` is JSON-encoded
+/// (so `json_response(...)` and a hand-written map both work).
+pub(super) fn map_to_response(map: &Map) -> Result<MockResponse, Box<EvalAltResult>> {
+    let status = match map.get("status") {
+        Some(d) => d
+            .as_int()
+            .map_err(|_| -> Box<EvalAltResult> { "`status` must be an integer".into() })?,
+        None => 200,
+    };
+    let status = u16::try_from(status)
+        .map_err(|_| -> Box<EvalAltResult> { format!("`status` {status} out of range").into() })?;
+    let content_type = map
+        .get("content_type")
+        .and_then(|d| d.clone().into_string().ok());
+    let headers = match map.get("headers").and_then(|d| d.clone().try_cast::<Map>()) {
+        Some(h) => h
+            .iter()
+            .filter_map(|(k, v)| v.clone().into_string().ok().map(|val| (k.to_string(), val)))
+            .collect(),
+        None => Vec::new(),
+    };
+    let body = map.get("body").and_then(body_to_string).unwrap_or_default();
+    Ok(MockResponse {
+        status,
+        content_type,
+        headers,
+        body,
+    })
 }
 
 /// A valid SIP header field name (RFC 3261 `token`).
