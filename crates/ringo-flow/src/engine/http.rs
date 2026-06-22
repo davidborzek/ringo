@@ -137,7 +137,7 @@ pub fn perform(
 /// Navigate a dotted path (`a.b.0.c`) into a JSON body and return the value at it
 /// (the whole body for an empty path). Missing fields / out-of-range indices /
 /// descending past a scalar are errors with the offending segment.
-fn json_path_value(body: &str, path: &str) -> anyhow::Result<serde_json::Value> {
+pub(crate) fn json_path_value(body: &str, path: &str) -> anyhow::Result<serde_json::Value> {
     // An empty body (e.g. 204 No Content) is treated as JSON `null` so `json()`
     // yields `()` rather than an error — `assert(body).is_present()` then guards
     // both the empty and the literal-`null` case uniformly. A non-empty body that

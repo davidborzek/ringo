@@ -24,4 +24,5 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.13", default-features = false, features = ["default-tls", "charset", "blocking"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 rhai = { version = "1", features = ["sync", "metadata", "internals"] }

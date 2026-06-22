@@ -3,12 +3,14 @@
 //! `Ctx` by agent name; a language adapter (e.g. `script::rhai`) holds an
 //! `Arc<Ctx>` and exposes thin handles that call these methods.
 
+use super::mock_server::MockServerInner;
 use crate::runtime::agent_options;
 use crate::runtime::report::{Event, Reporter};
 use crate::runtime::session::AgentSession;
 use crate::runtime::state::{CallPhase, received_header_value};
 use ringo_core::baresip::Account;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
@@ -88,6 +90,9 @@ pub struct Ctx {
     pub rt: Handle,
     pub reporter: Mutex<Box<dyn Reporter + Send>>,
     pub sessions: Mutex<HashMap<String, AgentSession>>,
+    /// Mock HTTP servers started this scenario, shut down at `reset_sessions` so a
+    /// port can't leak across scenarios (per-scenario isolation, like sessions).
+    mock_servers: Mutex<Vec<Arc<MockServerInner>>>,
     /// Default `await_until` timeout in ms; settable via `default_timeout(…)`.
     default_timeout_ms: AtomicU64,
     /// Disable TLS cert verification for `http(...)` (the `--insecure-http` escape hatch).
@@ -100,6 +105,7 @@ impl Ctx {
             rt,
             reporter: Mutex::new(reporter),
             sessions: Mutex::new(HashMap::new()),
+            mock_servers: Mutex::new(Vec::new()),
             default_timeout_ms: AtomicU64::new(default_timeout.as_millis() as u64),
             http_insecure: AtomicBool::new(false),
         }
@@ -165,6 +171,14 @@ impl Ctx {
             .unwrap_or_else(|e| e.into_inner())
             .insert(name.to_string(), session);
         Ok(())
+    }
+
+    /// Track a mock server so it is shut down at the next `reset_sessions`.
+    pub fn register_mock(&self, server: Arc<MockServerInner>) {
+        self.mock_servers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(server);
     }
 
     // ── getters ──
@@ -418,6 +432,23 @@ impl Ctx {
     /// Hang up and drop all sessions (per-scenario isolation / final teardown),
     /// letting baresip flush BYEs. Poison-tolerant so cleanup can't be blocked.
     pub fn reset_sessions(&self) {
+        // Signal any mock servers to stop, then collect their task handles so we can
+        // await actual socket release (so the next scenario can rebind an explicit
+        // port without an "address in use" race).
+        let servers: Vec<Arc<MockServerInner>> = self
+            .mock_servers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain(..)
+            .collect();
+        let mut server_tasks = Vec::with_capacity(servers.len());
+        for s in &servers {
+            s.shutdown();
+            if let Some(task) = s.take_task() {
+                server_tasks.push(task);
+            }
+        }
+
         let sessions: Vec<AgentSession> = self
             .sessions
             .lock()
@@ -428,9 +459,15 @@ impl Ctx {
         for s in &sessions {
             s.hangup_all();
         }
-        self.rt
-            .block_on(async { tokio::time::sleep(Duration::from_millis(200)).await });
+        self.rt.block_on(async {
+            // Await server shutdown so ports are freed, then let baresip flush BYEs.
+            for task in server_tasks {
+                let _ = task.await;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
         drop(sessions);
+        drop(servers);
     }
 
     pub fn default_timeout(&self) -> Duration {

@@ -4,9 +4,10 @@
 
 use super::convert;
 use super::host::Registry;
-use super::types::{Agent, Assertion, HttpResponse, Peer};
+use super::types::{Agent, Assertion, HttpMock, HttpResponse, MockRequest, PathPattern, Peer};
 use crate::engine::audio::AudioSpec;
 use crate::engine::ctx::{CallState, Ctx};
+use crate::engine::mock_server::{self, PathMatcher, Responder};
 use crate::engine::{assertion, audio, http};
 use crate::runtime::report::Event;
 use rhai::{Dynamic, Engine, EvalAltResult, FnPtr, Map, NativeCallContext};
@@ -38,6 +39,7 @@ pub(super) fn build_engine(
     register_agent(&mut engine, &ctx);
     register_assertions(&mut engine, &ctx);
     register_http(&mut engine, &ctx);
+    register_mock(&mut engine, &ctx, &registry);
     register_audio(&mut engine, &ctx);
     register_globals(&mut engine, &ctx, &registry, &env, base_dir);
 
@@ -564,6 +566,404 @@ fn register_http(engine: &mut Engine, ctx: &Arc<Ctx>) {
             let inner = http::perform(&c, method, url, &headers, body)
                 .map_err(|e| -> Box<EvalAltResult> { e.into() })?;
             Ok(HttpResponse { inner })
+        }
+    );
+}
+
+/// The mock HTTP server: `mock_server(...)`, its `respond`/`on` route verbs, the
+/// `MockRequest` accessors, and the `json_response`/`text_response` helpers. Webhook
+/// e2e tests start a server, register what to answer, drive the call, then assert on
+/// the requests it received (all waiting goes through `await_until`).
+/// `"*"` (any case) means "match any method"; otherwise the upper-cased method.
+fn method_opt(method: &str) -> Option<String> {
+    (method != "*").then(|| method.to_uppercase())
+}
+
+/// Register a static response on `mock` for `method`/`path`.
+fn add_static(
+    mock: &HttpMock,
+    method: Option<String>,
+    path: PathMatcher,
+    response: Map,
+) -> Result<(), Box<EvalAltResult>> {
+    let resp = convert::map_to_response(&response)?;
+    mock.inner.set_route(method, path, Responder::Static(resp));
+    Ok(())
+}
+
+/// Register a dynamic (Rhai-closure) responder on `mock` for `method`/`path`.
+fn add_dynamic(
+    registry: &Registry,
+    mock: &HttpMock,
+    method: Option<String>,
+    path: PathMatcher,
+    responder: FnPtr,
+) -> Result<(), Box<EvalAltResult>> {
+    let r = build_dynamic_responder(registry, responder)?;
+    mock.inner.set_route(method, path, r);
+    Ok(())
+}
+
+/// Turn a Rhai responder closure into an engine [`Responder`]: detach its captured
+/// variables (like `parallel`, so it can run on a worker thread without aliasing the
+/// script thread's values), then call it per request. The engine is held weakly so
+/// the responder (reachable from `Ctx`) can't form a reference cycle with it. A bad
+/// return or a Rhai error becomes an `Err`, which the server logs and answers `500`.
+fn build_dynamic_responder(
+    registry: &Registry,
+    mut responder: FnPtr,
+) -> Result<Responder, Box<EvalAltResult>> {
+    let (engine, ast) = registry
+        .exec()
+        .ok_or_else(|| -> Box<EvalAltResult> { "on: engine not ready".into() })?;
+    for v in responder.iter_curry_mut() {
+        *v = v.flatten_clone();
+    }
+    let weak_engine = Arc::downgrade(&engine);
+    let func = move |req: mock_server::MockRequest| -> Result<mock_server::MockResponse, String> {
+        let Some(engine) = weak_engine.upgrade() else {
+            return Err("scenario engine gone".into());
+        };
+        let arg = Dynamic::from(MockRequest::new(req));
+        match responder.call::<Dynamic>(&engine, &ast, (arg,)) {
+            Ok(d) => match d.try_cast::<Map>() {
+                Some(m) => convert::map_to_response(&m).map_err(|e| e.to_string()),
+                None => Err(
+                    "responder must return a response map (use json_response/text_response)".into(),
+                ),
+            },
+            Err(e) => Err(format!("responder failed: {e}")),
+        }
+    };
+    Ok(Responder::Dynamic(Box::new(func)))
+}
+
+fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) {
+    engine.register_type_with_name::<HttpMock>("HttpMock");
+    engine.register_type_with_name::<MockRequest>("MockRequest");
+    engine.register_type_with_name::<PathPattern>("PathPattern");
+
+    reg!(
+        engine,
+        "regex",
+        ["pattern: string", "PathPattern"],
+        "/// A regex path matcher for `respond`/`on`/`request_count`/… anchored to the\n\
+         /// whole path: `regex(\"/calls/.*\")` matches `/calls/123`. Errors on a bad\n\
+         /// pattern.",
+        |pattern: &str| -> Result<PathPattern, Box<EvalAltResult>> {
+            PathMatcher::regex(pattern)
+                .map(|inner| PathPattern { inner })
+                .map_err(|e| e.into())
+        }
+    );
+
+    // ── starting a server ──
+    let c = ctx.clone();
+    reg!(
+        engine,
+        "mock_server",
+        ["HttpMock"],
+        "/// Start a mock HTTP server on a free port and return a handle. Stopped\n\
+         /// automatically at the end of the scenario. Use `url` to point the system\n\
+         /// under test at it, `respond`/`on` to define routes.",
+        move || -> Result<HttpMock, Box<EvalAltResult>> {
+            let inner =
+                mock_server::start(&c, None).map_err(|e| -> Box<EvalAltResult> { e.into() })?;
+            c.register_mock(inner.clone());
+            Ok(HttpMock { inner })
+        }
+    );
+    let c = ctx.clone();
+    reg!(
+        engine,
+        "mock_server",
+        ["config: map", "HttpMock"],
+        "/// Start a mock HTTP server with config `#{ port: 8080 }` (omit `port` for a\n\
+         /// free one). Returns a handle; stopped automatically at scenario end.",
+        move |config: Map| -> Result<HttpMock, Box<EvalAltResult>> {
+            let port = match config.get("port") {
+                Some(d) => Some(
+                    u16::try_from(d.as_int().map_err(|_| -> Box<EvalAltResult> {
+                        "mock_server: `port` must be an integer".into()
+                    })?)
+                    .map_err(|_| -> Box<EvalAltResult> {
+                        "mock_server: `port` out of range".into()
+                    })?,
+                ),
+                None => None,
+            };
+            let inner =
+                mock_server::start(&c, port).map_err(|e| -> Box<EvalAltResult> { e.into() })?;
+            c.register_mock(inner.clone());
+            Ok(HttpMock { inner })
+        }
+    );
+
+    // ── server handle: getters + verbs ──
+    reg!(
+        engine,
+        "get$url",
+        ["mock: HttpMock", "string"],
+        "/// The server's base URL, e.g. `http://127.0.0.1:8080`.",
+        HttpMock::url
+    );
+    reg!(
+        engine,
+        "get$port",
+        ["mock: HttpMock", "int"],
+        "/// The port the server is listening on.",
+        HttpMock::port
+    );
+    reg!(
+        engine,
+        "respond",
+        [
+            "mock: HttpMock",
+            "method: string",
+            "path: string",
+            "response: map",
+            "()"
+        ],
+        "/// Register a static response for `method path`: a map\n\
+         /// `#{ status: 200, content_type: \"…\", headers: #{…}, body: <string|map> }`\n\
+         /// (use `json_response`/`text_response` to build it). `method` may be `\"*\"`\n\
+         /// for any method. Re-register to stage the next answer between webhooks.",
+        |mock: &mut HttpMock, method: &str, path: &str, response: Map| {
+            add_static(
+                mock,
+                method_opt(method),
+                PathMatcher::Exact(path.into()),
+                response,
+            )
+        }
+    );
+    reg!(
+        engine,
+        "respond",
+        [
+            "mock: HttpMock",
+            "method: string",
+            "path: PathPattern",
+            "response: map",
+            "()"
+        ],
+        "/// Static response for `method` and a `regex(...)` path.",
+        |mock: &mut HttpMock, method: &str, path: PathPattern, response: Map| {
+            add_static(mock, method_opt(method), path.inner, response)
+        }
+    );
+    reg!(
+        engine,
+        "respond",
+        ["mock: HttpMock", "path: string", "response: map", "()"],
+        "/// Static response for `path` on any HTTP method.",
+        |mock: &mut HttpMock, path: &str, response: Map| {
+            add_static(mock, None, PathMatcher::Exact(path.into()), response)
+        }
+    );
+    reg!(
+        engine,
+        "respond",
+        ["mock: HttpMock", "path: PathPattern", "response: map", "()"],
+        "/// Static response for a `regex(...)` path on any HTTP method.",
+        |mock: &mut HttpMock, path: PathPattern, response: Map| {
+            add_static(mock, None, path.inner, response)
+        }
+    );
+    reg!(
+        engine,
+        "request_count",
+        ["mock: HttpMock", "path: string", "int"],
+        "/// How many requests arrived on `path` (any method). Poll it with\n\
+         /// `await_until`, e.g.\n\
+         /// `await_until(|| assert(hooks.request_count(\"/voice\")).equals(1))`.",
+        HttpMock::request_count
+    );
+    reg!(
+        engine,
+        "request_count",
+        ["mock: HttpMock", "path: PathPattern", "int"],
+        "/// How many requests arrived on a `regex(...)` path (any method).",
+        HttpMock::request_count_re
+    );
+    reg!(
+        engine,
+        "last_request",
+        ["mock: HttpMock", "path: string", "MockRequest"],
+        "/// The most recent request on `path` (errors if none yet). Read it after\n\
+         /// `await_until` confirms the webhook arrived.",
+        HttpMock::last_request
+    );
+    reg!(
+        engine,
+        "last_request",
+        ["mock: HttpMock", "path: PathPattern", "MockRequest"],
+        "/// The most recent request on a `regex(...)` path (errors if none yet).",
+        HttpMock::last_request_re
+    );
+    reg!(
+        engine,
+        "requests",
+        ["mock: HttpMock", "path: string", "array"],
+        "/// All requests received on `path`, in arrival order, as `MockRequest`s.",
+        HttpMock::requests
+    );
+    reg!(
+        engine,
+        "requests",
+        ["mock: HttpMock", "path: PathPattern", "array"],
+        "/// All requests on a `regex(...)` path, in arrival order, as `MockRequest`s.",
+        HttpMock::requests_re
+    );
+    reg!(
+        engine,
+        "stop",
+        ["mock: HttpMock", "()"],
+        "/// Stop the server now (it otherwise stops automatically at scenario end).",
+        HttpMock::stop
+    );
+
+    // on([method,] path, |req| <response map>) — a dynamic responder evaluated per
+    // request on a runtime worker. The closure must be pure (request → response, no
+    // agent verbs): it runs concurrently with the script thread. `method` may be
+    // `"*"` (or be omitted) to match any method; `path` may be a `regex(...)`.
+    let r = registry.clone();
+    reg!(
+        engine,
+        "on",
+        [
+            "mock: HttpMock",
+            "method: string",
+            "path: string",
+            "responder: Fn",
+            "()"
+        ],
+        "/// Answer `method path` dynamically: the `|req|` closure receives the\n\
+         /// `MockRequest` and returns a response map (e.g. `json_response(#{…})`).\n\
+         /// `method` may be `\"*\"` for any method. The closure runs on a runtime\n\
+         /// worker, so keep it pure (request → response): no agent verbs, no `wait`\n\
+         /// — those block a worker thread.",
+        move |mock: &mut HttpMock, method: &str, path: &str, responder: FnPtr| {
+            add_dynamic(
+                &r,
+                mock,
+                method_opt(method),
+                PathMatcher::Exact(path.into()),
+                responder,
+            )
+        }
+    );
+    let r = registry.clone();
+    reg!(
+        engine,
+        "on",
+        [
+            "mock: HttpMock",
+            "method: string",
+            "path: PathPattern",
+            "responder: Fn",
+            "()"
+        ],
+        "/// Dynamic responder for `method` and a `regex(...)` path.",
+        move |mock: &mut HttpMock, method: &str, path: PathPattern, responder: FnPtr| {
+            add_dynamic(&r, mock, method_opt(method), path.inner, responder)
+        }
+    );
+    let r = registry.clone();
+    reg!(
+        engine,
+        "on",
+        ["mock: HttpMock", "path: string", "responder: Fn", "()"],
+        "/// Dynamic responder for `path` on any HTTP method.",
+        move |mock: &mut HttpMock, path: &str, responder: FnPtr| {
+            add_dynamic(&r, mock, None, PathMatcher::Exact(path.into()), responder)
+        }
+    );
+    let r = registry.clone();
+    reg!(
+        engine,
+        "on",
+        ["mock: HttpMock", "path: PathPattern", "responder: Fn", "()"],
+        "/// Dynamic responder for a `regex(...)` path on any HTTP method.",
+        move |mock: &mut HttpMock, path: PathPattern, responder: FnPtr| {
+            add_dynamic(&r, mock, None, path.inner, responder)
+        }
+    );
+
+    // ── MockRequest accessors (mirror HttpResponse) ──
+    reg!(
+        engine,
+        "get$method",
+        ["request: MockRequest", "string"],
+        "/// The request method (upper-case).",
+        MockRequest::method
+    );
+    reg!(
+        engine,
+        "get$path",
+        ["request: MockRequest", "string"],
+        "/// The request path.",
+        MockRequest::path
+    );
+    reg!(
+        engine,
+        "get$body",
+        ["request: MockRequest", "string"],
+        "/// The raw request body.",
+        MockRequest::body
+    );
+    reg!(
+        engine,
+        "header",
+        ["request: MockRequest", "name: string", "?"],
+        "/// A request header value (case-insensitive), or `()` if absent.",
+        MockRequest::header
+    );
+    reg!(
+        engine,
+        "query",
+        ["request: MockRequest", "name: string", "?"],
+        "/// A query-string parameter value, or `()` if absent.",
+        MockRequest::query
+    );
+    reg!(
+        engine,
+        "json",
+        ["request: MockRequest", "path: string", "?"],
+        "/// The value at a dotted JSON path in the body (object→map, array, number,\n\
+         /// bool, `null`→`()`). Errors if the path is missing.",
+        MockRequest::json
+    );
+
+    // ── response-map helpers ──
+    reg!(
+        engine,
+        "json_response",
+        ["body: ?", "map"],
+        "/// Build a `200 application/json` response map from `body` (JSON-encoded),\n\
+         /// for `respond`/`on`. `body` may be a map or an array, e.g.\n\
+         /// `json_response(#{ actions: [ … ] })` or `json_response([ … ])`.",
+        |body: Dynamic| -> Map {
+            let mut m = Map::new();
+            m.insert("status".into(), Dynamic::from(200_i64));
+            m.insert("content_type".into(), "application/json".into());
+            let json = serde_json::to_string(&convert::dynamic_to_json(&body))
+                .unwrap_or_else(|_| "null".into());
+            m.insert("body".into(), json.into());
+            m
+        }
+    );
+    reg!(
+        engine,
+        "text_response",
+        ["body: string", "map"],
+        "/// Build a `200 text/plain` response map from `body`, for `respond`/`on`.",
+        |body: &str| -> Map {
+            let mut m = Map::new();
+            m.insert("status".into(), Dynamic::from(200_i64));
+            m.insert("content_type".into(), "text/plain".into());
+            m.insert("body".into(), body.to_string().into());
+            m
         }
     );
 }

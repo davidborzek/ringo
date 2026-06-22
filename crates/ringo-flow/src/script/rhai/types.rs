@@ -5,7 +5,8 @@
 use super::convert;
 use crate::engine::assertion::Assertion as EngineAssertion;
 use crate::engine::ctx::{CallState, Ctx, mark_pending_label};
-use crate::engine::http::HttpResponse as EngineHttp;
+use crate::engine::http::{HttpResponse as EngineHttp, json_path_value};
+use crate::engine::mock_server::{MockRequest as EngineMockRequest, MockServerInner, PathMatcher};
 use crate::engine::sip_user_part;
 use rhai::{Dynamic, EvalAltResult};
 use std::sync::Arc;
@@ -312,5 +313,126 @@ impl HttpResponse {
     }
     pub(super) fn expect_status(&mut self, code: i64) -> Result<(), Box<EvalAltResult>> {
         self.inner.expect_status(code).map_err(|e| e.into())
+    }
+}
+
+/// A handle to a running mock HTTP server. Cheap to clone (shares the server's
+/// state via `Arc`); the server is shut down automatically at the end of the
+/// scenario, so scripts rarely call `stop()`.
+#[derive(Clone)]
+pub(super) struct HttpMock {
+    pub(super) inner: Arc<MockServerInner>,
+}
+
+impl HttpMock {
+    pub(super) fn url(&mut self) -> String {
+        self.inner.url()
+    }
+    pub(super) fn port(&mut self) -> i64 {
+        self.inner.port() as i64
+    }
+    /// Number of requests whose path matches; pair with `await_until`, e.g.
+    /// `await_until(|| assert(hooks.request_count("/voice")).equals(1))`.
+    pub(super) fn request_count(&mut self, path: &str) -> i64 {
+        self.count(&PathMatcher::Exact(path.to_string()))
+    }
+    pub(super) fn request_count_re(&mut self, pat: PathPattern) -> i64 {
+        self.count(&pat.inner)
+    }
+    fn count(&self, m: &PathMatcher) -> i64 {
+        mark_pending_label(format!("mock requests to {}", m.label()));
+        self.inner.request_count(m)
+    }
+    /// The most recent request whose path matches, for inspection after `await_until`.
+    pub(super) fn last_request(&mut self, path: &str) -> Result<MockRequest, Box<EvalAltResult>> {
+        self.last(&PathMatcher::Exact(path.to_string()))
+    }
+    pub(super) fn last_request_re(
+        &mut self,
+        pat: PathPattern,
+    ) -> Result<MockRequest, Box<EvalAltResult>> {
+        self.last(&pat.inner)
+    }
+    fn last(&self, m: &PathMatcher) -> Result<MockRequest, Box<EvalAltResult>> {
+        self.inner
+            .last_request(m)
+            .map(MockRequest::new)
+            .ok_or_else(|| format!("no request recorded on `{}`", m.label()).into())
+    }
+    /// All requests whose path matches, in arrival order.
+    pub(super) fn requests(&mut self, path: &str) -> Dynamic {
+        self.all(&PathMatcher::Exact(path.to_string()))
+    }
+    pub(super) fn requests_re(&mut self, pat: PathPattern) -> Dynamic {
+        self.all(&pat.inner)
+    }
+    fn all(&self, m: &PathMatcher) -> Dynamic {
+        let arr: rhai::Array = self
+            .inner
+            .requests(m)
+            .into_iter()
+            .map(|r| Dynamic::from(MockRequest::new(r)))
+            .collect();
+        Dynamic::from_array(arr)
+    }
+    /// Stop the server early (it otherwise stops at scenario teardown).
+    pub(super) fn stop(&mut self) {
+        self.inner.shutdown();
+    }
+}
+
+/// A path matcher passed to `respond`/`on`/`request_count`/…: either an exact path
+/// (a plain string) or a regex built with `regex(...)`.
+#[derive(Clone)]
+pub(super) struct PathPattern {
+    pub(super) inner: PathMatcher,
+}
+
+/// A request the mock server received, exposed to scenarios. Mirrors
+/// [`HttpResponse`]'s accessors (`json`, `header`, plus `method`/`path`/`body`).
+#[derive(Clone)]
+pub(super) struct MockRequest {
+    inner: Arc<EngineMockRequest>,
+}
+
+impl MockRequest {
+    pub(super) fn new(req: EngineMockRequest) -> Self {
+        Self {
+            inner: Arc::new(req),
+        }
+    }
+    pub(super) fn method(&mut self) -> String {
+        mark_pending_label("request method");
+        self.inner.method.clone()
+    }
+    pub(super) fn path(&mut self) -> String {
+        mark_pending_label("request path");
+        self.inner.path.clone()
+    }
+    pub(super) fn body(&mut self) -> String {
+        mark_pending_label("request body");
+        self.inner.body.clone()
+    }
+    /// A request header value (lower-case lookup), or `()` if absent.
+    pub(super) fn header(&mut self, name: &str) -> Dynamic {
+        mark_pending_label(format!("request header {name}"));
+        convert::opt_to_dynamic(self.inner.headers.get(&name.to_lowercase()).cloned())
+    }
+    /// A query parameter value, or `()` if absent.
+    pub(super) fn query(&mut self, name: &str) -> Dynamic {
+        mark_pending_label(format!("request query {name}"));
+        convert::opt_to_dynamic(self.inner.query.get(name).cloned())
+    }
+    /// The value at a dotted JSON path in the body (`""` for the whole body), typed
+    /// like `HttpResponse::json` (object→map, array, number, bool, `null`→`()`).
+    pub(super) fn json(&mut self, path: &str) -> Result<Dynamic, Box<EvalAltResult>> {
+        mark_pending_label(if path.is_empty() {
+            "request body (JSON)".to_string()
+        } else {
+            format!("request {path}")
+        });
+        json_path_value(&self.inner.body, path)
+            .map(|v| convert::json_to_dynamic(&v))
+            .map_err(|e| e.to_string().into())
     }
 }
