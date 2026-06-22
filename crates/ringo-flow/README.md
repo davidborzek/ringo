@@ -111,6 +111,12 @@ scenario("wip", #{ only: true }, |ctx| { … });                   // run only t
 
 Skipped scenarios don't fail the run; the summary reports them (`… 1 skipped`).
 
+Filters and `only` apply to scenarios inside a suite. A single-scenario file (one
+with no `scenario(...)` call — its top-level code *is* the test) always runs; it has
+no tags/`only` to match. Directory runs only pick up suite files, so this only
+matters when you list single-scenario and suite files together on one command line
+(there, the single-scenario files run first).
+
 ## Docker
 
 A small image (~36 MB) with baresip compiled in — nothing to install, ideal for

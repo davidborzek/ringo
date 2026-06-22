@@ -227,6 +227,12 @@ struct Deferred<H> {
 /// in order); phase 2 runs the suite files' scenarios, with any `only` focus seen
 /// anywhere applied globally. A `FileStarted` header is emitted when running more
 /// than one file.
+///
+/// Knowing the run-wide focus requires every top-level pass first, and a
+/// single-scenario file *executes* during that pass — so when single-scenario and
+/// suite files are listed together explicitly, the single-scenario ones report
+/// before the deferred suites. Directory runs only contain suite files, so they
+/// stay in order.
 fn run_files<H, F>(
     programs: Vec<(String, F)>,
     ctx: &Arc<Ctx>,

@@ -252,10 +252,14 @@ pub(super) fn scenario_info_from_map(
             }
         }
     };
-    let only = map
-        .get("only")
-        .and_then(|d| d.as_bool().ok())
-        .unwrap_or(false);
+    // Error (not silently false) on a non-bool `only` — a typo there would quietly
+    // hide the rest of the suite.
+    let only = match map.get("only") {
+        None => false,
+        Some(d) => d.as_bool().map_err(|_| -> Box<EvalAltResult> {
+            format!("scenario `{name}`: `only` must be a bool").into()
+        })?,
+    };
     Ok(ScenarioInfo {
         name: name.to_string(),
         tags,
@@ -315,7 +319,9 @@ pub(super) fn body_to_string(d: &Dynamic) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{account_from_map, body_to_string, headers_from_map, json_to_dynamic};
+    use super::{
+        account_from_map, body_to_string, headers_from_map, json_to_dynamic, scenario_info_from_map,
+    };
     use rhai::{Dynamic, Map};
 
     #[test]
@@ -373,6 +379,38 @@ mod tests {
         let mut bad = Map::new();
         bad.insert("headers".into(), Dynamic::from(bad_hdrs));
         assert!(headers_from_map(&bad).is_err());
+    }
+
+    #[test]
+    fn scenario_info_parses_tags_skip_only() {
+        // tags array + skip reason + only
+        let mut m = Map::new();
+        m.insert(
+            "tags".into(),
+            Dynamic::from_array(vec![Dynamic::from("smoke"), Dynamic::from("slow")]),
+        );
+        m.insert("skip".into(), Dynamic::from("because"));
+        m.insert("only".into(), Dynamic::from(true));
+        let info = scenario_info_from_map("x", &m).unwrap();
+        assert_eq!(info.tags, vec!["smoke", "slow"]);
+        assert!(info.skip);
+        assert_eq!(info.skip_reason.as_deref(), Some("because"));
+        assert!(info.only);
+
+        // bare-string tag, skip: true (no reason), only defaults false
+        let mut m = Map::new();
+        m.insert("tags".into(), Dynamic::from("smoke"));
+        m.insert("skip".into(), Dynamic::from(true));
+        let info = scenario_info_from_map("x", &m).unwrap();
+        assert_eq!(info.tags, vec!["smoke"]);
+        assert!(info.skip);
+        assert_eq!(info.skip_reason, None);
+        assert!(!info.only);
+
+        // a non-bool `only` is an error, not silently false
+        let mut m = Map::new();
+        m.insert("only".into(), Dynamic::from("yes"));
+        assert!(scenario_info_from_map("x", &m).is_err());
     }
 
     #[test]
