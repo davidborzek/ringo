@@ -1,0 +1,140 @@
+name: Release-plz
+
+# release-plz owns versioning, changelogs, crates.io publishing (in dependency
+# order) and GitHub releases for the whole workspace. The binary build (ringo-phone)
+# and the Docker image (ringo-flow) hang off release-plz's `releases` output in the
+# same run, so no cross-workflow tag trigger / PAT is needed.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # Opens/updates the "Release PR" with version bumps + changelogs.
+  release-pr:
+    name: Release PR
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-plz-pr
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # On merge of the Release PR: publish to crates.io (core → phone/flow), tag, and
+  # create GitHub releases. Exposes which crates were released (+ their tags).
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    outputs:
+      phone_tag: ${{ steps.tags.outputs.phone_tag }}
+      flow_tag: ${{ steps.tags.outputs.flow_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run release-plz
+        id: release-plz
+        uses: MarcoIeni/release-plz-action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      - name: Extract released tags
+        id: tags
+        if: steps.release-plz.outputs.releases_created == 'true'
+        run: |
+          rel='${{ steps.release-plz.outputs.releases }}'
+          echo "phone_tag=$(echo "$rel" | jq -r '.[] | select(.package_name=="ringo-phone") | .tag // empty')" >> "$GITHUB_OUTPUT"
+          echo "flow_tag=$(echo "$rel" | jq -r '.[] | select(.package_name=="ringo-flow") | .tag // empty')" >> "$GITHUB_OUTPUT"
+
+  # ringo-phone binaries → attached to its GitHub release (only if it was released).
+  phone-binaries:
+    name: Build ringo-phone ${{ matrix.target }}
+    needs: release
+    if: needs.release.outputs.phone_tag != ''
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.phone_tag }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install aarch64 Linux cross-compiler
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target ${{ matrix.target }} -p ringo-phone
+      - name: Package
+        run: cp target/${{ matrix.target }}/release/ringo ringo-${{ matrix.target }}
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release.outputs.phone_tag }}
+          files: ringo-${{ matrix.target }}
+
+  # ringo-flow Docker image → GHCR (only if ringo-flow was released).
+  flow-docker:
+    name: Build & push ringo-flow image (GHCR)
+    needs: release
+    if: needs.release.outputs.flow_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.flow_tag }}
+      - name: Compute image tags
+        id: tags
+        run: |
+          version="${FLOW_TAG#ringo-flow-v}"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/ringo-flow"
+          echo "tags=${image}:${version},${image}:latest" >> "$GITHUB_OUTPUT"
+        env:
+          FLOW_TAG: ${{ needs.release.outputs.flow_tag }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/ringo-flow/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
