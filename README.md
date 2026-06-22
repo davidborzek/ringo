@@ -3,7 +3,8 @@
 > A terminal SIP softphone and telephony test runner built on [baresip](https://github.com/baresip/baresip).
 
 [![CI](https://github.com/davidborzek/ringo/actions/workflows/ci.yml/badge.svg)](https://github.com/davidborzek/ringo/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/ringo-phone)](https://crates.io/crates/ringo-phone)
+[![ringo-phone on crates.io](https://img.shields.io/crates/v/ringo-phone?label=ringo-phone)](https://crates.io/crates/ringo-phone)
+[![ringo-flow on crates.io](https://img.shields.io/crates/v/ringo-flow?label=ringo-flow)](https://crates.io/crates/ringo-flow)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
