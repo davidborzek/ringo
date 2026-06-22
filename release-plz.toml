@@ -1,11 +1,16 @@
-# release-plz orchestrates the whole workspace: it bumps versions (per crate, from
-# the commits), keeps inter-crate `version` requirements in sync, writes changelogs,
-# and publishes to crates.io in dependency order — which removes the "a dependent
-# crate was published against a stale sibling" footgun entirely.
+# release-plz manages versions, changelogs and crates.io publishing (in dependency
+# order). cargo-dist owns the GitHub releases + binaries + Homebrew (see
+# dist-workspace.toml / .github/workflows/release.yml).
 #
-# Flow: push to main -> release-plz opens/updates a "Release PR" (version bumps +
-# changelogs). Merging that PR -> release-plz publishes + tags + creates the GitHub
-# releases. Nothing publishes until the Release PR is merged.
+# Flow: push to main -> release-plz opens/updates a "Release PR" (version bump +
+# changelogs). Merging it -> release-plz publishes core→phone→flow to crates.io and
+# pushes ONE shared tag `v{version}`; that tag triggers cargo-dist (one unified
+# release for both binaries). Needs a PAT (RELEASE_PLZ_TOKEN) so the tag triggers
+# cargo-dist — a GITHUB_TOKEN-pushed tag does not start other workflows.
+
+[workspace]
+# cargo-dist creates the GitHub releases, not release-plz.
+git_release_enable = false
 
 [changelog]
 # Mirror the previous cliff.toml grouping (skip chore/style noise).
@@ -18,18 +23,18 @@ commit_parsers = [
   { message = "^[Ss]tyle|^[Cc]hore|^[Cc]i", skip = true },
 ]
 
-# All three crates share one version via `version.workspace = true`, so release-plz
-# bumps the single workspace version and releases them together at the same number.
+# All three crates share one version (`version.workspace = true`). Only ONE tag is
+# created — `v{version}` on ringo-phone — so cargo-dist runs once and makes a single
+# unified release for both binaries. core + flow are published but not tagged
+# separately (no per-crate tags to avoid triggering cargo-dist multiple times).
 [[package]]
 name = "ringo-core"
-# Internal support crate: publish + tag it, but no standalone GitHub release page.
-git_release_enable = false
+git_tag_enable = false
 
 [[package]]
 name = "ringo-phone"
-# Keep the established `vX.Y.Z` tag for the app (its binaries attach to this release).
 git_tag_name = "v{{ version }}"
 
 [[package]]
 name = "ringo-flow"
-git_tag_name = "ringo-flow-v{{ version }}"
+git_tag_enable = false

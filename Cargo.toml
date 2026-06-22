@@ -10,9 +10,15 @@ edition = "2024"
 license = "MIT"
 authors = ["David Borzek <mail@davidborzek.de>"]
 repository = "https://github.com/davidborzek/ringo"
+homepage = "https://github.com/davidborzek/ringo"
 rust-version = "1.85"
 
 # Keep the published dependency version in sync with the workspace version on
 # release (both live in this file).
 [workspace.dependencies]
 ringo-core = { path = "crates/ringo-core", version = "0.10.0" }
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
