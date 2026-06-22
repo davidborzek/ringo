@@ -1715,7 +1715,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-core"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1726,7 +1726,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-flow"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1744,7 +1744,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-phone"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "cargo-husky",
