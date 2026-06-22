@@ -31,7 +31,7 @@ the first failure. No sound hardware needed; it's built on the shared
   system recorded the call (e.g. a correlation id carried on an inbound INVITE).
 - **Webhook-driven call control** — stand up a built-in HTTP mock server, let the
   system under test call its webhook for a call, and answer with the actions it
-  should perform (Twilio-style), then assert on the requests it received. Routes
+  should perform, then assert on the requests it received. Routes
   match by exact path or `regex(...)`, and by a given method or any (`"*"` / no
   method argument).
 
@@ -142,7 +142,7 @@ To build the image yourself (for development):
   agents and a blind **SIP REFER**: Callee transfers the Caller to a Target, who
   ends up connected while the Callee drops out.
 - [`webhook-mock.rhai`](examples/webhook-mock.rhai) — a **mock HTTP server**
-  answers the API's webhook with call actions (Twilio-style); the scenario waits
+  answers the API's webhook with call actions; the scenario waits
   for the webhook via `await_until` and asserts on the recorded request.
 
 ## API reference & editor support

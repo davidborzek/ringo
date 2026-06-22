@@ -2,7 +2,7 @@
 //! responses (static, or a dynamic responder supplied by the language adapter),
 //! and inspects the requests it received. It backs the webhook-driven e2e pattern
 //! — a telephony API calls our webhook and we answer with the actions it should
-//! perform (Twilio-style).
+//! perform.
 //!
 //! The server runs on the shared tokio runtime (`Ctx::rt`); the script thread only
 //! ever touches the route table and the recorded requests behind a `Mutex`, so

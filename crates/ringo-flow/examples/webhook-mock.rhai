@@ -1,6 +1,6 @@
 // Webhook-driven API test with the built-in HTTP mock server.
 //
-// The pattern: a telephony API (Twilio-style) calls our webhook for a call and we
+// The pattern: a telephony API calls our webhook for a call and we
 // answer with the actions it should perform. We stand up a mock server, point the
 // API at it, place a call, and assert the API hit our webhook as expected. The
 // mock server is stopped automatically at the end of the scenario.
