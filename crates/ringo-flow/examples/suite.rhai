@@ -2,8 +2,12 @@
 // as the context; each `scenario(…)` runs in isolation (fresh agents); the
 // optional `teardown(…)` runs after each. Credentials come from the environment.
 //
-// Run all:   ringo-flow run crates/ringo-flow/examples/suite.rhai
-// Run one:   ringo-flow run crates/ringo-flow/examples/suite.rhai --scenario "rejected call"
+// Scenarios can carry options: `#{ tags: [...], skip: true|"reason", only: true }`.
+//
+// Run all:    ringo-flow run crates/ringo-flow/examples/suite.rhai
+// Run one:    ringo-flow run crates/ringo-flow/examples/suite.rhai --scenario "rejected call"
+// By tag:     ringo-flow run crates/ringo-flow/examples/suite.rhai --tag smoke
+// Skip a tag: ringo-flow run crates/ringo-flow/examples/suite.rhai --exclude-tag slow
 
 let DOMAIN = env("SIP_DOMAIN");
 
@@ -17,7 +21,7 @@ setup(|| {
     #{ caller: caller, callee: callee }   // → ctx for each scenario
 });
 
-scenario("answered call", |ctx| {
+scenario("answered call", #{ tags: ["smoke"] }, |ctx| {
     ctx.caller.dial(ctx.callee);
     await_until(|| assert(ctx.callee.state).equals(State::Ringing), "15s");
     ctx.callee.accept();
@@ -26,9 +30,15 @@ scenario("answered call", |ctx| {
     await_until(|| assert(ctx.caller.state).equals(State::Idle), "10s");
 });
 
-scenario("rejected call", |ctx| {
+scenario("rejected call", #{ tags: ["smoke"] }, |ctx| {
     ctx.caller.dial(ctx.callee);
     await_until(|| assert(ctx.callee.state).equals(State::Ringing), "15s");
     ctx.callee.hangup();                  // callee rejects
     await_until(|| assert(ctx.caller.state).equals(State::Idle), "10s");
+});
+
+// Statically disabled — reported as skipped, never run (until the bug is fixed).
+scenario("flaky under load", #{ tags: ["slow"], skip: "needs investigation" }, |ctx| {
+    ctx.caller.dial(ctx.callee);
+    await_until(|| assert(ctx.callee.state).equals(State::Ringing), "15s");
 });

@@ -13,4 +13,4 @@ pub mod mock_server;
 mod run;
 
 pub use ctx::{AgentInfo, CallState, Ctx, sip_user_part};
-pub use run::{ScriptHost, TopLevel, run};
+pub use run::{Filters, ScenarioInfo, ScenarioResult, ScriptHost, TopLevel, run};

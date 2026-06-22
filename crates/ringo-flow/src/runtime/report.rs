@@ -82,10 +82,17 @@ pub enum Event<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
-    /// A suite of scenarios finished: how many passed of the total run.
+    /// A scenario was skipped (statically via `#{ skip }` or at runtime via `skip`).
+    ScenarioSkipped {
+        name: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<&'a str>,
+    },
+    /// A suite of scenarios finished: how many passed/skipped of the total run.
     SuiteFinished {
         total: usize,
         passed: usize,
+        skipped: usize,
     },
     Finished {
         passed: bool,
@@ -98,6 +105,7 @@ pub enum Event<'a> {
         passed_files: usize,
         scenarios: usize,
         passed_scenarios: usize,
+        skipped_scenarios: usize,
     },
 }
 
@@ -224,9 +232,24 @@ impl Reporter for Human {
                     );
                 }
             }
-            Event::SuiteFinished { total, passed } => {
-                let failed = total.saturating_sub(*passed);
-                let body = format!("{total} scenarios — {passed} passed, {failed} failed");
+            Event::ScenarioSkipped { name, reason } => {
+                let detail = reason.map(|r| format!(" ({r})")).unwrap_or_default();
+                out(
+                    None,
+                    &styled(
+                        out_tty(),
+                        "33",
+                        &format!("⊘ scenario `{name}` skipped{detail}"),
+                    ),
+                );
+            }
+            Event::SuiteFinished {
+                total,
+                passed,
+                skipped,
+            } => {
+                let failed = total.saturating_sub(*passed).saturating_sub(*skipped);
+                let body = tally(*total, *passed, failed, *skipped);
                 // Blank line + bold so the final tally stands out at the end.
                 if failed == 0 {
                     println!();
@@ -257,9 +280,15 @@ impl Reporter for Human {
                 passed_files,
                 scenarios,
                 passed_scenarios,
+                skipped_scenarios,
             } => {
+                let skip_note = if *skipped_scenarios > 0 {
+                    format!(" ({skipped_scenarios} skipped)")
+                } else {
+                    String::new()
+                };
                 let body = format!(
-                    "{files} files, {scenarios} scenarios — {passed_scenarios}/{scenarios} scenarios, {passed_files}/{files} files passed"
+                    "{files} files, {scenarios} scenarios — {passed_scenarios}/{scenarios} scenarios{skip_note}, {passed_files}/{files} files passed"
                 );
                 if passed_files == files {
                     println!();
@@ -325,6 +354,15 @@ fn err(agent: Option<&str>, body: &str) {
         Some(a) => eprintln!("{} {a}: {body}", human_ts()),
         None => eprintln!("{} {body}", human_ts()),
     }
+}
+
+/// The suite tally line: `N scenarios — P passed, F failed[, S skipped]`.
+fn tally(total: usize, passed: usize, failed: usize, skipped: usize) -> String {
+    let mut s = format!("{total} scenarios — {passed} passed, {failed} failed");
+    if skipped > 0 {
+        s.push_str(&format!(", {skipped} skipped"));
+    }
+    s
 }
 
 /// The body of an agent action line (the agent name is the line prefix).

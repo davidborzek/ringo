@@ -53,10 +53,25 @@ pattern.
 Register a named scenario, run in isolation (fresh agents, torn down
 after). The body may take the `setup()` context: `|ctx| { … }`.
 
+### `scenario(name: string, options: map, body: Fn)`
+
+Register a scenario with options `#{ tags: ["smoke"], skip: true|"reason",
+only: true }`. `--tag`/`--exclude-tag` filter by tag; a skipped scenario is
+reported but not run; if any scenario sets `only`, only those run.
+
 ### `setup(body: Fn)`
 
 Run before each scenario; its return value is passed to the scenario
 (and teardown) as `ctx`. Typically creates and registers the agents.
+
+### `skip()`
+
+Skip the current scenario at runtime (reported, not failed).
+
+### `skip(reason: string)`
+
+Skip the current scenario at runtime with a reason (reported, not failed);
+e.g. `if env("STAGE") != "prod" { skip("prod only") }`.
 
 ### `teardown(body: Fn)`
 

@@ -84,10 +84,38 @@ ringo-flow check scenario.rhai   # syntax-check only (no baresip)
 ```
 
 Useful flags: `--scenario <pattern>` (run a subset by name; `re:` for regex),
-`--env-file FILE`, `--logs` (print SIP signaling), `--save-audio`, `--json`
-(NDJSON for CI), `-q`/`-v`, `--no-color`, `--insecure-http` (skip TLS verification
-for `http(...)`). The exit code is non-zero if any
-scenario fails. See `ringo-flow run --help` for the full list.
+`--tag <tag>` / `--exclude-tag <tag>` (filter by tag), `--env-file FILE`, `--logs`
+(print SIP signaling), `--save-audio`, `--json` (NDJSON for CI), `-q`/`-v`,
+`--no-color`, `--insecure-http` (skip TLS verification for `http(...)`). The exit
+code is non-zero if any scenario fails. See `ringo-flow run --help` for the full
+list.
+
+### Selecting, tagging and skipping scenarios
+
+Scenarios in a suite take an options map — `scenario(name, #{ … }, |ctx| { … })`:
+
+```rhai
+scenario("happy path", #{ tags: ["smoke"] }, |ctx| { … });
+scenario("nightly load", #{ tags: ["slow", "nightly"] }, |ctx| { … });
+scenario("known broken", #{ skip: "needs fix" }, |ctx| { … });   // reported, not run
+scenario("wip", #{ only: true }, |ctx| { … });                   // run only this one
+```
+
+- **Tags** — `--tag smoke` runs only tagged scenarios; `--exclude-tag slow` drops
+  them. Both are repeatable and comma-separated, and combine with `--scenario`.
+- **Skip** — `skip: true` / `skip: "reason"` disables a scenario statically; it is
+  reported as skipped (not failed). For runtime/env-gated conditions, call
+  `skip("reason")` inside `setup`/the body, e.g. `if env("STAGE") != "prod" { skip("prod only") }`.
+- **Focus** — `only: true` restricts the run to focused scenarios (with a warning,
+  so a stray `only` can't silently hide the rest of the suite).
+
+Skipped scenarios don't fail the run; the summary reports them (`… 1 skipped`).
+
+Filters and `only` apply to scenarios inside a suite. A single-scenario file (one
+with no `scenario(...)` call — its top-level code *is* the test) always runs; it has
+no tags/`only` to match. Directory runs only pick up suite files, so this only
+matters when you list single-scenario and suite files together on one command line
+(there, the single-scenario files run first).
 
 ## Docker
 
