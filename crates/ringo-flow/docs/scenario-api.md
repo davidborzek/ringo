@@ -377,8 +377,9 @@ Dynamic responder for `method` and a `regex(...)` path.
 
 Answer `method path` dynamically: the `|req|` closure receives the
 `MockRequest` and returns a response map (e.g. `json_response(#{…})`).
-`method` may be `"*"` for any method. Must be pure — no agent verbs — as
-it runs on a worker thread.
+`method` may be `"*"` for any method. The closure runs on a runtime
+worker, so keep it pure (request → response): no agent verbs, no `wait`
+— those block a worker thread.
 
 ### `on(mock: HttpMock, path: PathPattern, responder: Fn)`
 

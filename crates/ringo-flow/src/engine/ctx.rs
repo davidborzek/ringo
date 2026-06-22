@@ -432,16 +432,21 @@ impl Ctx {
     /// Hang up and drop all sessions (per-scenario isolation / final teardown),
     /// letting baresip flush BYEs. Poison-tolerant so cleanup can't be blocked.
     pub fn reset_sessions(&self) {
-        // Stop any mock servers first so their ports are released for the next
-        // scenario; the graceful shutdown completes during the settle sleep below.
+        // Signal any mock servers to stop, then collect their task handles so we can
+        // await actual socket release (so the next scenario can rebind an explicit
+        // port without an "address in use" race).
         let servers: Vec<Arc<MockServerInner>> = self
             .mock_servers
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .drain(..)
             .collect();
+        let mut server_tasks = Vec::with_capacity(servers.len());
         for s in &servers {
             s.shutdown();
+            if let Some(task) = s.take_task() {
+                server_tasks.push(task);
+            }
         }
 
         let sessions: Vec<AgentSession> = self
@@ -454,8 +459,13 @@ impl Ctx {
         for s in &sessions {
             s.hangup_all();
         }
-        self.rt
-            .block_on(async { tokio::time::sleep(Duration::from_millis(200)).await });
+        self.rt.block_on(async {
+            // Await server shutdown so ports are freed, then let baresip flush BYEs.
+            for task in server_tasks {
+                let _ = task.await;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
         drop(sessions);
         drop(servers);
     }

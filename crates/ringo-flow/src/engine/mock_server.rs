@@ -19,6 +19,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 /// Largest request body the mock will buffer (webhooks are small JSON payloads).
 const MAX_BODY: usize = 1 << 20; // 1 MiB
@@ -107,6 +108,9 @@ pub struct MockServerInner {
     routes: Mutex<Vec<Route>>,
     recorded: Mutex<Vec<MockRequest>>,
     shutdown: Mutex<Option<oneshot::Sender<()>>>,
+    /// The serving task, awaited at teardown so the port is provably released
+    /// before the next scenario can rebind it.
+    task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl MockServerInner {
@@ -194,8 +198,9 @@ impl MockServerInner {
             .collect()
     }
 
-    /// Stop serving (idempotent). Called by [`Ctx::reset_sessions`] at teardown and
-    /// by the optional `stop()` verb.
+    /// Signal the serving task to stop (idempotent). Called by the `stop()` verb and
+    /// by [`Ctx::reset_sessions`]; the latter then [`take_task`](Self::take_task)s the
+    /// handle to await actual release.
     pub fn shutdown(&self) {
         if let Some(tx) = self
             .shutdown
@@ -205,6 +210,12 @@ impl MockServerInner {
         {
             let _ = tx.send(());
         }
+    }
+
+    /// Take the serving task handle so it can be awaited after `shutdown()`, ensuring
+    /// the listening socket is closed (port freed) before returning.
+    pub fn take_task(&self) -> Option<JoinHandle<()>> {
+        self.task.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 }
 
@@ -240,13 +251,14 @@ pub fn start(ctx: &Arc<Ctx>, port: Option<u16>) -> Result<Arc<MockServerInner>, 
         routes: Mutex::new(Vec::new()),
         recorded: Mutex::new(Vec::new()),
         shutdown: Mutex::new(Some(tx)),
+        task: Mutex::new(None),
     });
 
     let handler = Handler {
         inner: inner.clone(),
         ctx: Arc::downgrade(ctx),
     };
-    ctx.rt.spawn(async move {
+    let task = ctx.rt.spawn(async move {
         let listener = match tokio::net::TcpListener::from_std(std_listener) {
             Ok(l) => l,
             Err(e) => {
@@ -261,6 +273,7 @@ pub fn start(ctx: &Arc<Ctx>, port: Option<u16>) -> Result<Arc<MockServerInner>, 
             })
             .await;
     });
+    *inner.task.lock().unwrap_or_else(|e| e.into_inner()) = Some(task);
 
     Ok(inner)
 }
@@ -269,6 +282,8 @@ pub fn start(ctx: &Arc<Ctx>, port: Option<u16>) -> Result<Arc<MockServerInner>, 
 /// and run its responder (404 if none matches).
 async fn serve(State(state): State<Handler>, req: Request<Body>) -> Response<Body> {
     let (parts, body) = req.into_parts();
+    // A body over MAX_BODY (or an I/O error) reads as empty rather than failing the
+    // request — webhooks are small, so this only bites pathological payloads.
     let body = to_bytes(body, MAX_BODY)
         .await
         .map(|b| String::from_utf8_lossy(&b).into_owned())
@@ -355,6 +370,8 @@ fn build_response(r: MockResponse) -> Response<Body> {
     for (k, v) in &r.headers {
         builder = builder.header(k.as_str(), v.as_str());
     }
+    // An invalid status/header makes `body()` error; fall back to an empty 200 so a
+    // malformed response map can't panic the worker (it surfaces as a blank reply).
     builder
         .body(Body::from(r.body))
         .unwrap_or_else(|_| Response::new(Body::empty()))
@@ -588,5 +605,34 @@ mod tests {
         assert_eq!(server.request_count(&re), 4);
 
         server.shutdown();
+    }
+
+    #[test]
+    fn explicit_port_is_freed_after_awaiting_task() {
+        let (rt, ctx) = test_ctx();
+        // A free port to reuse (the throwaway listener is dropped at the semicolon).
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+
+        let s1 = start(&ctx, Some(port)).unwrap();
+        assert_eq!(s1.port(), port);
+        s1.shutdown();
+        rt.block_on(async {
+            if let Some(t) = s1.take_task() {
+                let _ = t.await;
+            }
+        });
+
+        // Rebinding the same port must succeed now that the task has ended.
+        let s2 = start(&ctx, Some(port)).expect("port should be free after awaiting the task");
+        s2.shutdown();
+        rt.block_on(async {
+            if let Some(t) = s2.take_task() {
+                let _ = t.await;
+            }
+        });
     }
 }

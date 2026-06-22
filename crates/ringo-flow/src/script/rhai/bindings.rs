@@ -840,8 +840,9 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         ],
         "/// Answer `method path` dynamically: the `|req|` closure receives the\n\
          /// `MockRequest` and returns a response map (e.g. `json_response(#{…})`).\n\
-         /// `method` may be `\"*\"` for any method. Must be pure — no agent verbs — as\n\
-         /// it runs on a worker thread.",
+         /// `method` may be `\"*\"` for any method. The closure runs on a runtime\n\
+         /// worker, so keep it pure (request → response): no agent verbs, no `wait`\n\
+         /// — those block a worker thread.",
         move |mock: &mut HttpMock, method: &str, path: &str, responder: FnPtr| {
             add_dynamic(
                 &r,
