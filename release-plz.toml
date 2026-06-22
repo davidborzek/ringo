@@ -18,17 +18,15 @@ commit_parsers = [
   { message = "^[Ss]tyle|^[Cc]hore|^[Cc]i", skip = true },
 ]
 
-# ringo-core + ringo-phone release in lockstep (same version); ringo-flow is
-# versioned independently (it's pre-1.0/beta).
+# All three crates share one version via `version.workspace = true`, so release-plz
+# bumps the single workspace version and releases them together at the same number.
 [[package]]
 name = "ringo-core"
-version_group = "app"
 # Internal support crate: publish + tag it, but no standalone GitHub release page.
 git_release_enable = false
 
 [[package]]
 name = "ringo-phone"
-version_group = "app"
 # Keep the established `vX.Y.Z` tag for the app (its binaries attach to this release).
 git_tag_name = "v{{ version }}"
 
