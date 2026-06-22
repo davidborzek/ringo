@@ -1,0 +1,35 @@
+# release-plz orchestrates the whole workspace: it bumps versions (per crate, from
+# the commits), keeps inter-crate `version` requirements in sync, writes changelogs,
+# and publishes to crates.io in dependency order — which removes the "a dependent
+# crate was published against a stale sibling" footgun entirely.
+#
+# Flow: push to main -> release-plz opens/updates a "Release PR" (version bumps +
+# changelogs). Merging that PR -> release-plz publishes + tags + creates the GitHub
+# releases. Nothing publishes until the Release PR is merged.
+
+[changelog]
+# Mirror the previous cliff.toml grouping (skip chore/style noise).
+commit_parsers = [
+  { message = "^[Ff]eat", group = "Features" },
+  { message = "^[Ff]ix", group = "Bug Fixes" },
+  { message = "^[Rr]efactor", group = "Refactor" },
+  { message = "^[Dd]ocs", group = "Documentation" },
+  { message = "^[Tt]est", group = "Tests" },
+  { message = "^[Ss]tyle|^[Cc]hore|^[Cc]i", skip = true },
+]
+
+# All three crates share one version via `version.workspace = true`, so release-plz
+# bumps the single workspace version and releases them together at the same number.
+[[package]]
+name = "ringo-core"
+# Internal support crate: publish + tag it, but no standalone GitHub release page.
+git_release_enable = false
+
+[[package]]
+name = "ringo-phone"
+# Keep the established `vX.Y.Z` tag for the app (its binaries attach to this release).
+git_tag_name = "v{{ version }}"
+
+[[package]]
+name = "ringo-flow"
+git_tag_name = "ringo-flow-v{{ version }}"

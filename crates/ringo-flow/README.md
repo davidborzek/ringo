@@ -1,15 +1,12 @@
 # ringo-flow
 
-![status: beta](https://img.shields.io/badge/status-beta-orange)
-
 > Declarative telephony tests for [baresip](https://github.com/baresip/baresip):
 > script SIP call scenarios and assert what happens.
 
 > [!WARNING]
-> **Beta — the scenario API is not stable yet.** ringo-flow is pre-1.0
-> (`0.1.0-beta`) and versioned independently of the rest of the workspace. Verbs,
-> getters, output and behaviour may change in **breaking** ways between releases.
-> Pin an exact version if you depend on it.
+> **The scenario API is not stable yet.** ringo-flow shares the workspace version
+> and is still pre-1.0 (`0.x`); verbs, getters, output and behaviour may change in
+> **breaking** ways between releases. Pin an exact version if you depend on it.
 
 ringo-flow runs automated **call tests**. A scenario is a [Rhai](https://rhai.rs)
 script that brings up one or more SIP **agents** (each a headless baresip
@@ -98,7 +95,7 @@ docker run --rm --network host \
 ```
 
 Tags: `:latest` (the newest release) and `:<version>` to pin a specific one
-(e.g. `:0.1.0-beta.1`).
+(e.g. `:0.10.0`).
 
 - **`--network host`** is the simplest way to get working SIP/RTP and to reach
   internal services — the container shares the host's network and DNS. On the
