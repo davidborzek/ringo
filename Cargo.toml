@@ -5,7 +5,7 @@ members = ["crates/ringo-core", "crates/ringo-phone", "crates/ringo-flow"]
 # Shared metadata inherited by the member crates via `<field>.workspace = true`.
 # Bump `version` here once to release both crates in lockstep.
 [workspace.package]
-version = "0.10.0"
+version = "0.10.1"
 edition = "2024"
 license = "MIT"
 authors = ["David Borzek <mail@davidborzek.de>"]
@@ -15,4 +15,4 @@ rust-version = "1.85"
 # Keep the published dependency version in sync with the workspace version on
 # release (both live in this file).
 [workspace.dependencies]
-ringo-core = { path = "crates/ringo-core", version = "0.10.0" }
+ringo-core = { path = "crates/ringo-core", version = "0.10.1" }

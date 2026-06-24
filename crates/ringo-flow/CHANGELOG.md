@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.10.0...ringo-flow-v0.10.1) - 2026-06-24
+
+### Documentation
+
+- add crates.io badges for ringo-flow ([#22](https://github.com/davidborzek/ringo/pull/22))
+
+### Features
+
+- *(ringo-flow)* scenario tags, skip and only ([#27](https://github.com/davidborzek/ringo/pull/27))
+- *(ringo-flow)* HTTP mock server for webhook scenarios ([#26](https://github.com/davidborzek/ringo/pull/26))
+
 ## [0.10.0](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.9.0...ringo-flow-v0.10.0) - 2026-06-22
 
 ### Features
