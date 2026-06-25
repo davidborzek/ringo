@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="13 13 74 74" role="img" aria-label="ringo">
+  <g fill="none" stroke="#d4633a" stroke-width="8" stroke-linecap="round">
+    <path d="M42 20 A34 34 0 0 0 42 80"/>
+    <path d="M58 20 A34 34 0 0 1 58 80"/>
+  </g>
+  <circle cx="50" cy="50" r="9" fill="#d4633a"/>
+</svg>
