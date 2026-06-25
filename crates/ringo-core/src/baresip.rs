@@ -212,7 +212,11 @@ fn accounts_line(account: &Account) -> String {
     );
 
     if let Some(v) = account.outbound.as_deref().filter(|s| !s.is_empty()) {
-        line.push_str(&format!(";outbound={}", v));
+        // Quote the outbound URI: baresip parses unquoted account params at every
+        // `;`, so a proxy URI like `sip:host;transport=tls` would leak its
+        // `transport=tls` out as a *separate* account param instead of routing
+        // to the proxy over TLS — silently registering over plain TCP/UDP.
+        line.push_str(&format!(";outbound=\"{}\"", v));
     }
     if let Some(v) = account.stun_server.as_deref().filter(|s| !s.is_empty()) {
         line.push_str(&format!(";stunserver={}", v));
@@ -386,4 +390,42 @@ fn detect_codecs(module_path: &str) -> Vec<String> {
 fn pick_free_port() -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0").context("Failed to bind for port discovery")?;
     Ok(listener.local_addr()?.port())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn outbound_uri_is_quoted_so_embedded_params_stay_with_the_proxy() {
+        // An unquoted outbound URI lets baresip parse `;transport=tls` as a
+        // separate account param, which silently downgrades the registration to
+        // plain TCP/UDP. Quoting keeps the transport bound to the proxy URI.
+        let account = Account {
+            username: "user".into(),
+            domain: "example.com".into(),
+            password: "secret".into(),
+            outbound: Some("sip:proxy.example.com;transport=tls".into()),
+            ..Default::default()
+        };
+
+        let line = accounts_line(&account);
+
+        assert!(
+            line.contains(";outbound=\"sip:proxy.example.com;transport=tls\""),
+            "outbound URI must be quoted: {line}"
+        );
+    }
+
+    #[test]
+    fn outbound_is_omitted_when_unset() {
+        let account = Account {
+            username: "user".into(),
+            domain: "example.com".into(),
+            password: "secret".into(),
+            ..Default::default()
+        };
+
+        assert!(!accounts_line(&account).contains("outbound"));
+    }
 }
