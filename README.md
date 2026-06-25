@@ -12,13 +12,15 @@
 softphone you live in, and a scenario runner that drives baresip headless for
 automated call testing, both sharing one engine.
 
-## Crates
+📖 **Documentation: https://davidborzek.github.io/ringo/**
+
+## Tools
 
 | Crate | What it is | Docs |
 |-------|------------|------|
-| [`ringo-phone`](crates/ringo-phone) | The **`ringo` softphone** — a ratatui TUI managing multiple SIP profiles, with calls, contacts, transfers, remote control and headless automation | [README](crates/ringo-phone/README.md) |
-| [`ringo-flow`](crates/ringo-flow) | A **telephony scenario test runner** — bring up SIP agents from a [Rhai](https://rhai.rs) script, drive them, and assert call behaviour (incl. audio) | [README](crates/ringo-flow/README.md) · [API](crates/ringo-flow/docs/scenario-api.md) |
-| [`ringo-core`](crates/ringo-core) | The **shared engine** — baresip spawning, the `ctrl_tcp` wire protocol, the call-event model (internal, no stable API) | [README](crates/ringo-core/README.md) |
+| [`ringo-phone`](crates/ringo-phone) | The **`ringo` softphone** — a ratatui TUI managing multiple SIP profiles, with calls, contacts, transfers, remote control and headless automation | [Guide](https://davidborzek.github.io/ringo/ringo-phone/introduction.html) |
+| [`ringo-flow`](crates/ringo-flow) | A **telephony scenario test runner** — bring up SIP agents from a [Rhai](https://rhai.rs) script, drive them, and assert call behaviour (incl. audio) | [Guide](https://davidborzek.github.io/ringo/ringo-flow/introduction.html) · [API](https://davidborzek.github.io/ringo/ringo-flow/api/scenario-structure.html) |
+| [`ringo-core`](crates/ringo-core) | The **shared engine** — baresip spawning, the `ctrl_tcp` wire protocol, the call-event model (internal, no stable API) | — |
 
 ## Requirements
 
@@ -34,9 +36,9 @@ cargo install ringo-phone   # installs the `ringo` binary
 ringo                       # Ctrl+N to create your first profile
 ```
 
-See the [**ringo-phone README**](crates/ringo-phone/README.md) for features,
-installation options, keybindings, configuration, remote control and more. For
-automated call testing, see [**ringo-flow**](crates/ringo-flow/README.md).
+See the [documentation](https://davidborzek.github.io/ringo/) for install
+options, configuration, remote control and writing scenario tests with
+[ringo-flow](https://davidborzek.github.io/ringo/ringo-flow/introduction.html).
 
 ## Development
 

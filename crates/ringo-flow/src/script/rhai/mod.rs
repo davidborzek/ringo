@@ -5,8 +5,8 @@
 //! imported modules.
 
 /// Register a native function with metadata so it shows up in the generated
-/// `.d.rhai` (and HTML docs) with named parameters, clean Rhai types and a
-/// doc-comment. `params` is `["name: type", …, "ReturnType"]` (return type last).
+/// `.d.rhai` and the scenario API reference with named parameters, clean Rhai
+/// types and a doc-comment. `params` is `["name: type", …, "ReturnType"]` (last).
 /// Defined before the submodules so they can use it.
 macro_rules! reg {
     ($engine:expr, $name:expr, [$($pi:literal),* $(,)?], $doc:expr, $func:expr $(,)?) => {
@@ -19,9 +19,11 @@ macro_rules! reg {
 
 mod bindings;
 mod convert;
+mod docs;
 mod host;
 mod types;
 
+pub use docs::{write_book_api, write_definitions};
 pub use host::scenario_names;
 
 use crate::engine::{self, Ctx};
@@ -206,220 +208,9 @@ pub fn check(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Build an engine purely to enumerate the registered API (definitions/docs). No
-/// baresip is started; the throwaway `Ctx`'s verbs are never called. The runtime
-/// is returned so its `Handle` (held by `Ctx`) stays valid.
-fn doc_engine() -> Result<(tokio::runtime::Runtime, Engine)> {
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    let ctx = Arc::new(Ctx::new(
-        rt.handle().clone(),
-        Box::new(crate::runtime::report::Json),
-        DEFAULT_TIMEOUT,
-    ));
-    let engine = bindings::build_engine(
-        ctx,
-        Arc::new(host::Registry::default()),
-        Arc::default(),
-        PathBuf::from("."),
-    );
-    Ok((rt, engine))
-}
-
-/// Write a Rhai definition file (`.d.rhai`) describing the whole scenario API
-/// (functions, getters, types, the `State` namespace) for the Rhai language
-/// server (completion/hover).
-pub fn write_definitions(out: &Path) -> Result<()> {
-    let (_rt, engine) = doc_engine()?;
-    let scope = rhai::Scope::new();
-    engine
-        .definitions_with_scope(&scope)
-        .write_to_file(out)
-        .with_context(|| format!("write {}", out.display()))?;
-    println!("wrote {}", out.display());
-    Ok(())
-}
-
-/// The documented scenario API as `(signature label, doc lines)`, sorted by
-/// label. Operators and the Rhai stdlib (no doc comments) are filtered out, so
-/// this is exactly what the `reg!` calls document — the single source for both
-/// the HTML and the Markdown reference.
-fn api_functions(engine: &Engine) -> Result<Vec<(String, Vec<String>)>> {
-    let json = engine
-        .gen_fn_metadata_to_json(false)
-        .context("generate function metadata")?;
-    let meta: serde_json::Value = serde_json::from_str(&json).context("parse metadata JSON")?;
-    let mut out: Vec<(String, Vec<String>)> = meta["functions"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|f| {
-            let docs: Vec<String> = f["docComments"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|d| d.as_str())
-                .flat_map(clean_doc)
-                .collect();
-            (!docs.is_empty()).then(|| (sig_label(f), docs))
-        })
-        .collect();
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(out)
-}
-
-/// The reference section a signature belongs to, for the grouped Markdown. This
-/// is presentation-only: group by the receiver type (first parameter), with the
-/// audio verbs split out by name. Returns `(order, title)`.
-fn category(label: &str) -> (u8, &'static str) {
-    let name = label
-        .trim_start_matches("get ")
-        .split('(')
-        .next()
-        .unwrap_or("");
-    if matches!(
-        name,
-        "send_audio" | "verify_audio" | "verify_audio_connection" | "tone" | "file" | "silent"
-    ) {
-        (5, "Audio")
-    } else if label.contains("Assertion") {
-        (2, "Assertions & matchers")
-    } else if label.contains("HttpMock")
-        || label.contains("MockRequest")
-        || matches!(name, "mock_server" | "json_response" | "text_response")
-    {
-        (4, "HTTP mock server")
-    } else if label.contains("HttpResponse") {
-        (3, "HTTP")
-    } else if label.contains("Agent") || label.contains("Peer") {
-        (1, "Agents")
-    } else {
-        (0, "Top-level")
-    }
-}
-
-/// Render the scenario API as Markdown, grouped into sections. Pure (no I/O) so a
-/// test can compare it against the committed `docs/scenario-api.md`.
-fn render_markdown_docs(engine: &Engine) -> Result<String> {
-    // `funcs` is already sorted by label, so within each group the entries stay
-    // alphabetical; the BTreeMap key `(order, title)` orders the sections.
-    let mut groups: std::collections::BTreeMap<(u8, &'static str), String> =
-        std::collections::BTreeMap::new();
-    for (label, docs) in api_functions(engine)? {
-        let body = groups.entry(category(&label)).or_default();
-        body.push_str(&format!("### `{label}`\n\n"));
-        for line in docs {
-            body.push_str(&line);
-            body.push('\n');
-        }
-        body.push('\n');
-    }
-
-    let mut md = String::from(
-        "# ringo-flow scenario API\n\n\
-         Functions, getters and types available in a `.rhai` scenario. **Generated** \
-         from the engine with `ringo-flow docs` — do not edit by hand; see the \
-         [README](../README.md) for concepts and usage.\n\n",
-    );
-    for ((_, title), body) in &groups {
-        md.push_str(&format!("## {title}\n\n{body}"));
-    }
-    Ok(md)
-}
-
-/// Write the Markdown scenario API reference (git-friendly, linkable).
-pub fn write_markdown_docs(out: &Path) -> Result<()> {
-    let (_rt, engine) = doc_engine()?;
-    let md = render_markdown_docs(&engine)?;
-    std::fs::write(out, md).with_context(|| format!("write {}", out.display()))?;
-    println!("wrote {}", out.display());
-    Ok(())
-}
-
-/// Write an HTML reference of the scenario API, rendered from the engine's
-/// function metadata (so it stays in sync). Only documented functions are shown.
-pub fn write_html_docs(out: &Path) -> Result<()> {
-    let (_rt, engine) = doc_engine()?;
-    let mut items = String::new();
-    for (label, docs) in api_functions(&engine)? {
-        items.push_str(&format!(
-            "<section><h3><code>{}</code></h3>\n",
-            html_escape(&label)
-        ));
-        for line in docs {
-            items.push_str(&format!("<p>{}</p>\n", html_escape(&line)));
-        }
-        items.push_str("</section>\n");
-    }
-
-    let html = format!(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
-<title>ringo-flow scenario API</title><style>\
-body{{font:16px/1.5 system-ui,sans-serif;max-width:48rem;margin:2rem auto;padding:0 1rem;color:#222}}\
-h1{{border-bottom:2px solid #eee;padding-bottom:.3rem}}\
-section{{border-top:1px solid #eee;padding:.3rem 0}}\
-code{{background:#f5f5f5;padding:.1rem .3rem;border-radius:3px;font-size:.95em}}\
-h3{{margin:.6rem 0 .2rem}} p{{margin:.2rem 0}}\
-</style></head><body>\
-<h1>ringo-flow scenario API</h1>\
-<p>Functions and getters available in a <code>.rhai</code> scenario. Generated \
-from the engine — see the README for usage.</p>\n{items}</body></html>\n"
-    );
-    std::fs::write(out, html).with_context(|| format!("write {}", out.display()))?;
-    println!("wrote {}", out.display());
-    Ok(())
-}
-
-/// A readable signature; getters (`get$x(…)`) render as `get x(…)`.
-fn sig_label(f: &serde_json::Value) -> String {
-    let sig = f["signature"].as_str().unwrap_or("");
-    match sig.strip_prefix("get$") {
-        Some(rest) => format!("get {rest}"),
-        None => sig.to_string(),
-    }
-}
-
-/// Split a `///`/`/**` doc block into clean text lines.
-fn clean_doc(block: &str) -> Vec<String> {
-    block
-        .lines()
-        .map(|l| {
-            l.trim()
-                .trim_start_matches("/**")
-                .trim_end_matches("*/")
-                .trim_start_matches("///")
-                .trim_start_matches('*')
-                .trim()
-                .to_string()
-        })
-        .filter(|l| !l.is_empty())
-        .collect()
-}
-
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
 #[cfg(test)]
 mod tests {
     use super::merge_dotenv;
-
-    #[test]
-    fn markdown_reference_is_current() {
-        // The committed reference is generated; this fails if it drifts from the
-        // engine's registered API so it can't go stale silently.
-        let (_rt, engine) = super::doc_engine().unwrap();
-        let generated = super::render_markdown_docs(&engine).unwrap();
-        let committed = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/scenario-api.md"));
-        assert_eq!(
-            generated, committed,
-            "docs/scenario-api.md is stale — regenerate with \
-             `cargo run -p ringo-flow -- docs crates/ringo-flow/docs/scenario-api.md`"
-        );
-    }
 
     #[test]
     fn dotenv_parses_comments_quotes_export_and_overrides() {

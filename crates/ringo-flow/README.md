@@ -14,30 +14,32 @@
 ringo-flow runs automated **call tests**. A scenario is a [Rhai](https://rhai.rs)
 script that brings up one or more SIP **agents** (each a headless baresip
 instance), drives them — register, dial, accept, transfer, send DTMF, play and
-verify audio — and **asserts** the outcome. Assertions are event-driven: they
-wait for the expected state instead of sleeping, and the run exits non-zero on
-the first failure. No sound hardware needed; it's built on the shared
-[`ringo-core`](../ringo-core) engine.
+verify audio, call webhooks — and **asserts** the outcome. Assertions are
+event-driven: they wait for the expected state instead of sleeping, and the run
+exits non-zero on the first failure. No sound hardware needed; it's built on the
+shared [`ringo-core`](../ringo-core) engine.
 
-## Use cases
+📖 **Full documentation: https://davidborzek.github.io/ringo/ringo-flow/introduction.html**
+— a guide (your first scenario, writing scenarios, audio testing, HTTP &
+webhooks, running in CI) and the generated
+[**scenario API reference**](https://davidborzek.github.io/ringo/ringo-flow/api/scenario-structure.html).
 
-- **Regression-test a PBX / SIP setup** — registration, call routing, rejection,
-  hold, blind & attended transfer, conferences.
-- **CI for telephony backends** — fully headless (virtual audio), so it runs on a
-  build server with no devices.
-- **End-to-end feature checks** — DTMF/IVR navigation, MWI, custom SIP headers,
-  and real two-way **audio** (tone detection over the media path).
-- **Cross-check a backend API** — make HTTP calls mid-scenario and assert the
-  system recorded the call (e.g. a correlation id carried on an inbound INVITE).
-- **Webhook-driven call control** — stand up a built-in HTTP mock server, let the
-  system under test call its webhook for a call, and answer with the actions it
-  should perform, then assert on the requests it received. Routes
-  match by exact path or `regex(...)`, and by a given method or any (`"*"` / no
-  method argument).
+## Requirements
 
-## How it works
+[baresip](https://github.com/baresip/baresip) >= 3.14 in `$PATH`. For CI there's
+also a small Docker image with baresip compiled in (`ghcr.io/davidborzek/ringo-flow`) —
+see [Running in CI](https://davidborzek.github.io/ringo/ringo-flow/running-in-ci.html).
+
+## Install
+
+```sh
+cargo install --git https://github.com/davidborzek/ringo ringo-flow
+```
+
+## Getting started
 
 ```rhai
+// scenario.rhai
 let a = agent("A", #{ username: env("A_USER"), domain: env("SIP_DOMAIN"), password: env("A_PASS") });
 let b = agent("B", #{ username: env("B_USER"), domain: env("SIP_DOMAIN"), password: env("B_PASS") });
 
@@ -50,153 +52,28 @@ b.accept();
 await_until(|| assert(a.state).equals(State::Established));
 ```
 
-- **Agents** are SIP endpoints you create and drive with verbs (`register`,
-  `dial`, `accept`, `hangup`, `hold`, `transfer`, `dtmf`, `send_audio`, …).
-- **`assert(x).<matcher>(…)`** is a fluent, auto-labeled check; wrap it in
-  **`await_until(|| …)`** to wait for async state to settle (default timeout,
-  overridable per call).
-- A file with `scenario("name", |ctx| { … })` calls becomes a **suite** — each
-  scenario runs in isolation with `setup`/`teardown`; otherwise the whole script
-  is a single scenario.
-- Credentials come from the **environment** (`env(...)`, `--env-file`, a per-file
-  `<scenario>.env`) so secrets stay out of scripts.
-
-It's a normal Rhai script, so variables, `if`/`for` and `fn` definitions all work.
-The full verb / getter / matcher list — with signatures — is in the generated
-[**scenario API reference**](docs/scenario-api.md).
-
-## Getting started
-
-Requires [baresip](https://github.com/baresip/baresip) >= 3.14 in `$PATH`.
-
 ```sh
-cargo install --git https://github.com/davidborzek/ringo ringo-flow
-# …or from a workspace checkout: cargo run -p ringo-flow -- run scenario.rhai
-
 SIP_DOMAIN=example.com A_USER=alice A_PASS=… B_USER=bob B_PASS=… \
   ringo-flow run scenario.rhai
-```
 
-```sh
-ringo-flow run scenario.rhai     # one file
 ringo-flow run scenarios/        # a directory (all *.rhai, recursively)
 ringo-flow check scenario.rhai   # syntax-check only (no baresip)
 ```
 
-Useful flags: `--scenario <pattern>` (run a subset by name; `re:` for regex),
-`--tag <tag>` / `--exclude-tag <tag>` (filter by tag), `--env-file FILE`, `--logs`
-(print SIP signaling), `--save-audio`, `--json` (NDJSON for CI), `-q`/`-v`,
-`--no-color`, `--insecure-http` (skip TLS verification for `http(...)`). The exit
-code is non-zero if any scenario fails. See `ringo-flow run --help` for the full
-list.
+The [**Your first scenario**](https://davidborzek.github.io/ringo/ringo-flow/your-first-scenario.html)
+walkthrough explains this line by line. See the guide for tags & filtering,
+audio verification, the HTTP mock server, Docker/CI and the full API.
+Runnable examples live in [`examples/`](https://github.com/davidborzek/ringo/tree/main/crates/ringo-flow/examples).
 
-### Selecting, tagging and skipping scenarios
+### Editor support
 
-Scenarios in a suite take an options map — `scenario(name, #{ … }, |ctx| { … })`:
-
-```rhai
-scenario("happy path", #{ tags: ["smoke"] }, |ctx| { … });
-scenario("nightly load", #{ tags: ["slow", "nightly"] }, |ctx| { … });
-scenario("known broken", #{ skip: "needs fix" }, |ctx| { … });   // reported, not run
-scenario("wip", #{ only: true }, |ctx| { … });                   // run only this one
-```
-
-- **Tags** — `--tag smoke` runs only tagged scenarios; `--exclude-tag slow` drops
-  them. Both are repeatable and comma-separated, and combine with `--scenario`.
-- **Skip** — `skip: true` / `skip: "reason"` disables a scenario statically; it is
-  reported as skipped (not failed). For runtime/env-gated conditions, call
-  `skip("reason")` inside `setup`/the body, e.g. `if env("STAGE") != "prod" { skip("prod only") }`.
-- **Focus** — `only: true` restricts the run to focused scenarios (with a warning,
-  so a stray `only` can't silently hide the rest of the suite).
-
-Skipped scenarios don't fail the run; the summary reports them (`… 1 skipped`).
-
-Filters and `only` apply to scenarios inside a suite. A single-scenario file (one
-with no `scenario(...)` call — its top-level code *is* the test) always runs; it has
-no tags/`only` to match. Directory runs only pick up suite files, so this only
-matters when you list single-scenario and suite files together on one command line
-(there, the single-scenario files run first).
-
-## Docker
-
-A small image (~36 MB) with baresip compiled in — nothing to install, ideal for
-CI. The release workflow builds and pushes it to GHCR on each `ringo-flow-v*`
-tag, so just pull and run a scenario directory (mounted read-only):
+The API is generated from the engine, so it never drifts from the code. Emit a
+Rhai definition file and point the [Rhai language server](https://github.com/rhaiscript/lsp)
+at it for completion, signatures and hover docs:
 
 ```sh
-docker run --rm --network host \
-  -e SIP_DOMAIN=example.com -e A_USER=alice -e A_PASS=… -e B_USER=bob -e B_PASS=… \
-  -v "$PWD/scenarios:/scn:ro" \
-  ghcr.io/davidborzek/ringo-flow:latest run /scn --scenario "answered call"
+ringo-flow definitions ringo-flow.d.rhai
 ```
-
-Tags: `:latest` (the newest release) and `:<version>` to pin a specific one
-(e.g. `:0.10.0`).
-
-- **`--network host`** is the simplest way to get working SIP/RTP and to reach
-  internal services — the container shares the host's network and DNS. On the
-  default bridge network, SIP media and split-horizon/VPN DNS often don't work.
-- **Credentials:** pass them as `-e VAR=…` for `env(...)`, or mount a dotenv file
-  and add `--env-file /scn/dev.env`.
-- **Recordings:** `--save-audio` writes to the working dir (`/work`); mount a
-  writable volume there to keep them.
-
-**TLS to a private/corporate CA.** If `http(...)` targets a service whose cert is
-signed by an internal CA, give the container that trust store — reqwest uses
-rustls + rustls-native-certs, which honors `SSL_CERT_FILE`:
-
-```sh
-docker run --rm --network host \
-  -v /etc/ssl/certs/ca-certificates.crt:/ca.pem:ro -e SSL_CERT_FILE=/ca.pem \
-  -v "$PWD/scenarios:/scn:ro" ghcr.io/davidborzek/ringo-flow:latest run /scn
-```
-
-Without it, such requests fail with *unable to get local issuer certificate*. As a
-last resort, `--insecure-http` (or `RINGO_FLOW_INSECURE_HTTP=1`) skips certificate
-verification entirely — only for throwaway dev testing.
-
-To build the image yourself (for development):
-`docker build -f crates/ringo-flow/Dockerfile -t ringo-flow .`
-
-## Examples
-
-[`examples/`](examples/) has runnable, commented scenarios:
-
-- [`two-party.rhai`](examples/two-party.rhai) — two agents place, answer and tear
-  down a call.
-- [`suite.rhai`](examples/suite.rhai) — a suite with `setup`/`teardown` and an
-  answered- vs rejected-call scenario.
-- [`three-party-transfer.rhai`](examples/three-party-transfer.rhai) — three
-  agents and a blind **SIP REFER**: Callee transfers the Caller to a Target, who
-  ends up connected while the Callee drops out.
-- [`webhook-mock.rhai`](examples/webhook-mock.rhai) — a **mock HTTP server**
-  answers the API's webhook with call actions; the scenario waits
-  for the webhook via `await_until` and asserts on the recorded request.
-
-## API reference & editor support
-
-The API is generated from the engine, so it never drifts from the code. The
-canonical reference is [**docs/scenario-api.md**](docs/scenario-api.md):
-
-```sh
-ringo-flow docs docs/scenario-api.md                # Markdown reference (default)
-ringo-flow docs ringo-flow-api.html --format html   # self-contained HTML page
-ringo-flow definitions ringo-flow.d.rhai            # Rhai definition file (LSP)
-```
-
-Point the [Rhai language server](https://github.com/rhaiscript/lsp) at the
-`.d.rhai` for completion, signatures and hover docs in your editor.
-
-## Notes
-
-- **`wait(n)` is a hold, not a sleep** — it fails if a call that's established at
-  the start drops during it.
-- **DTMF:** for reliable headless DTMF set `dtmf_mode: "info"` on the agent. (RTP
-  telephone-event needs a clocked TX, which idles once a headless agent's audio
-  goes silent, so only the first digit reaches the wire.)
-- **Audio** is verified headless via baresip's `aubridge` + Goertzel tone
-  detection; for a conference give each party a distinct tone and check each one
-  hears the others.
 
 ## Security
 
@@ -205,3 +82,7 @@ arbitrary HTTP requests (`http(...)`) and read local files (`file(...)`,
 `load_env(...)`). Only run scenarios you wrote or reviewed — and in CI, where the
 runner has network reach and real credentials, keep scenario sources and env
 files under the same review controls as the rest of your code.
+
+## License
+
+MIT — see [LICENSE](../../LICENSE).

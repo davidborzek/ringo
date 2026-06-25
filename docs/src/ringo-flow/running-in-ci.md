@@ -1,0 +1,59 @@
+# Running in CI
+
+ringo-flow is built to run unattended on a build server: it's headless (virtual
+audio), exits non-zero on failure, and can emit machine-readable output.
+
+## Exit code and output
+
+The process exits non-zero if any scenario fails, so a CI step fails naturally.
+Add `--json` for one JSON object per event (NDJSON) instead of the human log:
+
+```sh
+ringo-flow run scenarios/ --json
+```
+
+Other handy flags: `-q` (only failures + result), `-v` (show every assertion),
+`--logs` (print each agent's SIP signaling at the end), `--save-audio` (dump
+sent/received WAVs), `--no-color`.
+
+## Credentials and environment
+
+Scenarios read secrets via [`env(...)`](api/environment.md#env). Provide them as
+environment variables, or from a dotenv file:
+
+```sh
+ringo-flow run scenarios/ --env-file ci.env
+```
+
+A sibling `<scenario>.env` next to a file is layered on top automatically. Keep
+real credentials in your CI secret store, not in the repo.
+
+## Selecting what to run
+
+Run a whole directory (all `*.rhai`, recursively) or a subset:
+
+```sh
+ringo-flow run scenarios/                       # everything
+ringo-flow run scenarios/ --scenario "answered" # by name (re: for regex)
+ringo-flow run scenarios/ --tag smoke           # by tag
+ringo-flow run scenarios/ --exclude-tag slow    # drop tagged ones
+```
+
+See [Writing scenarios](writing-scenarios.md) for tags, `skip` and `only`.
+
+## Docker
+
+A small image with baresip compiled in is published to GHCR on each release —
+nothing to install:
+
+```sh
+docker run --rm --network host \
+  -e SIP_DOMAIN=example.com -e A_USER=alice -e A_PASS=… -e B_USER=bob -e B_PASS=… \
+  -v "$PWD/scenarios:/scn:ro" \
+  ghcr.io/davidborzek/ringo-flow:latest run /scn
+```
+
+`--network host` is the simplest way to get working SIP/RTP and DNS. Use
+`:latest` or pin `:<version>`. See the
+[README](https://github.com/davidborzek/ringo/tree/main/crates/ringo-flow#docker)
+for recordings, dotenv mounting and private-CA TLS.

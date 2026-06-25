@@ -1,0 +1,19 @@
+[book]
+title = "ringo"
+authors = ["David Borzek"]
+description = "Tooling for baresip SIP softphones — the ringo softphone and the ringo-flow scenario test runner."
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/davidborzek/ringo"
+edit-url-template = "https://github.com/davidborzek/ringo/edit/main/docs/{path}"
+# Project Pages live under /ringo/; the whole site is one book mounted there.
+site-url = "/ringo/"
+# Sidebar auto-numbering hidden + landing-page styles (see custom.css).
+additional-css = ["custom.css"]
+
+[output.html.search]
+enable = true

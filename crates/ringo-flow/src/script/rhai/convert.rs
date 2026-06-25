@@ -173,8 +173,225 @@ pub(super) fn opt_to_dynamic(v: Option<String>) -> Dynamic {
     }
 }
 
+/// A field of the `agent(...)` config map: the single source for both the runtime
+/// validation in [`account_from_map`] and the generated docs ([`agent_config_doc`]).
+pub(super) struct ConfigField {
+    pub key: &'static str,
+    pub ty: &'static str,
+    pub required: bool,
+    pub desc: &'static str,
+}
+
+/// The `agent(name, #{…})` config schema. Keep in sync with [`account_from_map`]
+/// (the only place these keys are read).
+pub(super) const AGENT_CONFIG: &[ConfigField] = &[
+    ConfigField {
+        key: "username",
+        ty: "string",
+        required: true,
+        desc: "SIP user (registration / auth)",
+    },
+    ConfigField {
+        key: "domain",
+        ty: "string",
+        required: true,
+        desc: "SIP domain / registrar",
+    },
+    ConfigField {
+        key: "password",
+        ty: "string",
+        required: false,
+        desc: "auth password",
+    },
+    ConfigField {
+        key: "display_name",
+        ty: "string",
+        required: false,
+        desc: "caller display name",
+    },
+    ConfigField {
+        key: "transport",
+        ty: "string",
+        required: false,
+        desc: "`udp` (default), `tcp` or `tls`",
+    },
+    ConfigField {
+        key: "auth_user",
+        ty: "string",
+        required: false,
+        desc: "auth user, if it differs from `username`",
+    },
+    ConfigField {
+        key: "outbound",
+        ty: "string",
+        required: false,
+        desc: "outbound proxy URI",
+    },
+    ConfigField {
+        key: "stun_server",
+        ty: "string",
+        required: false,
+        desc: "STUN server, e.g. `stun:host:port`",
+    },
+    ConfigField {
+        key: "media_enc",
+        ty: "string",
+        required: false,
+        desc: "media encryption, e.g. `srtp`, `zrtp`, `dtls_srtp`",
+    },
+    ConfigField {
+        key: "regint",
+        ty: "int",
+        required: false,
+        desc: "re-registration interval (seconds); `0` disables",
+    },
+    ConfigField {
+        key: "mwi",
+        ty: "bool",
+        required: false,
+        desc: "subscribe to message-waiting indication",
+    },
+    ConfigField {
+        key: "dtmf_mode",
+        ty: "string",
+        required: false,
+        desc: "`\"info\"` for reliable headless DTMF (SIP INFO)",
+    },
+    ConfigField {
+        key: "headers",
+        ty: "map",
+        required: false,
+        desc: "extra SIP headers on the INVITE, e.g. `#{ \"X-Foo\": \"bar\" }`",
+    },
+];
+
+/// The `http(method, url, #{…})` options-map schema (single source for the docs
+/// table and the unknown-key validation).
+pub(super) const HTTP_OPTIONS: &[ConfigField] = &[
+    ConfigField {
+        key: "headers",
+        ty: "map",
+        required: false,
+        desc: "request headers, e.g. `#{ \"Content-Type\": \"application/json\" }`",
+    },
+    ConfigField {
+        key: "body",
+        ty: "string or map",
+        required: false,
+        desc: "request body; a map is encoded to JSON",
+    },
+];
+
+/// The `mock_server(#{…})` config-map schema.
+pub(super) const MOCK_SERVER_CONFIG: &[ConfigField] = &[ConfigField {
+    key: "port",
+    ty: "int",
+    required: false,
+    desc: "port to bind (omit for a free one)",
+}];
+
+/// Render a config schema as a `/// `-prefixed Markdown options table.
+fn options_table(schema: &[ConfigField]) -> String {
+    let mut s = String::from(
+        "///\n\
+         /// | Field | Type | Description |\n\
+         /// | --- | --- | --- |\n",
+    );
+    for f in schema {
+        let ty = if f.required {
+            format!("{} · required", f.ty)
+        } else {
+            f.ty.to_string()
+        };
+        s.push_str(&format!("/// | `{}` | {} | {} |\n", f.key, ty, f.desc));
+    }
+    s
+}
+
+/// Reject keys in `map` that aren't in `schema` (catches typos like `passwrod`).
+/// `ctx` prefixes the error, e.g. `agent \`A\``.
+pub(super) fn reject_unknown_keys(
+    ctx: &str,
+    map: &Map,
+    schema: &[ConfigField],
+) -> Result<(), Box<EvalAltResult>> {
+    for key in map.keys() {
+        if !schema.iter().any(|f| f.key == key.as_str()) {
+            return Err(format!("{ctx}: unknown config key `{key}`").into());
+        }
+    }
+    Ok(())
+}
+
+/// The doc comment for the `agent(...)` constructor, with its config options table
+/// rendered from [`AGENT_CONFIG`] so the reference stays in sync with the schema.
+pub(super) fn agent_config_doc() -> String {
+    let mut s = String::from(
+        "/// Connect a headless baresip agent and return a handle.\n\
+         ///\n\
+         /// **Config options** — `agent(name, #{ … })`:\n",
+    );
+    s.push_str(&options_table(AGENT_CONFIG));
+    s.push_str(
+        "///\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// let a = agent(\"A\", #{\n\
+         ///     username: env(\"A_USER\"),\n\
+         ///     domain: env(\"SIP_DOMAIN\"),\n\
+         ///     password: env(\"A_PASS\"),\n\
+         /// });\n\
+         /// ```",
+    );
+    s
+}
+
+/// The doc comment for the `http(method, url, #{…})` overload, table from
+/// [`HTTP_OPTIONS`].
+pub(super) fn http_options_doc() -> String {
+    let mut s = String::from(
+        "/// Make an HTTP request with options and return the response.\n\
+         ///\n\
+         /// **Options** — `http(method, url, #{ … })`:\n",
+    );
+    s.push_str(&options_table(HTTP_OPTIONS));
+    s.push_str(
+        "///\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// let res = http(\"POST\", env(\"API_URL\") + \"/calls\", #{\n\
+         ///     headers: #{ \"Content-Type\": \"application/json\" },\n\
+         ///     body: #{ to: \"+49301234567\" },\n\
+         /// });\n\
+         /// ```",
+    );
+    s
+}
+
+/// The doc comment for the `mock_server(#{…})` overload, table from
+/// [`MOCK_SERVER_CONFIG`].
+pub(super) fn mock_server_config_doc() -> String {
+    let mut s = String::from(
+        "/// Start a mock HTTP server with config; stopped automatically at scenario\n\
+         /// end. Omit `port` (or use `mock_server()`) for a free one.\n\
+         ///\n\
+         /// **Config** — `mock_server(#{ … })`:\n",
+    );
+    s.push_str(&options_table(MOCK_SERVER_CONFIG));
+    s.push_str(
+        "///\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// let hooks = mock_server(#{ port: 8080 });\n\
+         /// ```",
+    );
+    s
+}
+
 /// Build an [`Account`] from a Rhai config map (`#{ username: …, domain: … }`).
+/// Unknown keys are rejected (catches typos like `passwrod`).
 pub(super) fn account_from_map(name: &str, map: &Map) -> Result<Account, Box<EvalAltResult>> {
+    reject_unknown_keys(&format!("agent `{name}`"), map, AGENT_CONFIG)?;
     let get = |k: &str| map.get(k).and_then(|d| d.clone().into_string().ok());
     let req = |k: &str| get(k).ok_or_else(|| format!("agent `{name}`: `{k}` is required"));
     Ok(Account {
@@ -360,6 +577,17 @@ mod tests {
         let mut bad = Map::new();
         bad.insert("username".into(), Dynamic::from("alice"));
         assert!(account_from_map("A", &bad).is_err());
+    }
+
+    #[test]
+    fn account_rejects_unknown_key() {
+        let mut m = Map::new();
+        m.insert("username".into(), Dynamic::from("alice"));
+        m.insert("domain".into(), Dynamic::from("example.com"));
+        m.insert("passwrod".into(), Dynamic::from("typo")); // not `password`
+        let err = account_from_map("A", &m).unwrap_err().to_string();
+        assert!(err.contains("unknown config key"), "{err}");
+        assert!(err.contains("passwrod"), "{err}");
     }
 
     #[test]

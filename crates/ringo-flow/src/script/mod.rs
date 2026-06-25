@@ -4,6 +4,4 @@
 
 pub mod rhai;
 
-pub use self::rhai::{
-    check, run, scenario_names, write_definitions, write_html_docs, write_markdown_docs,
-};
+pub use self::rhai::{check, run, scenario_names, write_book_api, write_definitions};

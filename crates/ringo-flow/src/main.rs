@@ -3,7 +3,7 @@ mod runtime;
 mod script;
 
 use anyhow::{Context, Result, bail};
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum, ValueHint};
+use clap::{CommandFactory, Parser, Subcommand, ValueHint};
 use clap_complete::{
     engine::{ArgValueCandidates, CompletionCandidate},
     env::CompleteEnv,
@@ -117,25 +117,13 @@ enum Commands {
         #[arg(default_value = "ringo-flow.d.rhai", value_hint = ValueHint::FilePath)]
         out: PathBuf,
     },
-    /// Write a human reference of the scenario API (Markdown by default, or HTML)
+    /// Generate the scenario API reference: one Markdown page per section into the
+    /// given directory (the mdBook `src/api`).
     Docs {
-        /// Output path
-        #[arg(default_value = "ringo-flow-api.md", value_hint = ValueHint::FilePath)]
+        /// Output directory for the generated API pages
+        #[arg(default_value = "docs/src/ringo-flow/api", value_hint = ValueHint::DirPath)]
         out: PathBuf,
-        /// Output format
-        #[arg(long, value_enum, default_value_t = DocFormat::Markdown)]
-        format: DocFormat,
     },
-}
-
-/// Output format for `docs`.
-#[derive(Clone, Copy, ValueEnum)]
-enum DocFormat {
-    /// Markdown (git-friendly, linkable)
-    #[value(alias = "md")]
-    Markdown,
-    /// Self-contained HTML page
-    Html,
 }
 
 /// Parse repeated `--set key=value` flags into a map.
@@ -200,9 +188,6 @@ fn main() -> Result<()> {
         }
         Commands::Check { file } => script::check(&file),
         Commands::Definitions { out } => script::write_definitions(&out),
-        Commands::Docs { out, format } => match format {
-            DocFormat::Markdown => script::write_markdown_docs(&out),
-            DocFormat::Html => script::write_html_docs(&out),
-        },
+        Commands::Docs { out } => script::write_book_api(&out),
     }
 }

@@ -157,21 +157,36 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "register",
         ["agent: Agent", "()"],
-        "/// (Re-)register the agent's account.",
+        "/// (Re-)register the agent's account.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// a.register();\n\
+         /// await_until(|| assert(a.registered).is_true(), \"10s\");\n\
+         /// ```",
         Agent::register
     );
     reg!(
         engine,
         "accept",
         ["agent: Agent", "()"],
-        "/// Answer the agent's incoming call.",
+        "/// Answer the agent's incoming call.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// await_until(|| assert(b.state).equals(State::Ringing), \"15s\");\n\
+         /// b.accept();\n\
+         /// ```",
         Agent::accept
     );
     reg!(
         engine,
         "hangup",
         ["agent: Agent", "()"],
-        "/// Hang up the agent's active call.",
+        "/// Hang up the agent's active call.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// a.hangup();\n\
+         /// await_until(|| assert(a.state).equals(State::Idle), \"10s\");\n\
+         /// ```",
         Agent::hangup
     );
     reg!(
@@ -192,14 +207,22 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "mute",
         ["agent: Agent", "()"],
-        "/// Toggle mute on the active call.",
+        "/// Toggle mute on the active call.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// a.mute(); // mute; call again to unmute\n\
+         /// ```",
         Agent::mute
     );
     reg!(
         engine,
         "dtmf",
         ["agent: Agent", "digits: string", "()"],
-        "/// Send DTMF tones (characters `0-9`, `*`, `#`, `A-D`) back-to-back.",
+        "/// Send DTMF tones (characters `0-9`, `*`, `#`, `A-D`) back-to-back.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// a.dtmf(\"123#\");\n\
+         /// ```",
         Agent::dtmf
     );
     reg!(
@@ -213,7 +236,13 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "dial",
         ["agent: Agent", "target: Agent", "()"],
-        "/// Dial another agent at its AOR.",
+        "/// Dial another agent at its AOR.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// a.dial(b);                 // dial agent B at its AOR\n\
+         /// a.dial(\"+49301234567\");    // …or a number/URI in A's domain\n\
+         /// await_until(|| assert(b.state).equals(State::Ringing), \"15s\");\n\
+         /// ```",
         Agent::dial_agent
     );
     reg!(
@@ -227,7 +256,11 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "transfer",
         ["agent: Agent", "target: Agent", "()"],
-        "/// Blind-transfer (REFER) the active call to another agent's AOR.",
+        "/// Blind-transfer (REFER) the active call to another agent's AOR.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// callee.transfer(target); // hand the caller off to `target`\n\
+         /// ```",
         Agent::transfer_agent
     );
     reg!(
@@ -273,10 +306,9 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "agent",
         ["name: string", "config: map", "Agent"],
-        "/// Connect a headless baresip agent and return a handle.\n\
-         /// `config` is a map: `username`/`domain` (required), `password`, `display_name`,\n\
-         /// `transport`, `auth_user`, `outbound`, `stun_server`, `media_enc`, `regint`,\n\
-         /// `mwi`, `dtmf_mode` (`\"info\"` for reliable headless DTMF), `headers`.",
+        // Doc comment (with the config options table) is generated from the schema in
+        // `convert::AGENT_CONFIG`, the same source `account_from_map` validates against.
+        convert::agent_config_doc(),
         move |name: &str, config: Map| -> Result<Agent, Box<EvalAltResult>> {
             let account = convert::account_from_map(name, &config)?;
             let headers = convert::headers_from_map(&config)?;
@@ -334,7 +366,11 @@ fn register_assertions(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "equals",
         ["a: Assertion", "expected: ?", "Assertion"],
-        "/// Assert the value equals `expected` (`is` is a reserved word in Rhai).",
+        "/// Assert the value equals `expected` (`is` is a reserved word in Rhai).\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// assert(a.state).equals(State::Established);\n\
+         /// ```",
         Assertion::equals
     );
     reg!(
@@ -348,7 +384,11 @@ fn register_assertions(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "is_true",
         ["a: Assertion", "Assertion"],
-        "/// Assert the value is `true`.",
+        "/// Assert the value is `true`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// assert(a.registered).is_true();\n\
+         /// ```",
         Assertion::is_true
     );
     reg!(
@@ -390,7 +430,11 @@ fn register_assertions(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "contains",
         ["a: Assertion", "needle: string", "Assertion"],
-        "/// Assert the (string) value contains `needle`.",
+        "/// Assert the (string) value contains `needle`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// assert(a.header(\"User-Agent\")).contains(\"baresip\");\n\
+         /// ```",
         Assertion::contains
     );
     reg!(
@@ -446,7 +490,11 @@ fn register_assertions(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "await_until",
         ["body: Fn", "within: string", "?"],
-        "/// Like `await_until(body)` but with an explicit timeout, e.g. `\"15s\"`.",
+        "/// Like `await_until(body)` but with an explicit timeout, e.g. `\"15s\"`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// await_until(|| assert(b.state).equals(State::Ringing), \"15s\");\n\
+         /// ```",
         move |nctx: NativeCallContext,
               body: FnPtr,
               within: &str|
@@ -508,7 +556,11 @@ fn register_http(engine: &mut Engine, ctx: &Arc<Ctx>) {
         "json",
         ["response: HttpResponse", "path: string", "?"],
         "/// The value at a dotted JSON path (e.g. `\"data.id\"`), typed: object→map,\n\
-         /// array, number, bool, `null`→`()`. Errors if the path is missing.",
+         /// array, number, bool, `null`→`()`. Errors if the path is missing.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// assert(res.json(\"data.id\")).equals(42);\n\
+         /// ```",
         HttpResponse::json
     );
     reg!(
@@ -531,7 +583,12 @@ fn register_http(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "http",
         ["method: string", "url: string", "HttpResponse"],
-        "/// Make an HTTP request and return the response.",
+        "/// Make an HTTP request and return the response.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// let res = http(\"GET\", env(\"API_URL\") + \"/calls\");\n\
+         /// res.expect_status(200);\n\
+         /// ```",
         move |method: &str, url: &str| -> Result<HttpResponse, Box<EvalAltResult>> {
             let inner = http::perform(&c, method, url, &[], None)
                 .map_err(|e| -> Box<EvalAltResult> { e.into() })?;
@@ -548,9 +605,11 @@ fn register_http(engine: &mut Engine, ctx: &Arc<Ctx>) {
             "options: map",
             "HttpResponse"
         ],
-        "/// Make an HTTP request with options `#{ headers: #{…}, body: … }`.\n\
-         /// `body` may be a string or a map (encoded to JSON).",
+        // Doc + options table generated from `convert::HTTP_OPTIONS` (same source the
+        // request validates against).
+        convert::http_options_doc(),
         move |method: &str, url: &str, opts: Map| -> Result<HttpResponse, Box<EvalAltResult>> {
+            convert::reject_unknown_keys("http options", &opts, convert::HTTP_OPTIONS)?;
             let headers = opts
                 .get("headers")
                 .and_then(|d| d.clone().try_cast::<Map>())
@@ -649,7 +708,11 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         ["pattern: string", "PathPattern"],
         "/// A regex path matcher for `respond`/`on`/`request_count`/… anchored to the\n\
          /// whole path: `regex(\"/calls/.*\")` matches `/calls/123`. Errors on a bad\n\
-         /// pattern.",
+         /// pattern.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// hooks.on(regex(\"/calls/.*\"), |req| text_response(\"ok\"));\n\
+         /// ```",
         |pattern: &str| -> Result<PathPattern, Box<EvalAltResult>> {
             PathMatcher::regex(pattern)
                 .map(|inner| PathPattern { inner })
@@ -665,7 +728,13 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         ["HttpMock"],
         "/// Start a mock HTTP server on a free port and return a handle. Stopped\n\
          /// automatically at the end of the scenario. Use `url` to point the system\n\
-         /// under test at it, `respond`/`on` to define routes.",
+         /// under test at it, `respond`/`on` to define routes.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// let hooks = mock_server();\n\
+         /// hooks.on(\"POST\", \"/voice\", |req| json_response(#{ actions: [ #{ type: \"answer\" } ] }));\n\
+         /// http(\"PUT\", env(\"API_URL\") + \"/config?webhook=\" + hooks.url + \"/voice\");\n\
+         /// ```",
         move || -> Result<HttpMock, Box<EvalAltResult>> {
             let inner =
                 mock_server::start(&c, None).map_err(|e| -> Box<EvalAltResult> { e.into() })?;
@@ -678,9 +747,10 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         engine,
         "mock_server",
         ["config: map", "HttpMock"],
-        "/// Start a mock HTTP server with config `#{ port: 8080 }` (omit `port` for a\n\
-         /// free one). Returns a handle; stopped automatically at scenario end.",
+        // Doc + config table generated from `convert::MOCK_SERVER_CONFIG`.
+        convert::mock_server_config_doc(),
         move |config: Map| -> Result<HttpMock, Box<EvalAltResult>> {
+            convert::reject_unknown_keys("mock_server", &config, convert::MOCK_SERVER_CONFIG)?;
             let port = match config.get("port") {
                 Some(d) => Some(
                     u16::try_from(d.as_int().map_err(|_| -> Box<EvalAltResult> {
@@ -727,7 +797,11 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         "/// Register a static response for `method path`: a map\n\
          /// `#{ status: 200, content_type: \"…\", headers: #{…}, body: <string|map> }`\n\
          /// (use `json_response`/`text_response` to build it). `method` may be `\"*\"`\n\
-         /// for any method. Re-register to stage the next answer between webhooks.",
+         /// for any method. Re-register to stage the next answer between webhooks.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// hooks.respond(\"POST\", \"/voice\", json_response(#{ actions: [ #{ type: \"hangup\" } ] }));\n\
+         /// ```",
         |mock: &mut HttpMock, method: &str, path: &str, response: Map| {
             add_static(
                 mock,
@@ -775,8 +849,11 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         "request_count",
         ["mock: HttpMock", "path: string", "int"],
         "/// How many requests arrived on `path` (any method). Poll it with\n\
-         /// `await_until`, e.g.\n\
-         /// `await_until(|| assert(hooks.request_count(\"/voice\")).equals(1))`.",
+         /// `await_until` to wait for a webhook.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// await_until(|| assert(hooks.request_count(\"/voice\")).equals(1), \"10s\");\n\
+         /// ```",
         HttpMock::request_count
     );
     reg!(
@@ -791,7 +868,12 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         "last_request",
         ["mock: HttpMock", "path: string", "MockRequest"],
         "/// The most recent request on `path` (errors if none yet). Read it after\n\
-         /// `await_until` confirms the webhook arrived.",
+         /// `await_until` confirms the webhook arrived.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// let req = hooks.last_request(\"/voice\");\n\
+         /// assert(req.json(\"event\")).equals(\"incoming_call\");\n\
+         /// ```",
         HttpMock::last_request
     );
     reg!(
@@ -842,7 +924,17 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
          /// `MockRequest` and returns a response map (e.g. `json_response(#{…})`).\n\
          /// `method` may be `\"*\"` for any method. The closure runs on a runtime\n\
          /// worker, so keep it pure (request → response): no agent verbs, no `wait`\n\
-         /// — those block a worker thread.",
+         /// — those block a worker thread.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// hooks.on(\"POST\", \"/voice\", |req| {\n\
+         ///     if req.json(\"event\") == \"incoming_call\" {\n\
+         ///         json_response(#{ actions: [ #{ type: \"answer\" } ] })\n\
+         ///     } else {\n\
+         ///         json_response(#{ actions: [ #{ type: \"hangup\" } ] })\n\
+         ///     }\n\
+         /// });\n\
+         /// ```",
         move |mock: &mut HttpMock, method: &str, path: &str, responder: FnPtr| {
             add_dynamic(
                 &r,
@@ -931,7 +1023,11 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         "json",
         ["request: MockRequest", "path: string", "?"],
         "/// The value at a dotted JSON path in the body (object→map, array, number,\n\
-         /// bool, `null`→`()`). Errors if the path is missing.",
+         /// bool, `null`→`()`). Errors if the path is missing.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// assert(req.json(\"call.from\")).equals(\"+49301234567\");\n\
+         /// ```",
         MockRequest::json
     );
 
@@ -942,7 +1038,11 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         ["body: ?", "map"],
         "/// Build a `200 application/json` response map from `body` (JSON-encoded),\n\
          /// for `respond`/`on`. `body` may be a map or an array, e.g.\n\
-         /// `json_response(#{ actions: [ … ] })` or `json_response([ … ])`.",
+         /// `json_response(#{ actions: [ … ] })` or `json_response([ … ])`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// hooks.respond(\"POST\", \"/voice\", json_response(#{ actions: [ #{ type: \"answer\" } ] }));\n\
+         /// ```",
         |body: Dynamic| -> Map {
             let mut m = Map::new();
             m.insert("status".into(), Dynamic::from(200_i64));
@@ -974,7 +1074,11 @@ fn register_audio(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "tone",
         ["freq: int", "AudioSpec"],
-        "/// A sine-tone audio source at the given frequency (Hz), for `send_audio`.",
+        "/// A sine-tone audio source at the given frequency (Hz), for `send_audio`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// a.send_audio(tone(440));\n\
+         /// ```",
         |freq: i64| AudioSpec::Tone(freq.max(0) as u32)
     );
     reg!(
@@ -997,7 +1101,12 @@ fn register_audio(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "send_audio",
         ["agent: Agent", "source: AudioSpec", "()"],
-        "/// Switch the agent's active-call audio source: `tone(Hz)`, `file(path)` or `silent()`.",
+        "/// Switch the agent's active-call audio source: `tone(Hz)`, `file(path)` or `silent()`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// a.send_audio(tone(440));         // play a 440 Hz tone\n\
+         /// a.send_audio(file(\"prompt.wav\"));\n\
+         /// ```",
         move |agent: Agent, spec: AudioSpec| -> Result<(), Box<EvalAltResult>> {
             audio::send_audio(&c, &agent.name, spec).map_err(|e| e.into())
         }
@@ -1007,7 +1116,12 @@ fn register_audio(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "verify_audio",
         ["agent: Agent", "freq: int", "within: string", "()"],
-        "/// Assert the agent is receiving a tone at `freq` Hz within the window (Goertzel).",
+        "/// Assert the agent is receiving a tone at `freq` Hz within the window (Goertzel).\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// a.send_audio(tone(440));\n\
+         /// b.verify_audio(440, \"5s\"); // b hears A's 440 Hz tone\n\
+         /// ```",
         move |agent: Agent, freq: i64, within: &str| -> Result<(), Box<EvalAltResult>> {
             audio::verify_audio(&c, &agent.name, freq, within).map_err(|e| e.into())
         }
@@ -1050,7 +1164,11 @@ fn register_globals(
         engine,
         "wait",
         ["seconds: int", "()"],
-        "/// Hold for N seconds; FAILS if a call that is established at the start drops.",
+        "/// Hold for N seconds; FAILS if a call that is established at the start drops.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// wait(3); // the call must stay up for 3s\n\
+         /// ```",
         move |secs: i64| -> Result<(), Box<EvalAltResult>> {
             let secs = secs.max(0) as u64;
             c.emit(&Event::Wait {
@@ -1079,7 +1197,12 @@ fn register_globals(
         "env",
         ["name: string", "string"],
         "/// Read a variable: first from `--env-file`/`<scenario>.env`/`load_env`, then\n\
-         /// the process environment. Errors if unset. Use it for per-env credentials.",
+         /// the process environment. Errors if unset. Use it for per-env credentials.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// let dom = env(\"SIP_DOMAIN\");\n\
+         /// let a = agent(\"A\", #{ username: env(\"A_USER\"), domain: dom, password: env(\"A_PASS\") });\n\
+         /// ```",
         move |name: &str| -> Result<String, Box<EvalAltResult>> {
             e.lock()
                 .unwrap()
@@ -1200,7 +1323,15 @@ fn register_globals(
         "scenario",
         ["name: string", "body: Fn", "()"],
         "/// Register a named scenario, run in isolation (fresh agents, torn down\n\
-         /// after). The body may take the `setup()` context: `|ctx| { … }`.",
+         /// after). The body may take the `setup()` context: `|ctx| { … }`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// scenario(\"answered call\", |ctx| {\n\
+         ///     ctx.caller.dial(ctx.callee);\n\
+         ///     await_until(|| assert(ctx.callee.state).equals(State::Ringing), \"15s\");\n\
+         ///     ctx.callee.accept();\n\
+         /// });\n\
+         /// ```",
         move |name: &str, body: FnPtr| r.add_scenario(
             ScenarioInfo {
                 name: name.to_string(),
@@ -1229,7 +1360,15 @@ fn register_globals(
         "setup",
         ["body: Fn", "()"],
         "/// Run before each scenario; its return value is passed to the scenario\n\
-         /// (and teardown) as `ctx`. Typically creates and registers the agents.",
+         /// (and teardown) as `ctx`. Typically creates and registers the agents.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// setup(|| {\n\
+         ///     let caller = agent(\"Caller\", #{ username: env(\"A_USER\"), domain: env(\"SIP_DOMAIN\"), password: env(\"A_PASS\") });\n\
+         ///     caller.register();\n\
+         ///     #{ caller: caller }\n\
+         /// });\n\
+         /// ```",
         move |body: FnPtr| r.set_setup(body)
     );
     let r = registry.clone();
@@ -1248,7 +1387,11 @@ fn register_globals(
         "skip",
         ["reason: string", "()"],
         "/// Skip the current scenario at runtime with a reason (reported, not failed);\n\
-         /// e.g. `if env(\"STAGE\") != \"prod\" { skip(\"prod only\") }`.",
+         /// e.g. `if env(\"STAGE\") != \"prod\" { skip(\"prod only\") }`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// if env(\"STAGE\") != \"prod\" { skip(\"prod only\") }\n\
+         /// ```",
         |reason: &str| -> Result<(), Box<EvalAltResult>> {
             Err(Box::new(EvalAltResult::ErrorRuntime(
                 Dynamic::from(SkipMarker {

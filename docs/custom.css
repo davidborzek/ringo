@@ -1,0 +1,65 @@
+/* Hide mdBook's auto-numbering ("1.", "2.", …) in the sidebar chapter list.
+   The numbers are rendered as `<strong aria-hidden="true">N.</strong>`. */
+.sidebar strong[aria-hidden="true"] {
+    display: none;
+}
+
+/* Set off each tool's section: a divider + spacing above the part title, and a
+   small uppercase label so "ringo-phone" / "ringo-flow" read as group headers. */
+.sidebar .part-title {
+    margin-top: 1.2rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.82em;
+    opacity: 0.85;
+}
+
+/* ---- Logo lockup: the ( • ) mark + "ringo" wordmark, with an optional
+   sub-name ("phone"/"flow") stacked under it. Used on the landing and at the
+   top of each tool's intro page. */
+.lockup {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    border-bottom: none;
+    margin: 0 0 1rem;
+}
+.lockup-mark {
+    height: 3.1rem;
+    width: auto;
+    flex: none;
+}
+.lockup-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.02;
+}
+.lockup-name {
+    font-size: 2.4rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+.lockup-sub {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #d4633a;
+    letter-spacing: 0.04em;
+}
+
+/* ---- Landing page (src/index.md): the lockup centered as a hero ---- */
+.hero {
+    text-align: center;
+    margin: 1.8rem 0 2.6rem;
+}
+.hero .lockup-mark {
+    height: 4rem;
+}
+.hero .lockup-name {
+    font-size: 3.4rem;
+}
+.hero .tagline {
+    opacity: 0.7;
+    margin: 0.7rem 0 0;
+}
