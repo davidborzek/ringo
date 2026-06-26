@@ -31,8 +31,8 @@ pub struct AgentState {
     pub calls: Vec<CallView>,
     pub last_call_reason: Option<String>,
     /// Headers of received INVITEs, keyed by SIP Call-ID (== the incoming call's
-    /// id). Populated from baresip's SIP trace, since the ctrl_tcp event API
-    /// doesn't expose inbound headers. Persists after a call closes.
+    /// id). Populated from the FFI BEVENT_SIPSESS_CONN handler which extracts
+    /// all headers directly from the SIP message. Persists after a call closes.
     pub received_headers: HashMap<String, Vec<(String, String)>>,
 }
 
@@ -114,6 +114,9 @@ pub fn reduce(state: &mut AgentState, event: &AppEvent) {
         AppEvent::RegisterFailed { reason } => {
             state.registered = false;
             state.reg_error = Some(reason.clone());
+        }
+        AppEvent::Unregistered { .. } => {
+            state.registered = false;
         }
         AppEvent::CallIncoming {
             call_id,

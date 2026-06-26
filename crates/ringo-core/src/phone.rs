@@ -17,15 +17,24 @@ pub trait Phone: Send {
     fn attended_transfer_abort(&self);
     fn add_header(&self, key: &str, value: &str);
     fn rm_header(&self, key: &str);
+    /// Switch the audio source at runtime, e.g. `ausine,440` to send a tone,
+    /// `aufile,/path.wav` to play a file, or `aubridge,default` to go silent.
+    /// Applies to the active call.
+    fn set_audio_source(&self, spec: &str);
 }
 
-// ─── Baresip implementation ───────────────────────────────────────────────────
+// ─── Test mock ────────────────────────────────────────────────────────────────
+//
+// A simple `Phone` impl that records every command as a `(String, String)` pair
+// into a channel. Used by the TUI tests to verify that user interactions
+// produce the expected phone commands. The real implementation lives in
+// `baresip/phone.rs` and calls libbaresip C functions via FFI.
 
-pub struct BaresipPhone {
+pub struct MockPhone {
     cmd_tx: Sender<(String, String)>,
 }
 
-impl BaresipPhone {
+impl MockPhone {
     pub fn new(cmd_tx: Sender<(String, String)>) -> Self {
         Self { cmd_tx }
     }
@@ -35,18 +44,10 @@ impl BaresipPhone {
             crate::rlog!(Warn, "cmd dropped: {} ({})", cmd, e);
         }
     }
-
-    /// Switch the audio source at runtime (baresip `ausrc <driver,device>`),
-    /// e.g. `ausine,440` to send a tone, `aufile,/path.wav` to play a file, or
-    /// `aubridge,default` to go silent. Applies to the active call.
-    pub fn set_audio_source(&self, spec: &str) {
-        self.send("ausrc", spec);
-    }
 }
 
-impl Phone for BaresipPhone {
+impl Phone for MockPhone {
     fn register(&self, _aor: &str, regint: u32) {
-        // uareg requires "<regint> <ua_index>" — UA index must be specified
         self.send("uareg", &format!("{} 0", regint));
     }
     fn dial(&self, number: &str) {
@@ -96,6 +97,9 @@ impl Phone for BaresipPhone {
     }
     fn rm_header(&self, key: &str) {
         self.send("uarmheader", &format!("{} 0", key));
+    }
+    fn set_audio_source(&self, spec: &str) {
+        self.send("ausrc", spec);
     }
 }
 
@@ -162,9 +166,9 @@ mod tests {
         assert_eq!(uri_header_escape("ä"), "%C3%A4");
     }
 
-    fn make_phone() -> (BaresipPhone, tokio::sync::mpsc::Receiver<(String, String)>) {
+    fn make_phone() -> (MockPhone, tokio::sync::mpsc::Receiver<(String, String)>) {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
-        (BaresipPhone::new(tx), rx)
+        (MockPhone::new(tx), rx)
     }
 
     #[test]
@@ -181,9 +185,6 @@ mod tests {
         let (phone, mut rx) = make_phone();
         phone.add_header("History-Info", "<sip:1@x.com>;index=1");
         let (_, params) = rx.try_recv().expect("one message");
-        // The trailing " 0" must remain a literal space — it's baresip's
-        // separator between value and ua-index. Everything outside hvalue
-        // (here: < > @ ; =) is percent-encoded.
         assert_eq!(params, "History-Info=%3Csip:1%40x.com%3E%3Bindex%3D1 0");
     }
 

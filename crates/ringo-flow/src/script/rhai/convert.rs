@@ -6,7 +6,7 @@ use crate::engine::assertion::Value;
 use crate::engine::mock_server::MockResponse;
 use crate::engine::{AgentInfo, CallState, ScenarioInfo, sip_user_part};
 use rhai::{Array, Dynamic, EvalAltResult, Map};
-use ringo_core::baresip::Account;
+use ringo_core::account::Account;
 
 /// A Rhai value → the engine's neutral [`Value`] (for assertions). `CallState`,
 /// bool, int, unit, arrays and maps are recognised; everything else becomes a

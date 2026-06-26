@@ -64,12 +64,10 @@ impl super::app::App {
                         self.dial_set(entry);
                     }
                 }
-                InputMode::HistoryNav => {
-                    if self.dial.nav_idx + 1 < self.dial.history.len() {
-                        self.dial.nav_idx += 1;
-                        let entry = self.dial.history[self.dial.nav_idx].clone();
-                        self.dial_set(entry);
-                    }
+                InputMode::HistoryNav if self.dial.nav_idx + 1 < self.dial.history.len() => {
+                    self.dial.nav_idx += 1;
+                    let entry = self.dial.history[self.dial.nav_idx].clone();
+                    self.dial_set(entry);
                 }
                 _ => {}
             },
@@ -375,6 +373,7 @@ mod tests {
         fn attended_transfer_abort(&self) {}
         fn add_header(&self, _: &str, _: &str) {}
         fn rm_header(&self, _: &str) {}
+        fn set_audio_source(&self, _: &str) {}
     }
 
     fn test_app() -> App {

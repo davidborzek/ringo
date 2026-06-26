@@ -23,14 +23,21 @@ impl Level {
     }
 }
 
-/// Open (or create) `/tmp/ringo-{profile}.log` in append mode.
-/// Safe to call multiple times — only the first call takes effect.
+/// Open (truncating) `/tmp/ringo-{profile}.log`. Safe to call multiple times —
+/// only the first call takes effect (the log is process-global: one RE thread
+/// serves all UAs, so log writes carry no per-agent context).
+///
+/// Truncate, not append: the file is opened once per process, so this clears it
+/// at start-up and the run's lines accumulate within the same process. Without
+/// it the file would grow without bound across runs and `--logs` would replay
+/// stale output from previous runs.
 pub fn init(profile_name: &str) {
     let path = format!("/tmp/ringo-{}.log", profile_name);
     let _ = LOG_FILE.set(
         OpenOptions::new()
             .create(true)
-            .append(true)
+            .write(true)
+            .truncate(true)
             .open(path)
             .map(Mutex::new)
             .expect("failed to open ringo log file"),

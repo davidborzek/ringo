@@ -10,6 +10,9 @@ ringo-flow-api.html
 # …but the docs ship a checked-in copy (served + linked from the site)
 !docs/src/ringo-flow/ringo-flow.d.rhai
 
+# call recordings written by baresip's sndfile module
+dump-*.wav
+
 # mdBook build output / assembled docs site
 docs/*/book/
 /site/

@@ -15,7 +15,7 @@ crate is `ringo-phone`, the binary is `ringo`.
 ## Features
 
 - **Profile picker** — fuzzy-search selector with inline create / edit / clone / delete.
-- **Headless baresip** — spawns baresip without its stdio UI; no terminal clutter.
+- **Embedded baresip** — baresip/libre linked in directly via FFI; no separate process, no stdio clutter.
 - **ratatui TUI** — status bar, command bar (`:` with tab-completion), Normal/Dial
   split, call list, DTMF, hold/resume, mute.
 - **Contact book** — TOML contacts with fuzzy number matching and `$EDITOR` editing.

@@ -21,6 +21,10 @@ impl super::app::App {
                 self.reg_status = RegStatus::Failed(reason.clone());
                 self.push_log(format!("✗ Registration failed: {}", reason));
             }
+            AppEvent::Unregistered { account } => {
+                self.reg_status = RegStatus::Failed("Unregistered".into());
+                self.push_log(format!("→ Unregistered: {}", account));
+            }
             AppEvent::CallIncoming {
                 call_id,
                 number,
@@ -57,9 +61,9 @@ impl super::app::App {
             AppEvent::Unknown { class, type_ } => {
                 self.push_log(format!("[{}] {}", class, type_));
             }
-            AppEvent::BaresipConnectFailed { reason } => {
-                self.reg_status = RegStatus::Failed(format!("baresip unreachable: {}", reason));
-                self.push_log(format!("✗ Cannot connect to baresip: {}", reason));
+            AppEvent::BackendConnectFailed { reason } => {
+                self.reg_status = RegStatus::Failed(format!("backend unreachable: {}", reason));
+                self.push_log(format!("✗ Cannot connect to backend: {}", reason));
             }
         }
     }

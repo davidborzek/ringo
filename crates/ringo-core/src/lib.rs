@@ -1,11 +1,13 @@
-//! Shared engine for the ringo tools: spawning baresip, the ctrl_tcp wire
-//! protocol, the call-event model and the phone command abstraction. Kept free
-//! of any TUI or ringo-specific configuration so it can back both the `ringo`
-//! softphone and the `ringo-flow` scenario runner.
+//! Shared engine for the ringo tools: backend abstraction and the phone
+//! command interface. Kept free of any TUI or ringo-specific configuration so
+//! it can back both the `ringo` softphone and the `ringo-flow` scenario runner.
 
-pub mod baresip;
-pub mod client;
+pub mod account;
+pub mod backend;
 pub mod event;
 pub mod log;
 pub mod phone;
-pub mod siptrace;
+
+pub use backend::{call_count, is_registered, received_audio, sent_audio, shutdown};
+
+mod baresip;

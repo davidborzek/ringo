@@ -1,19 +1,15 @@
-//! Tone detection on recorded call audio (for `verify-audio`).
+//! Tone detection on received call audio (for `verify-audio`) and WAV output
+//! (for `--save-audio`).
 //!
-//! baresip's `sndfile` module records each call's decoded (received) audio to a
-//! `dump-…-dec.wav` in the agent's temp dir. We read the recent window of that
-//! WAV and run a [Goertzel](https://en.wikipedia.org/wiki/Goertzel_algorithm)
-//! filter at the expected frequency: the score is ~1.0 for a clean tone at that
-//! frequency and ~0 for silence/noise/other tones, independent of sample count.
-//!
-//! The WAV is read with a tolerant parser, not a strict one: `verify-audio` runs
-//! while the call is still active, and libsndfile only patches the RIFF/`data`
-//! size fields when it closes the file. The PCM bytes are on disk regardless, so
-//! we read the `data` chunk to EOF rather than trusting its (stale, often 0)
-//! size field.
+//! The backend captures each agent's received (and, when saving, sent) audio
+//! in-process via ringo's own ausrc/auplay module — no baresip sndfile, no WAV
+//! dumps on disk. We run a [Goertzel](https://en.wikipedia.org/wiki/Goertzel_algorithm)
+//! filter on the captured samples at the expected frequency: the score is ~1.0
+//! for a clean tone at that frequency and ~0 for silence/noise/other tones,
+//! independent of sample count.
 
-use anyhow::{Context, Result, bail};
-use std::path::{Path, PathBuf};
+use anyhow::{Context, Result};
+use std::path::Path;
 
 /// A received audio tone counts as present at/above this score.
 pub const TONE_THRESHOLD: f64 = 0.2;
@@ -45,20 +41,6 @@ pub fn tone_score(samples: &[i16], sample_rate: u32, freq: f64) -> f64 {
     (2.0 * power) / (n as f64 * energy)
 }
 
-/// The most recently written received-audio recording in `dir`, if any.
-pub fn latest_received_wav(dir: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(dir)
-        .ok()?
-        .filter_map(std::result::Result::ok)
-        .map(|e| e.path())
-        .filter(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("dump-") && n.ends_with("-dec.wav"))
-        })
-        .max_by_key(|p| p.metadata().and_then(|m| m.modified()).ok())
-}
-
 /// Result of analysing a recording for a tone, with diagnostics to tell apart
 /// "tone present" / "audio but wrong tone" / "silence (no media)".
 #[derive(Debug, Clone, Copy, Default)]
@@ -71,14 +53,14 @@ pub struct ToneAnalysis {
     pub samples: usize,
 }
 
-/// Analyse the last `window` of the recorded WAV at `path` for `freq`
-/// (16-bit PCM; channel 0 if multi-channel).
-pub fn analyze_tone(path: &Path, freq: u32, window: std::time::Duration) -> Result<ToneAnalysis> {
-    let bytes =
-        std::fs::read(path).with_context(|| format!("read recording {}", path.display()))?;
-    let (samples, sample_rate) =
-        parse_wav_pcm16(&bytes).with_context(|| format!("parse recording {}", path.display()))?;
-    // Analyze the tail: the tone may begin after call/media setup.
+/// Analyse the last `window` of mono 16-bit `samples` at `sample_rate` for
+/// `freq`. The tail is used because the tone may begin after media setup.
+pub fn analyze_tone_samples(
+    samples: &[i16],
+    sample_rate: u32,
+    freq: u32,
+    window: std::time::Duration,
+) -> ToneAnalysis {
     let want = (f64::from(sample_rate) * window.as_secs_f64()) as usize;
     let tail = &samples[samples.len().saturating_sub(want)..];
     let rms = if tail.is_empty() {
@@ -86,60 +68,37 @@ pub fn analyze_tone(path: &Path, freq: u32, window: std::time::Duration) -> Resu
     } else {
         (tail.iter().map(|&x| f64::from(x).powi(2)).sum::<f64>() / tail.len() as f64).sqrt()
     };
-    Ok(ToneAnalysis {
+    ToneAnalysis {
         score: tone_score(tail, sample_rate, f64::from(freq)),
         rms,
         samples: tail.len(),
-    })
+    }
 }
 
-/// Tolerant RIFF/WAVE reader for 16-bit PCM → (channel-0 samples, sample_rate).
-/// Reads the `data` chunk to EOF, ignoring its size field, which is 0/stale
-/// while libsndfile is still writing the file (we read it mid-call).
-fn parse_wav_pcm16(b: &[u8]) -> Result<(Vec<i16>, u32)> {
-    let u16le = |i: usize| u16::from_le_bytes([b[i], b[i + 1]]);
-    let u32le = |i: usize| u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]);
-    if b.len() < 12 || &b[0..4] != b"RIFF" || &b[8..12] != b"WAVE" {
-        bail!("not a RIFF/WAVE file");
+/// Write mono 16-bit PCM `samples` at `sample_rate` to `path` as a WAV file
+/// (used by `--save-audio`; the audio is captured in-process, so we serialise
+/// it ourselves — no libsndfile).
+pub fn write_wav(path: &Path, samples: &[i16], sample_rate: u32) -> Result<()> {
+    let data_len = samples.len() * 2;
+    let byte_rate = sample_rate * 2; // mono, 16-bit
+    let mut v = Vec::with_capacity(44 + data_len);
+    v.extend_from_slice(b"RIFF");
+    v.extend_from_slice(&((36 + data_len) as u32).to_le_bytes());
+    v.extend_from_slice(b"WAVE");
+    v.extend_from_slice(b"fmt ");
+    v.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+    v.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    v.extend_from_slice(&1u16.to_le_bytes()); // mono
+    v.extend_from_slice(&sample_rate.to_le_bytes());
+    v.extend_from_slice(&byte_rate.to_le_bytes());
+    v.extend_from_slice(&2u16.to_le_bytes()); // block align
+    v.extend_from_slice(&16u16.to_le_bytes()); // bits/sample
+    v.extend_from_slice(b"data");
+    v.extend_from_slice(&(data_len as u32).to_le_bytes());
+    for s in samples {
+        v.extend_from_slice(&s.to_le_bytes());
     }
-    let (mut sample_rate, mut channels, mut bits) = (0u32, 1u16, 16u16);
-    let mut data: Option<&[u8]> = None;
-    let mut pos = 12;
-    while pos + 8 <= b.len() {
-        let id = &b[pos..pos + 4];
-        let declared = u32le(pos + 4) as usize;
-        let body = pos + 8;
-        if id == b"fmt " && body + 16 <= b.len() {
-            channels = u16le(body + 2).max(1);
-            sample_rate = u32le(body + 4);
-            bits = u16le(body + 14);
-            pos = body + declared.max(16);
-        } else if id == b"data" {
-            // size field unreliable (0 while still recording) → read to EOF
-            let end = if declared == 0 || body + declared > b.len() {
-                b.len()
-            } else {
-                body + declared
-            };
-            data = Some(&b[body..end]);
-            break;
-        } else if declared == 0 {
-            break; // can't advance past a zero-size non-data chunk
-        } else {
-            pos = body + declared;
-        }
-    }
-    if bits != 16 {
-        bail!("expected 16-bit PCM, got {bits}-bit");
-    }
-    let data = data.context("no data chunk")?;
-    let ch = channels as usize;
-    // one frame = `ch` interleaved samples; keep channel 0
-    let samples = data
-        .chunks_exact(2 * ch)
-        .map(|f| i16::from_le_bytes([f[0], f[1]]))
-        .collect();
-    Ok((samples, sample_rate))
+    std::fs::write(path, v).with_context(|| format!("write WAV {}", path.display()))
 }
 
 #[cfg(test)]
@@ -170,44 +129,24 @@ mod tests {
         assert_eq!(tone_score(&[0i16; 4000], 8000, 440.0), 0.0);
     }
 
-    /// Build a minimal PCM WAV; `finalized=false` mimics libsndfile mid-write
-    /// (RIFF/data size fields left at 0, data still on disk).
-    fn wav(samples: &[i16], sr: u32, finalized: bool) -> Vec<u8> {
-        let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
-        let (riff, dlen) = if finalized {
-            ((36 + data.len()) as u32, data.len() as u32)
-        } else {
-            (0, 0)
-        };
-        let mut v = Vec::new();
-        v.extend_from_slice(b"RIFF");
-        v.extend_from_slice(&riff.to_le_bytes());
-        v.extend_from_slice(b"WAVEfmt ");
-        v.extend_from_slice(&16u32.to_le_bytes());
-        v.extend_from_slice(&1u16.to_le_bytes()); // PCM
-        v.extend_from_slice(&1u16.to_le_bytes()); // mono
-        v.extend_from_slice(&sr.to_le_bytes());
-        v.extend_from_slice(&(sr * 2).to_le_bytes());
-        v.extend_from_slice(&2u16.to_le_bytes());
-        v.extend_from_slice(&16u16.to_le_bytes());
-        v.extend_from_slice(b"data");
-        v.extend_from_slice(&dlen.to_le_bytes());
-        v.extend_from_slice(&data);
-        v
-    }
-
     #[test]
-    fn parses_wav_even_with_unfinalized_size_fields() {
+    fn write_wav_roundtrips_header_and_samples() {
         let s = sine(440.0, 8000, 8000);
-        for finalized in [true, false] {
-            let (samples, sr) = parse_wav_pcm16(&wav(&s, 8000, finalized)).unwrap();
-            assert_eq!(sr, 8000);
-            assert_eq!(samples.len(), s.len(), "finalized={finalized}");
-            assert!(
-                tone_score(&samples, sr, 440.0) > 0.8,
-                "finalized={finalized}"
-            );
-        }
+        let dir = std::env::temp_dir();
+        let path = dir.join("ringo-flow-write-wav-test.wav");
+        write_wav(&path, &s, 8000).unwrap();
+        let b = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(&b[0..4], b"RIFF");
+        assert_eq!(&b[8..12], b"WAVE");
+        assert_eq!(u32::from_le_bytes([b[24], b[25], b[26], b[27]]), 8000); // srate
+        // 44-byte header + 2 bytes/sample
+        assert_eq!(b.len(), 44 + s.len() * 2);
+        let parsed: Vec<i16> = b[44..]
+            .chunks_exact(2)
+            .map(|c| i16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        assert_eq!(parsed, s);
     }
 
     #[test]

@@ -62,8 +62,18 @@ jobs:
           echo "flow_tag=$(echo "$rel" | jq -r '.[] | select(.package_name=="ringo-flow") | .tag // empty')" >> "$GITHUB_OUTPUT"
 
   # ringo-phone binaries → attached to its GitHub release (only if it was released).
+  #
+  # Single binary per target — audio auto-detected by build.rs:
+  #   Linux  → pulse (via pkg-config, works on PulseAudio + PipeWire)
+  #   macOS  → coreaudio (system framework, zero deps)
+  #
+  # Linux x86_64 builds inside a debian:bullseye container (glibc 2.31) for
+  # maximum compatibility, then smoke-tests in debian:bookworm-slim.
+  #
+  # Users who need ALSA instead of pulse can build from source:
+  #   cargo build --features alsa
   phone-binaries:
-    name: Build ringo-phone ${{ matrix.target }}
+    name: ringo-phone ${{ matrix.target }}
     needs: release
     if: needs.release.outputs.phone_tag != ''
     runs-on: ${{ matrix.os }}
@@ -84,26 +94,83 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.release.outputs.phone_tag }}
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: Install aarch64 Linux cross-compiler
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
+        with:
+          key: ${{ matrix.target }}
+      - name: Install Linux build dependencies (aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev llvm-dev pkg-config perl \
+            libspandsp-dev libopus-dev libpulse-dev \
+            gcc-aarch64-linux-gnu
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y \
+            libspandsp-dev:arm64 libopus-dev:arm64 \
+            libpulse-dev:arm64
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake pkg-config spandsp opus
+      - name: Set up aarch64 cross-compilation env
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+          echo "PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+      - name: Build (Linux x86_64 in bullseye container)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          docker build -t ringo-builder -f docker/builder.Dockerfile .
+          docker run --rm -v "$PWD:/work" \
+            -e HOST_UID=$(id -u) -e HOST_GID=$(id -g) \
+            ringo-builder sh -c 'CARGO_TARGET_DIR=/work/target-linux-x86_64 cargo build --release -p ringo-phone && chown -R $HOST_UID:$HOST_GID /work/target-linux-x86_64'
+      - name: Build (aarch64 cross-compile)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target aarch64-unknown-linux-gnu -p ringo-phone
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
         run: cargo build --release --target ${{ matrix.target }} -p ringo-phone
+      - name: Smoke test (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          cp target-linux-x86_64/release/ringo ringo
+          docker build -f docker/smoke-phone.Dockerfile .
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: target/${{ matrix.target }}/release/ringo --help
       - name: Package
-        run: cp target/${{ matrix.target }}/release/ringo ringo-${{ matrix.target }}
+        run: |
+          version="${{ needs.release.outputs.phone_tag }}"
+          version="${version#ringo-phone-v}"
+          target="${{ matrix.target }}"
+          dir="ringo-${version}-${target}"
+          mkdir -p "$dir"
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            cp "target-linux-x86_64/release/ringo" "$dir/"
+          else
+            cp "target/${target}/release/ringo" "$dir/"
+          fi
+          tar czf "${dir}.tar.gz" "$dir"
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.phone_tag }}
-          files: ringo-${{ matrix.target }}
+          files: ringo-*.tar.gz
 
   # ringo-flow binaries → attached to its GitHub release (only if it was released).
+  #
+  # Linux x86_64 builds inside a debian:bullseye container (glibc 2.31) for
+  # maximum compatibility, then smoke-tests in debian:bookworm-slim.
   flow-binaries:
     name: Build ringo-flow ${{ matrix.target }}
     needs: release
@@ -126,24 +193,75 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.release.outputs.flow_tag }}
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - name: Install aarch64 Linux cross-compiler
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
+      - name: Install Linux build dependencies (aarch64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Build
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev llvm-dev pkg-config perl \
+            libspandsp-dev libopus-dev \
+            gcc-aarch64-linux-gnu
+          sudo dpkg --add-architecture arm64
+          sudo apt-get update
+          sudo apt-get install -y \
+            libspandsp-dev:arm64 libopus-dev:arm64
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake pkg-config spandsp opus
+      - name: Set up aarch64 cross-compilation env
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+          echo "PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+          echo "PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+      - name: Build (Linux x86_64 in bullseye container)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          docker build -t ringo-builder -f docker/builder.Dockerfile .
+          docker run --rm -v "$PWD:/work" \
+            -e HOST_UID=$(id -u) -e HOST_GID=$(id -g) \
+            ringo-builder sh -c 'CARGO_TARGET_DIR=/work/target-linux-x86_64 cargo build --release -p ringo-flow && chown -R $HOST_UID:$HOST_GID /work/target-linux-x86_64'
+      - name: Build (aarch64 cross-compile)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target aarch64-unknown-linux-gnu -p ringo-flow
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
         run: cargo build --release --target ${{ matrix.target }} -p ringo-flow
+      - name: Smoke test (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          cp target-linux-x86_64/release/ringo-flow ringo-flow
+          docker build -f docker/smoke-flow.Dockerfile .
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: target/${{ matrix.target }}/release/ringo-flow --help
       - name: Package
-        run: cp target/${{ matrix.target }}/release/ringo-flow ringo-flow-${{ matrix.target }}
+        run: |
+          version="${{ needs.release.outputs.flow_tag }}"
+          version="${version#ringo-flow-v}"
+          target="${{ matrix.target }}"
+          dir="ringo-flow-${version}-${target}"
+          mkdir -p "$dir"
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            cp "target-linux-x86_64/release/ringo-flow" "$dir/"
+          else
+            cp "target/${target}/release/ringo-flow" "$dir/"
+          fi
+          tar czf "ringo-flow-${version}-${target}.tar.gz" "$dir"
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.flow_tag }}
-          files: ringo-flow-${{ matrix.target }}
+          files: ringo-flow-*.tar.gz
 
   # ringo-flow Docker image → GHCR (only if ringo-flow was released).
   flow-docker:
@@ -158,6 +276,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.release.outputs.flow_tag }}
+          submodules: true
       - name: Compute image tags
         id: tags
         run: |
@@ -201,16 +320,17 @@ jobs:
         run: |
           set -euo pipefail
           sha() { gh release download "$1" -R "$REPO" -p "$2" -O - | sha256sum | cut -d' ' -f1; }
-          # render <template> <base-url> <bin-prefix> <tag> <version> <out>
+          # render <template> <base-url> <prefix> <tag> <version> <out>
+          # <prefix> is "ringo" or "ringo-flow"; tarballs are <prefix>-<version>-<target>.tar.gz
           render() {
             sed \
               -e '/^# /d' \
               -e "s|__VERSION__|$5|g" \
               -e "s|__BASE__|$2|g" \
-              -e "s|__SHA_DARWIN_ARM__|$(sha "$4" "$3-aarch64-apple-darwin")|" \
-              -e "s|__SHA_DARWIN_X64__|$(sha "$4" "$3-x86_64-apple-darwin")|" \
-              -e "s|__SHA_LINUX_ARM__|$(sha "$4" "$3-aarch64-unknown-linux-gnu")|" \
-              -e "s|__SHA_LINUX_X64__|$(sha "$4" "$3-x86_64-unknown-linux-gnu")|" \
+              -e "s|__SHA_DARWIN_ARM__|$(sha "$4" "$3-$5-aarch64-apple-darwin.tar.gz")|" \
+              -e "s|__SHA_DARWIN_X64__|$(sha "$4" "$3-$5-x86_64-apple-darwin.tar.gz")|" \
+              -e "s|__SHA_LINUX_ARM__|$(sha "$4" "$3-$5-aarch64-unknown-linux-gnu.tar.gz")|" \
+              -e "s|__SHA_LINUX_X64__|$(sha "$4" "$3-$5-x86_64-unknown-linux-gnu.tar.gz")|" \
               "$1" > "$6"
           }
           rel="https://github.com/${REPO}/releases/download"

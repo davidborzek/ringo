@@ -410,6 +410,7 @@ mod tests {
         fn rm_header(&self, key: &str) {
             self.log.lock().unwrap().push(format!("rm {key}"));
         }
+        fn set_audio_source(&self, _: &str) {}
     }
 
     fn app_with_headers(headers: Vec<(&str, &str)>, phone: RecordingPhone) -> App {

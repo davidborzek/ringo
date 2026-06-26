@@ -184,7 +184,9 @@ fn main() -> Result<()> {
                 tags: tag,
                 exclude_tags: exclude_tag,
             };
-            script::run(&paths, output, overrides, filters, &env_file)
+            let result = script::run(&paths, output, overrides, filters, &env_file);
+            ringo_core::shutdown();
+            result
         }
         Commands::Check { file } => script::check(&file),
         Commands::Definitions { out } => script::write_definitions(&out),

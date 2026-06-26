@@ -1,7 +1,8 @@
 //! Language-neutral audio verbs: `send_audio` (switch an agent's call source),
 //! `verify_audio` (detect a tone in what an agent received), and
-//! `verify_audio_connection` (assert two-way audio). Headless — baresip's
-//! `aubridge` needs no sound hardware; recordings come from `sndfile`.
+//! `verify_audio_connection` (assert two-way audio). Headless — no sound
+//! hardware; sent/received audio is rendered and captured in-process by the
+//! backend (ringo's own ausrc/auplay), so verification needs no sndfile.
 
 use super::ctx::Ctx;
 use super::duration::parse_duration;
@@ -54,17 +55,17 @@ fn detect(
     freq: u32,
     window: Duration,
 ) -> Result<(bool, String), String> {
-    let dir = ctx.recording_dir(name)?;
     let mut last = ToneAnalysis::default();
     for _ in 0..VERIFY_AUDIO_ATTEMPTS {
         std::thread::sleep(window);
-        if let Some(a) = audio::latest_received_wav(&dir)
-            .and_then(|wav| audio::analyze_tone(&wav, freq, window).ok())
-        {
-            last = a;
-            if last.score >= audio::TONE_THRESHOLD {
-                return Ok((true, fmt_analysis(&last)));
-            }
+        // The backend captures received audio in-process (per-UA, no shared
+        // recording-dir race, no sndfile/disk round-trip).
+        let Some((samples, srate)) = ctx.received_audio(name)? else {
+            continue;
+        };
+        last = audio::analyze_tone_samples(&samples, srate, freq, window);
+        if last.score >= audio::TONE_THRESHOLD {
+            return Ok((true, fmt_analysis(&last)));
         }
     }
     Ok((false, fmt_analysis(&last)))

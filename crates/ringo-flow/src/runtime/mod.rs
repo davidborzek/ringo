@@ -11,30 +11,23 @@ pub(crate) mod wait;
 
 pub(crate) use wait::wait_holding;
 
-use ringo_core::baresip::BaresipOptions;
+use ringo_core::account::BackendOptions;
 
-/// The baresip options every ringo-flow agent runs with.
+/// The backend options every ringo-flow agent runs with.
 ///
-/// SIP trace on: lets sessions recover inbound INVITE headers (for `header`
-/// assertions) that the ctrl_tcp events don't expose. `aubridge` is a virtual
-/// loopback audio device: scenarios need no real sound hardware, so calls
-/// establish in CI/headless (unlike the auto-detected pipewire/pulse/alsa, which
-/// fail to open a device and abort baresip). Player and source share the device
-/// name, so aubridge couples them: the recv path is clocked (sndfile can record
-/// dump-…-dec.wav) and, until a `send-audio` overrides the source, nothing is
-/// injected, so a silent call stays silent — the loopback only echoes audio that
-/// is actually sent. `send-audio` switches the source via `ausrc ausine,<freq>` /
-/// `ausrc aufile,<path>`; those drivers only exist if their modules are loaded,
-/// hence the `extra` module lines.
-pub(crate) fn agent_options() -> BaresipOptions {
-    BaresipOptions {
-        sip_trace: true,
+/// `aubridge` selects headless mode (no sound hardware, so calls establish in CI
+/// — unlike auto-detected pipewire/pulse/alsa, which fail to open a device and
+/// abort baresip). In that mode the backend routes both the audio source and
+/// player through ringo's own in-process module (see `ringo_core` ausrc):
+/// `send-audio` sets a per-agent tone/file/silence the source renders (surviving
+/// re-INVITEs — transfer/hold/line switch), and the player captures received
+/// audio for `verify-audio`/`--save-audio`. A silent call stays silent until
+/// `send-audio` is called.
+pub(crate) fn agent_options() -> BackendOptions {
+    BackendOptions {
         audio_driver: Some("aubridge".into()),
-        record_audio: true,
-        extra: vec![
-            ("module".into(), "ausine.so".into()),
-            ("module".into(), "aufile.so".into()),
-        ],
+        // record_audio (full in-process capture) is set per run from --save-audio
+        // by the caller; verification uses the rolling window regardless.
         ..Default::default()
     }
 }

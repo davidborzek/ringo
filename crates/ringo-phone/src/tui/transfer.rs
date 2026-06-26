@@ -144,7 +144,7 @@ fn normalize_sip_uri(input: &str, account_aor: &str) -> String {
     if input.starts_with("sip:") || input.starts_with("sips:") {
         return input.to_string();
     }
-    let domain = account_aor.splitn(2, '@').nth(1).unwrap_or("");
+    let domain = account_aor.split_once('@').map(|x| x.1).unwrap_or("");
     if domain.is_empty() {
         input.to_string()
     } else {

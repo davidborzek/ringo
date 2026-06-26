@@ -20,7 +20,7 @@ automated call testing, both sharing one engine.
 |-------|------------|------|
 | [`ringo-phone`](crates/ringo-phone) | The **`ringo` softphone** — a ratatui TUI managing multiple SIP profiles, with calls, contacts, transfers, remote control and headless automation | [Guide](https://davidborzek.github.io/ringo/ringo-phone/introduction.html) |
 | [`ringo-flow`](crates/ringo-flow) | A **telephony scenario test runner** — bring up SIP agents from a [Rhai](https://rhai.rs) script, drive them, and assert call behaviour (incl. audio) | [Guide](https://davidborzek.github.io/ringo/ringo-flow/introduction.html) · [API](https://davidborzek.github.io/ringo/ringo-flow/api/scenario-structure.html) |
-| [`ringo-core`](crates/ringo-core) | The **shared engine** — baresip spawning, the `ctrl_tcp` wire protocol, the call-event model (internal, no stable API) | — |
+| [`ringo-core`](crates/ringo-core) | The **shared engine** — an FFI backend statically linking baresip/libre, the call-event model (internal, no stable API) | — |
 
 ## Requirements
 
