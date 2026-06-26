@@ -4,7 +4,7 @@
 
 ## peer.name
 
-**Receiver** [`Peer`](peer.md) · **Returns** `any`
+**Receiver** [`Peer`](peer.md) · **Returns** `string?`
 
 The remote party's display name, or `()` if absent.
 
@@ -12,7 +12,7 @@ The remote party's display name, or `()` if absent.
 
 ## peer.number
 
-**Receiver** [`Peer`](peer.md) · **Returns** `any`
+**Receiver** [`Peer`](peer.md) · **Returns** `string?`
 
 The remote party's number (user-part of the URI), or `()`.
 
@@ -20,7 +20,7 @@ The remote party's number (user-part of the URI), or `()`.
 
 ## peer.uri
 
-**Receiver** [`Peer`](peer.md) · **Returns** `any`
+**Receiver** [`Peer`](peer.md) · **Returns** `string?`
 
 The remote party's full URI (e.g. `sip:bob@example.com`), or `()`.
 

@@ -33,6 +33,7 @@ see [Running in CI](https://davidborzek.github.io/ringo/ringo-flow/running-in-ci
 ## Install
 
 ```sh
+brew install davidborzek/tap/ringo-flow   # Homebrew (macOS/Linux); also installs baresip
 cargo install --git https://github.com/davidborzek/ringo ringo-flow
 ```
 

@@ -14,3 +14,7 @@ Two tools that share one engine:
   write call flows as Rhai scripts and run them headlessly in CI.
 
 The [source is on GitHub](https://github.com/davidborzek/ringo).
+
+<sub>For tooling/agents: [llms.txt](llms.txt) indexes the docs, and the ringo-flow
+scenario API is available as [Rhai type definitions](ringo-flow/ringo-flow.d.rhai)
+(`.d.rhai`).</sub>

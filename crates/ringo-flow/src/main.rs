@@ -113,8 +113,8 @@ enum Commands {
     },
     /// Write a Rhai definition file (.d.rhai) for editor completion/hover
     Definitions {
-        /// Output path (e.g. ringo-flow.d.rhai)
-        #[arg(default_value = "ringo-flow.d.rhai", value_hint = ValueHint::FilePath)]
+        /// Output path
+        #[arg(default_value = "docs/src/ringo-flow/ringo-flow.d.rhai", value_hint = ValueHint::FilePath)]
         out: PathBuf,
     },
     /// Generate the scenario API reference: one Markdown page per section into the

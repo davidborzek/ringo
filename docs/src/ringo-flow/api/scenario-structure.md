@@ -25,6 +25,15 @@ Register a scenario with options `#{ tags: ["smoke"], skip: true|"reason",
 only: true }`. `--tag`/`--exclude-tag` filter by tag; a skipped scenario is
 reported but not run; if any scenario sets `only`, only those run.
 
+**Example**
+
+```rust
+scenario("smoke: answered", #{ tags: ["smoke"] }, |ctx| {
+    ctx.caller.dial(ctx.callee);
+    ctx.callee.accept();
+});
+```
+
 <a id="setup"></a>
 
 ## setup(body: Fn)
@@ -52,8 +61,7 @@ Skip the current scenario at runtime (reported, not failed).
 
 ## skip(reason: string)
 
-Skip the current scenario at runtime with a reason (reported, not failed);
-e.g. `if env("STAGE") != "prod" { skip("prod only") }`.
+Skip the current scenario at runtime with a reason (reported, not failed).
 
 **Example**
 
@@ -66,4 +74,10 @@ if env("STAGE") != "prod" { skip("prod only") }
 ## teardown(body: Fn)
 
 Run after each scenario (even on failure); receives the `setup` context.
+
+**Example**
+
+```rust
+teardown(|ctx| { ctx.caller.hangup(); });
+```
 

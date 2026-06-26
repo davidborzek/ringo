@@ -17,3 +17,14 @@ additional-css = ["custom.css"]
 
 [output.html.search]
 enable = true
+
+# Collapse chapters that have sub-pages by default (so the long API reference list
+# isn't always expanded); the active page's branch still auto-expands.
+[output.html.fold]
+enable = true
+level = 0
+
+# Code blocks use `rust` only for highlighting (the scripts are Rhai), so drop the
+# "Run" button that would send them to the Rust Playground.
+[output.html.playground]
+runnable = false

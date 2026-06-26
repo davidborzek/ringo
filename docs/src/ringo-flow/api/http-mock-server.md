@@ -47,7 +47,7 @@ let hooks = mock_server(#{ port: 8080 });
 
 ### mock.last_request(path: PathPattern)
 
-**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md) · **Returns** [`MockRequest`](mock-request.md)
+**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md#regex) · **Returns** [`MockRequest`](mock-request.md)
 
 The most recent request on a `regex(...)` path (errors if none yet).
 
@@ -71,7 +71,7 @@ assert(req.json("event")).equals("incoming_call");
 
 ### mock.on(method: string, path: PathPattern, responder: Fn)
 
-**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md)
+**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md#regex)
 
 Dynamic responder for `method` and a `regex(...)` path.
 
@@ -103,7 +103,7 @@ hooks.on("POST", "/voice", |req| {
 
 ### mock.on(path: PathPattern, responder: Fn)
 
-**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md)
+**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md#regex)
 
 Dynamic responder for a `regex(...)` path on any HTTP method.
 
@@ -119,7 +119,7 @@ Dynamic responder for `path` on any HTTP method.
 
 ### mock.request_count(path: PathPattern)
 
-**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md) · **Returns** `int`
+**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md#regex) · **Returns** `int`
 
 How many requests arrived on a `regex(...)` path (any method).
 
@@ -142,7 +142,7 @@ await_until(|| assert(hooks.request_count("/voice")).equals(1), "10s");
 
 ### mock.requests(path: PathPattern)
 
-**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md) · **Returns** `array`
+**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md#regex) · **Returns** `array`
 
 All requests on a `regex(...)` path, in arrival order, as `MockRequest`s.
 
@@ -158,7 +158,7 @@ All requests received on `path`, in arrival order, as `MockRequest`s.
 
 ### mock.respond(method: string, path: PathPattern, response: map)
 
-**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md)
+**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md#regex)
 
 Static response for `method` and a `regex(...)` path.
 
@@ -183,7 +183,7 @@ hooks.respond("POST", "/voice", json_response(#{ actions: [ #{ type: "hangup" } 
 
 ### mock.respond(path: PathPattern, response: map)
 
-**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md)
+**Receiver** [`HttpMock`](http-mock-server.md) · **Takes** [`PathPattern`](http-mock-server.md#regex)
 
 Static response for a `regex(...)` path on any HTTP method.
 
@@ -230,8 +230,7 @@ The server's base URL, e.g. `http://127.0.0.1:8080`.
 **Returns** `map`
 
 Build a `200 application/json` response map from `body` (JSON-encoded),
-for `respond`/`on`. `body` may be a map or an array, e.g.
-`json_response(#{ actions: [ … ] })` or `json_response([ … ])`.
+for `respond`/`on`. `body` may be a map or an array.
 
 **Example**
 
@@ -243,11 +242,10 @@ hooks.respond("POST", "/voice", json_response(#{ actions: [ #{ type: "answer" } 
 
 ### regex(pattern: string)
 
-**Returns** [`PathPattern`](http-mock-server.md)
+**Returns** [`PathPattern`](http-mock-server.md#regex)
 
 A regex path matcher for `respond`/`on`/`request_count`/… anchored to the
-whole path: `regex("/calls/.*")` matches `/calls/123`. Errors on a bad
-pattern.
+whole path (`/calls/.*` matches `/calls/123`). Errors on a bad pattern.
 
 **Example**
 

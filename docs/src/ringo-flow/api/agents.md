@@ -72,6 +72,14 @@ b.accept();
 Start an attended transfer: place a consultation call to another agent.
 Complete it with `complete_transfer()` once that call is established.
 
+**Example**
+
+```rust
+callee.attended_transfer(target);   // consult `target`
+await_until(|| assert(target.state).equals(State::Established));
+callee.complete_transfer();         // connect caller and target
+```
+
 <a id="attended_transfer"></a>
 
 ### agent.attended_transfer(target: string)
@@ -132,7 +140,13 @@ a.dtmf("123#");
 
 **Receiver** [`Agent`](agents.md)
 
-Send DTMF tones with a pause between digits, e.g. `dtmf("123#", "200ms")`.
+Send DTMF tones with a pause between digits.
+
+**Example**
+
+```rust
+a.dtmf("123#", "200ms");
+```
 
 <a id="hangup"></a>
 
@@ -153,7 +167,7 @@ await_until(|| assert(a.state).equals(State::Idle), "10s");
 
 ### agent.header(name: string)
 
-**Receiver** [`Agent`](agents.md) · **Returns** `any`
+**Receiver** [`Agent`](agents.md) · **Returns** `string?`
 
 Value of a header on a received INVITE (string), or `()` if absent.
 
@@ -288,6 +302,12 @@ b.verify_audio(440, "5s"); // b hears A's 440 Hz tone
 
 Assert two-way audio between two agents (a→b then b→a) at 1000 Hz.
 
+**Example**
+
+```rust
+caller.verify_audio_connection(callee);
+```
+
 ## Fields
 
 <a id="peer"></a>
@@ -303,7 +323,7 @@ The current call's remote party (the caller for an incoming call); read
 
 ### agent.reason
 
-**Receiver** [`Agent`](agents.md) · **Returns** `any`
+**Receiver** [`Agent`](agents.md) · **Returns** `string?`
 
 The last closed call's reason (string), or `()` if none yet.
 
@@ -319,7 +339,7 @@ Whether the agent's account is currently registered.
 
 ### agent.state
 
-**Receiver** [`Agent`](agents.md) · **Returns** `CallState`
+**Receiver** [`Agent`](agents.md) · **Returns** [`CallState`](call-state.md)
 
 The agent's current call phase: `Idle`, `Ringing` or `Established`.
 
@@ -327,7 +347,7 @@ The agent's current call phase: `Idle`, `Ringing` or `Established`.
 
 ### agent.status_code
 
-**Receiver** [`Agent`](agents.md) · **Returns** `any`
+**Receiver** [`Agent`](agents.md) · **Returns** `int?`
 
 SIP status code from the last closed call's reason (int, e.g. `603`),
 or `()` if the reason isn't a SIP response (local hangup, reset, …).

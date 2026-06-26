@@ -20,8 +20,11 @@ use tokio::runtime::Handle;
 /// `Established`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallState {
+    /// No active call.
     Idle,
+    /// A call is ringing — incoming or outgoing — but not yet answered.
     Ringing,
+    /// The call is connected and media is flowing.
     Established,
 }
 
