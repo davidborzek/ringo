@@ -68,6 +68,11 @@ struct Entry {
     receiver: Option<String>,
     sigs: Vec<String>,
     returns: Option<String>,
+    /// A documented return type from a `# Returns: <type>` doc-comment line, used
+    /// for the badge instead of the Rhai metadata type. Lets a dynamic (`?`) return
+    /// read as its real shape (e.g. `string?`) without putting non-Rhai syntax in
+    /// the `.d.rhai`, which keeps `params_info` as `?`.
+    doc_returns: Option<String>,
     summaries: Vec<String>,
     examples: Vec<String>,
 }
@@ -115,7 +120,7 @@ fn api_entries(engine: &Engine) -> Result<ApiIndex> {
             .and_then(|p| p.split_once(": "))
             .map(|(_, t)| t.trim())
             .filter(|t| RECEIVERS.contains(t));
-        let (summary, examples) = parse_doc(&comments);
+        let (summary, examples, doc_ret) = parse_doc(&comments);
 
         // Rank within a section, which also groups the page: 0 = the constructor of
         // the section's main type (a free function returning Agent/Assertion/
@@ -146,6 +151,9 @@ fn api_entries(engine: &Engine) -> Result<ApiIndex> {
         }
         if e.returns.is_none() {
             e.returns = ret;
+        }
+        if e.doc_returns.is_none() {
+            e.doc_returns = doc_ret;
         }
         if !summary.is_empty() && !e.summaries.contains(&summary) {
             e.summaries.push(summary);
@@ -273,10 +281,12 @@ fn entity_section(ret: &str) -> Option<(u8, &'static str)> {
     }
 }
 
-/// Split doc comments into a description and the `# Example` ```rhai code blocks:
-/// fenced blocks become examples (rendered as code), the rest is the description.
-/// A lone `Example` / `# Example` heading is dropped (we render our own label).
-fn parse_doc(comments: &[&str]) -> (String, Vec<String>) {
+/// Split doc comments into a description, the `# Example` ```rhai code blocks and
+/// an optional return type. Fenced blocks become examples (rendered as code); a
+/// `# Returns: <type>` line sets the documented return type (e.g. `string?`) and is
+/// dropped from the description; a lone `Example` heading is dropped (we render our
+/// own label); the rest is the description.
+fn parse_doc(comments: &[&str]) -> (String, Vec<String>, Option<String>) {
     let lines: Vec<String> = comments
         .iter()
         .flat_map(|c| c.lines())
@@ -284,6 +294,7 @@ fn parse_doc(comments: &[&str]) -> (String, Vec<String>) {
         .collect();
     let mut summary: Vec<String> = Vec::new();
     let mut examples: Vec<String> = Vec::new();
+    let mut doc_returns: Option<String> = None;
     let mut i = 0;
     while i < lines.len() {
         if lines[i].trim_start().starts_with("```") {
@@ -297,17 +308,19 @@ fn parse_doc(comments: &[&str]) -> (String, Vec<String>) {
             examples.push(block.join("\n").trim_end().to_string());
         } else {
             let t = lines[i].trim();
-            let is_example_heading = t
-                .trim_start_matches('#')
-                .trim()
-                .eq_ignore_ascii_case("example");
-            if !is_example_heading {
+            let bare = t.trim_start_matches('#').trim();
+            if let Some(ret) = bare
+                .strip_prefix("Returns:")
+                .or_else(|| bare.strip_prefix("returns:"))
+            {
+                doc_returns = Some(ret.trim().to_string());
+            } else if !bare.eq_ignore_ascii_case("example") {
                 summary.push(lines[i].clone());
             }
             i += 1;
         }
     }
-    (summary.join("\n").trim().to_string(), examples)
+    (summary.join("\n").trim().to_string(), examples, doc_returns)
 }
 
 /// Strip a doc-comment marker (`///`, `/**`, `*/`, leading `*`) and one space,
@@ -355,9 +368,10 @@ fn type_page(ty: &str) -> Option<&'static str> {
         "HttpResponse" => "http.md",
         "HttpMock" => "http-mock-server.md",
         "MockRequest" => "mock-request.md",
-        // PathPattern is built by `regex`, documented on the mock-server page.
-        "PathPattern" => "http-mock-server.md",
+        // PathPattern is built by `regex`; link to that entry, not the page top.
+        "PathPattern" => "http-mock-server.md#regex",
         "AudioSpec" => "audiospec.md",
+        "CallState" => "call-state.md",
         _ => return None,
     })
 }
@@ -421,8 +435,18 @@ fn render_entry(md: &mut String, level: &str, e: &Entry) {
         let links: Vec<String> = takes.iter().map(|t| type_md(t)).collect();
         meta.push(format!("**Takes** {}", links.join(", ")));
     }
-    if let Some(ret) = &e.returns {
-        meta.push(format!("**Returns** {}", type_md(ret_display(ret))));
+    // Prefer a documented `# Returns:` type (e.g. `string?`); else the Rhai metadata
+    // type, dropping a bare `any` (a `?`/dynamic return is noise — the description
+    // already says what comes back).
+    let ret = e.doc_returns.clone().or_else(|| {
+        e.returns
+            .as_deref()
+            .map(ret_display)
+            .filter(|d| *d != "any")
+            .map(str::to_string)
+    });
+    if let Some(ret) = ret {
+        meta.push(format!("**Returns** {}", type_md(&ret)));
     }
     if !meta.is_empty() {
         md.push_str(&meta.join(" · "));
@@ -490,11 +514,124 @@ fn book_sections(engine: &Engine) -> Result<Vec<(String, &'static str, String)>>
         }
         pages.push((slug(title), title, body));
     }
+    pages.push(call_state_section());
     Ok(pages)
+}
+
+/// The `State::*` constants `agent.state` is compared against, with descriptions.
+/// (`CallState` variants aren't functions, so they don't appear in the metadata;
+/// this is the one place they're documented.)
+const CALL_STATES: &[(&str, &str)] = &[
+    ("Idle", "No active call."),
+    (
+        "Ringing",
+        "A call is ringing — incoming or outgoing — but not yet answered.",
+    ),
+    ("Established", "The call is connected and media is flowing."),
+];
+
+/// The hand-rolled "Call state" section: the `CallState` type returned by
+/// `agent.state`, the `State::*` constants and how to compare them. Returned by
+/// [`book_sections`] so it's written and snapshot-tested like the rest.
+fn call_state_section() -> (String, &'static str, String) {
+    let mut body = String::from(
+        "# Call state\n\n\
+         `agent.state` returns a **`CallState`** — a call's current phase. Compare it \
+         against the `State::*` constants, usually inside `await_until`:\n\n\
+         ```rust\n\
+         await_until(|| assert(callee.state).equals(State::Ringing));\n\
+         ```\n\n",
+    );
+    for (name, desc) in CALL_STATES {
+        body.push_str(&format!("- `State::{name}` — {desc}\n"));
+    }
+    body.push('\n');
+    ("call-state".to_string(), "Call state", body)
 }
 
 /// Write the scenario API as one Markdown page per section into `dir` (the mdBook
 /// `src/api` directory), named `<slug>.md`. These are the generated API chapters.
+/// Sub-type sections nested under a parent in the overview (parent → children).
+const API_NESTING: &[(&str, &[&str])] = &[
+    ("Agents", &["Peer", "Call state", "AudioSpec"]),
+    ("HTTP mock server", &["Mock request"]),
+];
+
+/// One-line blurb per section for the overview (`index.md`). Empty for an unlisted
+/// section (the link still renders); the snapshot test flags drift either way.
+fn section_blurb(title: &str) -> &'static str {
+    match title {
+        "Scenario structure" => {
+            "defining and isolating tests: `scenario`, `setup`, `teardown`, `skip`."
+        }
+        "Flow and timing" => "`await_until`, `wait`, `parallel`, `default_timeout`.",
+        "Agents" => {
+            "create SIP endpoints and drive calls: register, dial, accept, transfer, DTMF, audio."
+        }
+        "Peer" => "the remote party of the active call.",
+        "Call state" => "the `State::*` phases for `agent.state`.",
+        "AudioSpec" => "audio sources for `send_audio` (`tone`, `file`, `silent`).",
+        "Assertions and matchers" => {
+            "the fluent `assert(x).<matcher>(…)`, used inside `await_until`."
+        }
+        "HTTP" => "`http(…)` requests and the response.",
+        "HTTP mock server" => "`mock_server(…)`, routes and responders for webhook-driven flows.",
+        "Mock request" => "the recorded request a responder/assertion sees.",
+        "Environment" => "`env`, `load_env` — credentials stay out of scripts.",
+        "Utilities" => "`log`, `uuid`.",
+        _ => "",
+    }
+}
+
+/// The generated API overview (`index.md`): every section linked, sub-types nested,
+/// each with a one-line blurb — the landing page for the API reference.
+fn api_index_body(engine: &Engine) -> Result<String> {
+    use std::collections::{HashMap, HashSet};
+    let sections = book_sections(engine)?;
+    let slug_of: HashMap<&str, &str> = sections.iter().map(|(s, t, _)| (*t, s.as_str())).collect();
+    let children: HashSet<&str> = API_NESTING
+        .iter()
+        .flat_map(|(_, cs)| cs.iter().copied())
+        .collect();
+
+    let line = |indent: &str, title: &str, slug: &str| {
+        let b = section_blurb(title);
+        let suffix = if b.is_empty() {
+            String::new()
+        } else {
+            format!(" — {b}")
+        };
+        format!("{indent}- [{title}]({slug}.md){suffix}\n")
+    };
+
+    let mut out = String::from(
+        "# API reference\n\n\
+         The complete scenario vocabulary, generated from the engine (so it never \
+         drifts from the code) — organized by the thing you're working with:\n\n",
+    );
+    for (slug, title, _) in &sections {
+        if children.contains(title) {
+            continue; // listed under its parent
+        }
+        out.push_str(&line("", title, slug));
+        if let Some((_, cs)) = API_NESTING.iter().find(|(p, _)| p == title) {
+            for child in *cs {
+                if let Some(cslug) = slug_of.get(child) {
+                    out.push_str(&line("  ", child, cslug));
+                }
+            }
+        }
+    }
+    out.push_str(
+        "\nNew to it? Start with [Your first scenario](../your-first-scenario.md), \
+         then [Writing scenarios](../writing-scenarios.md).\n\n\
+         For editors and agents, the whole API is also available as \
+         [Rhai type definitions](../ringo-flow.d.rhai) (`.d.rhai`) — point the Rhai \
+         language server at it for completion and hover.\n",
+    );
+    Ok(out)
+}
+
 pub fn write_book_api(dir: &Path) -> Result<()> {
     let (_rt, engine) = doc_engine()?;
     std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
@@ -502,6 +639,9 @@ pub fn write_book_api(dir: &Path) -> Result<()> {
         let path = dir.join(format!("{slug}.md"));
         std::fs::write(&path, body).with_context(|| format!("write {}", path.display()))?;
     }
+    let index = dir.join("index.md");
+    std::fs::write(&index, api_index_body(&engine)?)
+        .with_context(|| format!("write {}", index.display()))?;
     println!("wrote API pages to {}", dir.display());
     Ok(())
 }
@@ -523,5 +663,31 @@ mod tests {
                  `cargo run -p ringo-flow -- docs docs/src/ringo-flow/api`"
             );
         }
+        let index = format!("{dir}/index.md");
+        assert_eq!(
+            super::api_index_body(&engine).unwrap(),
+            std::fs::read_to_string(&index).unwrap_or_default(),
+            "{index} is stale — regenerate with \
+             `cargo run -p ringo-flow -- docs docs/src/ringo-flow/api`"
+        );
+    }
+
+    #[test]
+    fn rhai_definitions_are_current() {
+        // The committed .d.rhai (served from the docs, for the Rhai LSP and agents)
+        // is generated; fail if it drifts from the engine. Output is deterministic.
+        let tmp = std::env::temp_dir().join("ringo-flow-defs.d.rhai");
+        super::write_definitions(&tmp).unwrap();
+        let generated = std::fs::read_to_string(&tmp).unwrap();
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/src/ringo-flow/ringo-flow.d.rhai"
+        );
+        let committed = std::fs::read_to_string(path).unwrap_or_default();
+        assert_eq!(
+            generated, committed,
+            "{path} is stale — regenerate with \
+             `cargo run -p ringo-flow -- definitions docs/src/ringo-flow/ringo-flow.d.rhai`"
+        );
     }
 }

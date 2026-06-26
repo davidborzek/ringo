@@ -4,17 +4,18 @@
 
 ## await_until(body: Fn)
 
-**Returns** `any`
-
 Re-run the expression until its assertion holds or the default timeout
-elapses: `await_until(|| assert(a.registered).is_true())`. Returns the
-body's value, so `.value()` can bind a verified value.
+elapses; returns the body's value, so `.value()` can bind a verified value.
+
+**Example**
+
+```rust
+await_until(|| assert(a.registered).is_true());
+```
 
 <a id="await_until"></a>
 
 ## await_until(body: Fn, within: string)
-
-**Returns** `any`
 
 Like `await_until(body)` but with an explicit timeout, e.g. `"15s"`.
 
@@ -42,6 +43,15 @@ independent blocking work, e.g. `verify_audio` on several agents at once.
 Tasks may share captured variables (each gets an independent snapshot,
 so they can't race). Don't overlap `await_until` across tasks; its
 silencing is global.
+
+**Example**
+
+```rust
+let results = parallel([
+    || http("GET", env("A_URL")),
+    || http("GET", env("B_URL")),
+]);
+```
 
 <a id="wait"></a>
 

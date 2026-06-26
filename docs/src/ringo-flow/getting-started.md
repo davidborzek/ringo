@@ -11,6 +11,12 @@ for install instructions (`pacman -S baresip`, `brew install baresip`, …).
 
 ### 2. ringo-flow
 
+**Homebrew (macOS / Linux)** — also installs baresip, so you can skip step 1:
+
+```sh
+brew install davidborzek/tap/ringo-flow
+```
+
 **Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
 [releases page](https://github.com/davidborzek/ringo/releases) — download, extract
 and put `ringo-flow` on your `$PATH`.
@@ -32,6 +38,14 @@ cargo install --git https://github.com/davidborzek/ringo ringo-flow
 ```sh
 cargo run -p ringo-flow -- run scenario.rhai
 ```
+
+> Homebrew 6.0+ requires third-party taps to be trusted before use. If `brew
+> install` prompts you to trust the tap, accept it — or trust it up front:
+>
+> ```sh
+> brew tap davidborzek/tap
+> brew trust --formula davidborzek/tap/ringo-flow
+> ```
 
 ## Run a scenario
 

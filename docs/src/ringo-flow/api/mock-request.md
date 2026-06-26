@@ -6,7 +6,7 @@
 
 ### req.header(name: string)
 
-**Receiver** [`MockRequest`](mock-request.md) · **Returns** `any`
+**Receiver** [`MockRequest`](mock-request.md) · **Returns** `string?`
 
 A request header value (case-insensitive), or `()` if absent.
 
@@ -14,7 +14,7 @@ A request header value (case-insensitive), or `()` if absent.
 
 ### req.json(path: string)
 
-**Receiver** [`MockRequest`](mock-request.md) · **Returns** `any`
+**Receiver** [`MockRequest`](mock-request.md)
 
 The value at a dotted JSON path in the body (object→map, array, number,
 bool, `null`→`()`). Errors if the path is missing.
@@ -29,7 +29,7 @@ assert(req.json("call.from")).equals("+49301234567");
 
 ### req.query(name: string)
 
-**Receiver** [`MockRequest`](mock-request.md) · **Returns** `any`
+**Receiver** [`MockRequest`](mock-request.md) · **Returns** `string?`
 
 A query-string parameter value, or `()` if absent.
 

@@ -81,7 +81,8 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "get$reason",
         ["agent: Agent", "?"],
-        "/// The last closed call's reason (string), or `()` if none yet.",
+        "/// The last closed call's reason (string), or `()` if none yet.\n\
+         /// # Returns: string?",
         Agent::reason
     );
     reg!(
@@ -89,14 +90,16 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         "get$status_code",
         ["agent: Agent", "?"],
         "/// SIP status code from the last closed call's reason (int, e.g. `603`),\n\
-         /// or `()` if the reason isn't a SIP response (local hangup, reset, …).",
+         /// or `()` if the reason isn't a SIP response (local hangup, reset, …).\n\
+         /// # Returns: int?",
         Agent::status_code
     );
     reg!(
         engine,
         "header",
         ["agent: Agent", "name: string", "?"],
-        "/// Value of a header on a received INVITE (string), or `()` if absent.",
+        "/// Value of a header on a received INVITE (string), or `()` if absent.\n\
+         /// # Returns: string?",
         Agent::header
     );
     reg!(
@@ -112,21 +115,24 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "get$uri",
         ["peer: Peer", "?"],
-        "/// The remote party's full URI (e.g. `sip:bob@example.com`), or `()`.",
+        "/// The remote party's full URI (e.g. `sip:bob@example.com`), or `()`.\n\
+         /// # Returns: string?",
         Peer::uri
     );
     reg!(
         engine,
         "get$number",
         ["peer: Peer", "?"],
-        "/// The remote party's number (user-part of the URI), or `()`.",
+        "/// The remote party's number (user-part of the URI), or `()`.\n\
+         /// # Returns: string?",
         Peer::number
     );
     reg!(
         engine,
         "get$name",
         ["peer: Peer", "?"],
-        "/// The remote party's display name, or `()` if absent.",
+        "/// The remote party's display name, or `()` if absent.\n\
+         /// # Returns: string?",
         Peer::name
     );
     engine.register_fn("to_string", Peer::display);
@@ -229,7 +235,11 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "dtmf",
         ["agent: Agent", "digits: string", "gap: string", "()"],
-        "/// Send DTMF tones with a pause between digits, e.g. `dtmf(\"123#\", \"200ms\")`.",
+        "/// Send DTMF tones with a pause between digits.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// a.dtmf(\"123#\", \"200ms\");\n\
+         /// ```",
         Agent::dtmf_spaced
     );
     reg!(
@@ -275,7 +285,13 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         "attended_transfer",
         ["agent: Agent", "target: Agent", "()"],
         "/// Start an attended transfer: place a consultation call to another agent.\n\
-         /// Complete it with `complete_transfer()` once that call is established.",
+         /// Complete it with `complete_transfer()` once that call is established.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// callee.attended_transfer(target);   // consult `target`\n\
+         /// await_until(|| assert(target.state).equals(State::Established));\n\
+         /// callee.complete_transfer();         // connect caller and target\n\
+         /// ```",
         Agent::attended_transfer_agent
     );
     reg!(
@@ -356,8 +372,11 @@ fn register_assertions(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "value",
         ["a: Assertion", "?"],
-        "/// The value under assertion, so a verified value can be bound:\n\
-         /// `let id = await_until(|| assert(callee.header(\"X-Id\")).is_present().value());`.",
+        "/// The value under assertion, so a verified value can be bound.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// let id = await_until(|| assert(callee.header(\"X-Id\")).is_present().value());\n\
+         /// ```",
         Assertion::value
     );
 
@@ -479,8 +498,11 @@ fn register_assertions(engine: &mut Engine, ctx: &Arc<Ctx>) {
         "await_until",
         ["body: Fn", "?"],
         "/// Re-run the expression until its assertion holds or the default timeout\n\
-         /// elapses: `await_until(|| assert(a.registered).is_true())`. Returns the\n\
-         /// body's value, so `.value()` can bind a verified value.",
+         /// elapses; returns the body's value, so `.value()` can bind a verified value.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// await_until(|| assert(a.registered).is_true());\n\
+         /// ```",
         move |nctx: NativeCallContext, body: FnPtr| -> Result<Dynamic, Box<EvalAltResult>> {
             await_until(&c, &nctx, &body, c.default_timeout())
         }
@@ -548,7 +570,8 @@ fn register_http(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "header",
         ["response: HttpResponse", "name: string", "?"],
-        "/// A response header value (string), or `()` if absent.",
+        "/// A response header value (string), or `()` if absent.\n\
+         /// # Returns: string?",
         HttpResponse::header
     );
     reg!(
@@ -707,8 +730,7 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         "regex",
         ["pattern: string", "PathPattern"],
         "/// A regex path matcher for `respond`/`on`/`request_count`/… anchored to the\n\
-         /// whole path: `regex(\"/calls/.*\")` matches `/calls/123`. Errors on a bad\n\
-         /// pattern.\n\
+         /// whole path (`/calls/.*` matches `/calls/123`). Errors on a bad pattern.\n\
          /// # Example\n\
          /// ```rhai\n\
          /// hooks.on(regex(\"/calls/.*\"), |req| text_response(\"ok\"));\n\
@@ -1008,14 +1030,16 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         engine,
         "header",
         ["request: MockRequest", "name: string", "?"],
-        "/// A request header value (case-insensitive), or `()` if absent.",
+        "/// A request header value (case-insensitive), or `()` if absent.\n\
+         /// # Returns: string?",
         MockRequest::header
     );
     reg!(
         engine,
         "query",
         ["request: MockRequest", "name: string", "?"],
-        "/// A query-string parameter value, or `()` if absent.",
+        "/// A query-string parameter value, or `()` if absent.\n\
+         /// # Returns: string?",
         MockRequest::query
     );
     reg!(
@@ -1037,8 +1061,7 @@ fn register_mock(engine: &mut Engine, ctx: &Arc<Ctx>, registry: &Arc<Registry>) 
         "json_response",
         ["body: ?", "map"],
         "/// Build a `200 application/json` response map from `body` (JSON-encoded),\n\
-         /// for `respond`/`on`. `body` may be a map or an array, e.g.\n\
-         /// `json_response(#{ actions: [ … ] })` or `json_response([ … ])`.\n\
+         /// for `respond`/`on`. `body` may be a map or an array.\n\
          /// # Example\n\
          /// ```rhai\n\
          /// hooks.respond(\"POST\", \"/voice\", json_response(#{ actions: [ #{ type: \"answer\" } ] }));\n\
@@ -1131,7 +1154,11 @@ fn register_audio(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "verify_audio_connection",
         ["a: Agent", "b: Agent", "()"],
-        "/// Assert two-way audio between two agents (a→b then b→a) at 1000 Hz.",
+        "/// Assert two-way audio between two agents (a→b then b→a) at 1000 Hz.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// caller.verify_audio_connection(callee);\n\
+         /// ```",
         move |a: Agent, b: Agent| -> Result<(), Box<EvalAltResult>> {
             audio::verify_audio_connection(&c, &a.name, &b.name).map_err(|e| e.into())
         }
@@ -1260,7 +1287,14 @@ fn register_globals(
          /// independent blocking work, e.g. `verify_audio` on several agents at once.\n\
          /// Tasks may share captured variables (each gets an independent snapshot,\n\
          /// so they can't race). Don't overlap `await_until` across tasks; its\n\
-         /// silencing is global.",
+         /// silencing is global.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// let results = parallel([\n\
+         ///     || http(\"GET\", env(\"A_URL\")),\n\
+         ///     || http(\"GET\", env(\"B_URL\")),\n\
+         /// ]);\n\
+         /// ```",
         move |tasks: rhai::Array| -> Result<rhai::Array, Box<EvalAltResult>> {
             let (engine, ast) = r
                 .exec()
@@ -1347,7 +1381,14 @@ fn register_globals(
         ["name: string", "options: map", "body: Fn", "()"],
         "/// Register a scenario with options `#{ tags: [\"smoke\"], skip: true|\"reason\",\n\
          /// only: true }`. `--tag`/`--exclude-tag` filter by tag; a skipped scenario is\n\
-         /// reported but not run; if any scenario sets `only`, only those run.",
+         /// reported but not run; if any scenario sets `only`, only those run.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// scenario(\"smoke: answered\", #{ tags: [\"smoke\"] }, |ctx| {\n\
+         ///     ctx.caller.dial(ctx.callee);\n\
+         ///     ctx.callee.accept();\n\
+         /// });\n\
+         /// ```",
         move |name: &str, options: Map, body: FnPtr| -> Result<(), Box<EvalAltResult>> {
             let info = convert::scenario_info_from_map(name, &options)?;
             r.add_scenario(info, body);
@@ -1376,7 +1417,11 @@ fn register_globals(
         engine,
         "teardown",
         ["body: Fn", "()"],
-        "/// Run after each scenario (even on failure); receives the `setup` context.",
+        "/// Run after each scenario (even on failure); receives the `setup` context.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// teardown(|ctx| { ctx.caller.hangup(); });\n\
+         /// ```",
         move |body: FnPtr| r.set_teardown(body)
     );
 
@@ -1386,8 +1431,7 @@ fn register_globals(
         engine,
         "skip",
         ["reason: string", "()"],
-        "/// Skip the current scenario at runtime with a reason (reported, not failed);\n\
-         /// e.g. `if env(\"STAGE\") != \"prod\" { skip(\"prod only\") }`.\n\
+        "/// Skip the current scenario at runtime with a reason (reported, not failed).\n\
          /// # Example\n\
          /// ```rhai\n\
          /// if env(\"STAGE\") != \"prod\" { skip(\"prod only\") }\n\

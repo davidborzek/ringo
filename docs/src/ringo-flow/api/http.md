@@ -55,7 +55,7 @@ Assert and report the status; errors on mismatch.
 
 ### resp.header(name: string)
 
-**Receiver** [`HttpResponse`](http.md) · **Returns** `any`
+**Receiver** [`HttpResponse`](http.md) · **Returns** `string?`
 
 A response header value (string), or `()` if absent.
 
@@ -63,7 +63,7 @@ A response header value (string), or `()` if absent.
 
 ### resp.json()
 
-**Receiver** [`HttpResponse`](http.md) · **Returns** `any`
+**Receiver** [`HttpResponse`](http.md)
 
 The whole JSON body as a native value (object→map, array, …).
 
@@ -71,7 +71,7 @@ The whole JSON body as a native value (object→map, array, …).
 
 ### resp.json(path: string)
 
-**Receiver** [`HttpResponse`](http.md) · **Returns** `any`
+**Receiver** [`HttpResponse`](http.md)
 
 The value at a dotted JSON path (e.g. `"data.id"`), typed: object→map,
 array, number, bool, `null`→`()`. Errors if the path is missing.

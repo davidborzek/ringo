@@ -25,13 +25,16 @@ and integrations.
 
 ## Install
 
-Pre-built binaries for Linux and macOS (x86\_64 + arm64) are on the
-[releases page](https://github.com/davidborzek/ringo/releases), or build with cargo:
-
 ```sh
+brew install davidborzek/tap/ringo                          # Homebrew (macOS/Linux)
 cargo install ringo-phone                                   # from crates.io
 cargo install --git https://github.com/davidborzek/ringo ringo-phone   # from git
 ```
+
+Pre-built binaries for Linux and macOS (x86\_64 + arm64) are also on the
+[releases page](https://github.com/davidborzek/ringo/releases). Homebrew 6.0+ may
+ask you to trust the third-party tap first (`brew trust --formula davidborzek/tap/ringo`) —
+see [Getting started](https://davidborzek.github.io/ringo/ringo-phone/getting-started.html).
 
 See [Getting started](https://davidborzek.github.io/ringo/ringo-phone/getting-started.html)
 for installing baresip and other options.

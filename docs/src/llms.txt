@@ -1,0 +1,41 @@
+# ringo
+
+> Tooling for baresip SIP softphones: **ringo-phone** (a terminal SIP softphone) and **ringo-flow** (a declarative telephony scenario test runner). Full docs: https://davidborzek.github.io/ringo/
+
+
+## ringo-phone
+
+- [Introduction](https://davidborzek.github.io/ringo/ringo-phone/introduction.html)
+- [Getting started](https://davidborzek.github.io/ringo/ringo-phone/getting-started.html)
+- [Profiles](https://davidborzek.github.io/ringo/ringo-phone/profiles.html)
+- [Using the TUI](https://davidborzek.github.io/ringo/ringo-phone/tui.html)
+- [Remote control](https://davidborzek.github.io/ringo/ringo-phone/remote-control.html)
+- [Configuration](https://davidborzek.github.io/ringo/ringo-phone/configuration.html)
+- [Integrations](https://davidborzek.github.io/ringo/ringo-phone/integrations.html)
+
+## ringo-flow
+
+- [Introduction](https://davidborzek.github.io/ringo/ringo-flow/introduction.html)
+- [Getting started](https://davidborzek.github.io/ringo/ringo-flow/getting-started.html)
+- [Your first scenario](https://davidborzek.github.io/ringo/ringo-flow/your-first-scenario.html)
+- [Writing scenarios](https://davidborzek.github.io/ringo/ringo-flow/writing-scenarios.html)
+- [Audio testing](https://davidborzek.github.io/ringo/ringo-flow/audio.html)
+- [HTTP & webhooks](https://davidborzek.github.io/ringo/ringo-flow/http-and-webhooks.html)
+- [Running in CI](https://davidborzek.github.io/ringo/ringo-flow/running-in-ci.html)
+- [API reference](https://davidborzek.github.io/ringo/ringo-flow/api/index.html)
+- [Scenario structure](https://davidborzek.github.io/ringo/ringo-flow/api/scenario-structure.html)
+- [Flow and timing](https://davidborzek.github.io/ringo/ringo-flow/api/flow-and-timing.html)
+- [Agents](https://davidborzek.github.io/ringo/ringo-flow/api/agents.html)
+- [Peer](https://davidborzek.github.io/ringo/ringo-flow/api/peer.html)
+- [Call state](https://davidborzek.github.io/ringo/ringo-flow/api/call-state.html)
+- [AudioSpec](https://davidborzek.github.io/ringo/ringo-flow/api/audiospec.html)
+- [Assertions and matchers](https://davidborzek.github.io/ringo/ringo-flow/api/assertions-and-matchers.html)
+- [HTTP](https://davidborzek.github.io/ringo/ringo-flow/api/http.html)
+- [HTTP mock server](https://davidborzek.github.io/ringo/ringo-flow/api/http-mock-server.html)
+- [Mock request](https://davidborzek.github.io/ringo/ringo-flow/api/mock-request.html)
+- [Environment](https://davidborzek.github.io/ringo/ringo-flow/api/environment.html)
+- [Utilities](https://davidborzek.github.io/ringo/ringo-flow/api/utilities.html)
+
+## Machine-readable
+
+- [ringo-flow Rhai type definitions](https://davidborzek.github.io/ringo/ringo-flow/ringo-flow.d.rhai): the full scenario API as a `.d.rhai` (signatures for the Rhai LSP and agents)

@@ -159,8 +159,13 @@ Assert the value does not equal `expected`.
 
 ### assertion.value()
 
-**Receiver** [`Assertion`](assertions-and-matchers.md) · **Returns** `any`
+**Receiver** [`Assertion`](assertions-and-matchers.md)
 
-The value under assertion, so a verified value can be bound:
-`let id = await_until(|| assert(callee.header("X-Id")).is_present().value());`.
+The value under assertion, so a verified value can be bound.
+
+**Example**
+
+```rust
+let id = await_until(|| assert(callee.header("X-Id")).is_present().value());
+```
 

@@ -17,6 +17,12 @@ brew install baresip     # macOS
 
 ### 2. ringo
 
+**Homebrew (macOS / Linux):**
+
+```sh
+brew install davidborzek/tap/ringo
+```
+
 **Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
 [releases page](https://github.com/davidborzek/ringo/releases) — download, extract
 and put `ringo` on your `$PATH`.
@@ -32,6 +38,14 @@ cargo install ringo-phone
 ```sh
 cargo install --git https://github.com/davidborzek/ringo ringo-phone
 ```
+
+> Homebrew 6.0+ requires third-party taps to be trusted before use. If `brew
+> install` prompts you to trust the tap, accept it — or trust it up front:
+>
+> ```sh
+> brew tap davidborzek/tap
+> brew trust --formula davidborzek/tap/ringo
+> ```
 
 ## Quick start
 
