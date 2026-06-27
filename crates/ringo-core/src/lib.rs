@@ -8,6 +8,8 @@ pub mod event;
 pub mod log;
 pub mod phone;
 
-pub use backend::{call_count, is_registered, received_audio, sent_audio, shutdown};
+pub use backend::{
+    call_count, is_registered, received_audio, sent_audio, set_sip_trace, shutdown,
+};
 
 mod baresip;

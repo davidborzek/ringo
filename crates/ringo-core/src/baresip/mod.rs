@@ -20,6 +20,7 @@ mod config;
 mod events;
 mod phone;
 mod re_thread;
+mod siptrace;
 mod sounds;
 
 use std::collections::HashMap;
@@ -39,6 +40,13 @@ use self::phone::{BaresipPhone, BaresipSessionHandle, make_header_poll};
 use self::re_thread::{EVENT_TX, enter_re_thread, on_re_thread, redirect_logging, start_re_thread};
 
 pub use self::re_thread::stop_re_thread;
+
+/// Request SIP message tracing (every request/response logged through the ringo
+/// log). Call before the first session is spawned; the handler is installed
+/// during baresip init. Output goes to whatever log sink the binary set up.
+pub fn set_sip_trace(on: bool) {
+    siptrace::set_requested(on);
+}
 
 /// Returns true if any UA is still registered. Checks `uag_list()` on the
 /// RE thread without holding the lock. Used by ringo-flow to wait for
@@ -183,6 +191,9 @@ impl Backend for BaresipBackend {
                 if let Err(e) = ausrc::register_module() {
                     bail!("{e}");
                 }
+
+                // Install the SIP trace handler if `--sip-trace` was requested.
+                siptrace::install_if_requested();
 
                 let _ = BARESIP_INIT_DONE.set(true);
             }

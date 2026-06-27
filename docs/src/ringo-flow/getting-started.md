@@ -72,6 +72,7 @@ The exit code is non-zero if any scenario fails.
 - `--env-file FILE` — load variables for `env(...)` (a sibling `<scenario>.env`
   is layered on top per file).
 - `--log [<file>]` — write the backend/SIP log to stderr (or a file); off by default.
+- `--sip-trace` — trace every SIP request/response (to the log; stderr if no `--log`).
 - `--save-audio` — save sent/received WAVs to the working directory.
 - `--json` — emit NDJSON events (for CI).
 - `-q` / `-v`, `--no-color`.
