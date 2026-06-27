@@ -10,6 +10,12 @@ baresip is built in and statically linked — no separate `baresip` install need
 brew install davidborzek/tap/ringo-flow
 ```
 
+**Arch Linux (AUR)** — prebuilt, via any AUR helper:
+
+```sh
+yay -S ringo-flow-bin   # or: paru -S ringo-flow-bin
+```
+
 **Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
 [releases page](https://github.com/davidborzek/ringo/releases) — download, extract
 and put `ringo-flow` on your `$PATH`.
