@@ -49,35 +49,22 @@ jobs:
       # the real headless (aubridge-only) link path that Docker/release ship.
       - run: cargo build -p ringo-flow
 
-  build-macos:
-    name: Test (macOS)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install build dependencies
-        # OpenSSL is vendored, so only cmake/pkg-config and the dynamic codecs
-        # are needed. CoreAudio is a system framework.
-        run: brew install cmake pkg-config spandsp opus
-      - run: cargo test --workspace
+  # Unit tests are platform-independent logic (no live FFI/audio), so they run
+  # once on Linux above. The remaining platforms only need build/link + a
+  # runtime smoke test — which the release binary build covers. We reuse the
+  # exact release workflow (upload=false) so a cross-compile/link/runtime-dep
+  # regression is caught on the PR, not after merging the Release PR. aarch64 is
+  # cross-compiled here, matching the shipped artifact.
+  build-phone:
+    name: Build (ringo-phone)
+    uses: ./.github/workflows/build-binaries.yml
+    with:
+      package: ringo-phone
+      upload: false
 
-  test-aarch64:
-    name: Test (aarch64 Linux)
-    # Native ARM runner — no cross-compile, and tests actually run on aarch64
-    # (free for public repos; billed for private ones).
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake clang libclang-dev llvm-dev pkg-config perl \
-            libspandsp-dev libopus-dev libpulse-dev
-      - run: cargo test --workspace
+  build-flow:
+    name: Build (ringo-flow)
+    uses: ./.github/workflows/build-binaries.yml
+    with:
+      package: ringo-flow
+      upload: false
