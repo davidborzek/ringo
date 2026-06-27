@@ -117,7 +117,6 @@ fn build_vendored() {
         "ice",
         "srtp",
         "dtls_srtp",
-        "uuid",
         "mwi",
         "netroam",
     ];

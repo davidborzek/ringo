@@ -20,8 +20,11 @@ pub fn build_config_string(account: &Account, options: &BackendOptions) -> Strin
     lines.push("module                  g722.so".to_string());
     lines.push("module                  opus.so".to_string());
     lines.push("module                  l16.so".to_string());
-    // UUID — generates +sip.instance for GRUU (same as old process backend).
-    lines.push("module                  uuid.so".to_string());
+    // No uuid module: it would write a per-process `uuid` file into conf_path
+    // just to set +sip.instance (GRUU/RFC5626). Our conf_path is an ephemeral
+    // temp dir, so the UUID changes every run — no stable-instance benefit, only
+    // /tmp clutter. baresip omits +sip.instance when the uuid is empty. (A stable
+    // instance id for ringo-phone would be persisted in the config dir, later.)
     // Audio player for headless: aubridge (virtual loopback). The audio SOURCE
     // is ringo's own module (registered in code, see ausrc.rs) — tone/file/
     // silence are rendered in Rust, so baresip's ausine/aufile aren't needed.
