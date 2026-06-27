@@ -253,6 +253,26 @@ a.register();
 await_until(|| assert(a.registered).is_true(), "10s");
 ```
 
+<a id="respond_incoming"></a>
+
+### agent.respond_incoming(status: int, reason: string)
+
+**Receiver** [`Agent`](agents.md)
+
+Answer inbound INVITEs with a custom SIP response (status + reason)
+instead of accepting — e.g. `callee.respond_incoming(486, "Busy Here")`.
+Arm before the caller dials; clear with `stop_deflect()`.
+
+<a id="respond_incoming"></a>
+
+### agent.respond_incoming(status: int, reason: string, headers: map)
+
+**Receiver** [`Agent`](agents.md)
+
+Custom response with extra headers, e.g.
+`callee.respond_incoming(302, "Moved Temporarily", #{ "Contact": "<sip:bob@example.com>" })`.
+Header values must not contain CR/LF.
+
 <a id="resume"></a>
 
 ### agent.resume()
@@ -282,7 +302,7 @@ a.send_audio(file("prompt.wav"));
 
 **Receiver** [`Agent`](agents.md)
 
-Stop deflecting — inbound calls are accepted normally again.
+Stop deflecting / clear any armed response — inbound calls are accepted again.
 
 <a id="to_json"></a>
 

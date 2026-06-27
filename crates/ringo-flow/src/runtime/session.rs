@@ -169,6 +169,9 @@ impl AgentSession {
     pub fn deflect_incoming(&self, contact: &str, diversion: Option<&str>) {
         self.phone.deflect_incoming(contact, diversion);
     }
+    pub fn arm_invite_response(&self, scode: u16, reason: &str, headers: Vec<String>) {
+        self.phone.arm_invite_response(scode, reason, headers);
+    }
     pub fn disarm_invite_response(&self) {
         self.phone.disarm_invite_response();
     }

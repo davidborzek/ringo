@@ -172,6 +172,22 @@ impl Agent {
     pub(super) fn stop_deflect(&mut self) -> Verb<()> {
         self.ctx.stop_deflect(&self.name).map_err(|e| e.into())
     }
+    pub(super) fn respond_incoming(&mut self, scode: i64, reason: &str) -> Verb<()> {
+        self.ctx
+            .respond_incoming(&self.name, scode as u16, reason, vec![])
+            .map_err(|e| e.into())
+    }
+    pub(super) fn respond_incoming_with_headers(
+        &mut self,
+        scode: i64,
+        reason: &str,
+        headers: rhai::Map,
+    ) -> Verb<()> {
+        let hdrs = super::convert::response_headers_from_map(&headers)?;
+        self.ctx
+            .respond_incoming(&self.name, scode as u16, reason, hdrs)
+            .map_err(|e| e.into())
+    }
     pub(super) fn attended_transfer_agent(&mut self, target: Agent) -> Verb<()> {
         self.ctx
             .attended_transfer_agent(&self.name, &target.name)

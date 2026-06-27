@@ -428,6 +428,25 @@ impl Ctx {
         Ok(())
     }
 
+    // ── custom inbound response ──
+    /// Answer `name`'s inbound INVITEs with a custom response (status code +
+    /// reason + extra headers) instead of accepting. `deflect` is the 302 special
+    /// case; cleared by `stop_deflect`. Arm before the caller dials.
+    pub fn respond_incoming(
+        &self,
+        name: &str,
+        scode: u16,
+        reason: &str,
+        headers: Vec<String>,
+    ) -> Result<(), String> {
+        if reason.contains(['\r', '\n']) {
+            return Err("response reason must not contain CR/LF".into());
+        }
+        self.with_session(name, |s| s.arm_invite_response(scode, reason, headers))?;
+        self.act(name, "respond", Some(&format!("{scode} {reason}")));
+        Ok(())
+    }
+
     // ── audio support (used by the audio verbs) ──
     pub fn set_audio_source(&self, name: &str, spec: &str) -> Result<(), String> {
         self.with_session(name, |s| s.set_audio_source(spec))

@@ -306,8 +306,32 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         engine,
         "stop_deflect",
         ["agent: Agent", "()"],
-        "/// Stop deflecting — inbound calls are accepted normally again.",
+        "/// Stop deflecting / clear any armed response — inbound calls are accepted again.",
         Agent::stop_deflect
+    );
+    reg!(
+        engine,
+        "respond_incoming",
+        ["agent: Agent", "status: int", "reason: string", "()"],
+        "/// Answer inbound INVITEs with a custom SIP response (status + reason)\n\
+         /// instead of accepting — e.g. `callee.respond_incoming(486, \"Busy Here\")`.\n\
+         /// Arm before the caller dials; clear with `stop_deflect()`.",
+        Agent::respond_incoming
+    );
+    reg!(
+        engine,
+        "respond_incoming",
+        [
+            "agent: Agent",
+            "status: int",
+            "reason: string",
+            "headers: map",
+            "()"
+        ],
+        "/// Custom response with extra headers, e.g.\n\
+         /// `callee.respond_incoming(302, \"Moved Temporarily\", #{ \"Contact\": \"<sip:bob@example.com>\" })`.\n\
+         /// Header values must not contain CR/LF.",
+        Agent::respond_incoming_with_headers
     );
     reg!(
         engine,

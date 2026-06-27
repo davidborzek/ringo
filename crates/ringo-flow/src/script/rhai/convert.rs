@@ -441,6 +441,26 @@ pub(super) fn headers_from_map(map: &Map) -> Result<Vec<(String, String)>, Box<E
     Ok(out)
 }
 
+/// `#{ "Contact": "<sip:…>" }` → full header lines (`Contact: <sip:…>`) for a
+/// custom INVITE response. Names are validated as SIP tokens; values are
+/// rejected on CR/LF so they can't inject extra headers into the reply.
+pub(super) fn response_headers_from_map(map: &Map) -> Result<Vec<String>, Box<EvalAltResult>> {
+    let mut out = Vec::new();
+    for (k, v) in map.iter() {
+        if !is_header_token(k) {
+            return Err(format!("`{k}` is not a valid SIP header name").into());
+        }
+        let Ok(val) = v.clone().into_string() else {
+            continue;
+        };
+        if val.contains(['\r', '\n']) {
+            return Err(format!("header `{k}` value must not contain CR/LF").into());
+        }
+        out.push(format!("{k}: {val}"));
+    }
+    Ok(out)
+}
+
 /// A scenario options map → [`ScenarioInfo`]. Shape:
 /// `#{ tags: ["smoke", …], skip: true | "reason", only: true }`. `tags` accepts an
 /// array of strings (a bare string is taken as a single tag); `skip` accepts a bool

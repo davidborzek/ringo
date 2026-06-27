@@ -1019,6 +1019,16 @@ fn respond(mock: HttpMock, method: string, path: PathPattern, response: map) -> 
 /// ```
 fn respond(mock: HttpMock, method: string, path: string, response: map) -> ();
 
+/// Answer inbound INVITEs with a custom SIP response (status + reason)
+/// instead of accepting — e.g. `callee.respond_incoming(486, "Busy Here")`.
+/// Arm before the caller dials; clear with `stop_deflect()`.
+fn respond_incoming(agent: Agent, status: int, reason: string) -> ();
+
+/// Custom response with extra headers, e.g.
+/// `callee.respond_incoming(302, "Moved Temporarily", #{ "Contact": "<sip:bob@example.com>" })`.
+/// Header values must not contain CR/LF.
+fn respond_incoming(agent: Agent, status: int, reason: string, headers: map) -> ();
+
 /// Resume a held call.
 fn resume(agent: Agent) -> ();
 
@@ -1082,7 +1092,7 @@ fn skip(reason: string) -> ();
 /// Stop the server now (it otherwise stops automatically at scenario end).
 fn stop(mock: HttpMock) -> ();
 
-/// Stop deflecting — inbound calls are accepted normally again.
+/// Stop deflecting / clear any armed response — inbound calls are accepted again.
 fn stop_deflect(agent: Agent) -> ();
 
 /// Run after each scenario (even on failure); receives the `setup` context.
