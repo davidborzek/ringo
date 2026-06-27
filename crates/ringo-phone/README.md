@@ -27,6 +27,7 @@ and integrations.
 
 ```sh
 brew install davidborzek/tap/ringo                          # Homebrew (macOS/Linux)
+yay -S ringo-phone-bin                                      # Arch (AUR, prebuilt)
 cargo install ringo-phone                                   # from crates.io
 cargo install --git https://github.com/davidborzek/ringo ringo-phone   # from git
 ```

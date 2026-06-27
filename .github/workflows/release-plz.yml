@@ -115,3 +115,14 @@ jobs:
     with:
       phone_tag: ${{ needs.release.outputs.phone_tag }}
       flow_tag: ${{ needs.release.outputs.flow_tag }}
+
+  # AUR `-bin` packages — same gating as homebrew; aur.yml publishes only the
+  # package(s) whose tag is non-empty.
+  aur:
+    needs: [release, phone-binaries, flow-binaries]
+    if: ${{ !cancelled() && !failure() && (needs.release.outputs.phone_tag != '' || needs.release.outputs.flow_tag != '') }}
+    uses: ./.github/workflows/aur.yml
+    secrets: inherit
+    with:
+      phone_tag: ${{ needs.release.outputs.phone_tag }}
+      flow_tag: ${{ needs.release.outputs.flow_tag }}

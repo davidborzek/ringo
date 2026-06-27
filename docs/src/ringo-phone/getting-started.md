@@ -10,6 +10,12 @@ baresip is built in and statically linked — no separate `baresip` install need
 brew install davidborzek/tap/ringo
 ```
 
+**Arch Linux (AUR)** — prebuilt, via any AUR helper:
+
+```sh
+yay -S ringo-phone-bin   # or: paru -S ringo-phone-bin
+```
+
 **Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
 [releases page](https://github.com/davidborzek/ringo/releases) — download, extract
 and put `ringo` on your `$PATH`.

@@ -1,0 +1,102 @@
+name: AUR
+
+# Reusable: render the PKGBUILD templates with the release tarballs' checksums and
+# publish them to the AUR (prebuilt `-bin` packages). Called by release-plz after
+# the binaries are attached; also `workflow_dispatch`able to re-publish for a tag.
+# Needs AUR_SSH_KEY (the private key whose public half is registered on the AUR
+# account) — callers pass `secrets: inherit`.
+
+on:
+  workflow_call:
+    inputs:
+      phone_tag:
+        description: "ringo-phone tag (ringo-phone-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
+      flow_tag:
+        description: "ringo-flow tag (ringo-flow-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
+  workflow_dispatch:
+    inputs:
+      phone_tag:
+        description: "ringo-phone tag (ringo-phone-vX.Y.Z); empty to skip"
+        type: string
+        required: false
+        default: ""
+      flow_tag:
+        description: "ringo-flow tag (ringo-flow-vX.Y.Z); empty to skip"
+        type: string
+        required: false
+        default: ""
+
+jobs:
+  ringo:
+    name: Publish ringo-phone-bin
+    if: inputs.phone_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render PKGBUILD
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.phone_tag }}
+        run: |
+          set -euo pipefail
+          ver="${TAG#ringo-phone-v}"
+          base="https://github.com/${REPO}/releases/download/${TAG}"
+          sha() { gh release download "$TAG" -R "$REPO" -p "$1" -O - | sha256sum | cut -d' ' -f1; }
+          mkdir -p out
+          sed \
+            -e '/^# Template/d' -e '/^# `aur`/d' -e '/^# result is/d' \
+            -e "s|__VERSION__|$ver|g" \
+            -e "s|__BASE__|$base|g" \
+            -e "s|__SHA_LINUX_X64__|$(sha "ringo-$ver-x86_64-unknown-linux-gnu.tar.gz")|" \
+            -e "s|__SHA_LINUX_ARM__|$(sha "ringo-$ver-aarch64-unknown-linux-gnu.tar.gz")|" \
+            .github/aur/ringo-phone-bin.PKGBUILD > out/PKGBUILD
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        with:
+          pkgname: ringo-phone-bin
+          pkgbuild: out/PKGBUILD
+          commit_username: github-actions[bot]
+          commit_email: 41898282+github-actions[bot]@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_KEY }}
+          commit_message: "ringo ${{ inputs.phone_tag }}"
+
+  ringo-flow:
+    name: Publish ringo-flow-bin
+    if: inputs.flow_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render PKGBUILD
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.flow_tag }}
+        run: |
+          set -euo pipefail
+          ver="${TAG#ringo-flow-v}"
+          base="https://github.com/${REPO}/releases/download/${TAG}"
+          sha() { gh release download "$TAG" -R "$REPO" -p "$1" -O - | sha256sum | cut -d' ' -f1; }
+          mkdir -p out
+          sed \
+            -e '/^# Template/d' -e '/^# `aur`/d' -e '/^# result is/d' \
+            -e "s|__VERSION__|$ver|g" \
+            -e "s|__BASE__|$base|g" \
+            -e "s|__SHA_LINUX_X64__|$(sha "ringo-flow-$ver-x86_64-unknown-linux-gnu.tar.gz")|" \
+            -e "s|__SHA_LINUX_ARM__|$(sha "ringo-flow-$ver-aarch64-unknown-linux-gnu.tar.gz")|" \
+            .github/aur/ringo-flow-bin.PKGBUILD > out/PKGBUILD
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        with:
+          pkgname: ringo-flow-bin
+          pkgbuild: out/PKGBUILD
+          commit_username: github-actions[bot]
+          commit_email: 41898282+github-actions[bot]@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_KEY }}
+          commit_message: "ringo-flow ${{ inputs.flow_tag }}"

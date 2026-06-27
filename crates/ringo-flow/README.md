@@ -36,6 +36,7 @@ Docker image (`ghcr.io/davidborzek/ringo-flow`) — see
 
 ```sh
 brew install davidborzek/tap/ringo-flow   # Homebrew (macOS/Linux)
+yay -S ringo-flow-bin                      # Arch (AUR, prebuilt)
 cargo install --git https://github.com/davidborzek/ringo ringo-flow
 ```
 
