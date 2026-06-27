@@ -374,6 +374,8 @@ mod tests {
         fn add_header(&self, _: &str, _: &str) {}
         fn rm_header(&self, _: &str) {}
         fn set_audio_source(&self, _: &str) {}
+        fn arm_invite_response(&self, _: u16, _: &str, _: Vec<String>) {}
+        fn disarm_invite_response(&self) {}
     }
 
     fn test_app() -> App {

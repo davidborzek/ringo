@@ -159,6 +159,19 @@ impl Agent {
             .transfer_uri(&self.name, target)
             .map_err(|e| e.into())
     }
+    pub(super) fn deflect_agent(&mut self, target: Agent) -> Verb<()> {
+        self.ctx
+            .deflect_to_agent(&self.name, &target.name)
+            .map_err(|e| e.into())
+    }
+    pub(super) fn deflect_uri(&mut self, target: &str) -> Verb<()> {
+        self.ctx
+            .deflect_to_uri(&self.name, target)
+            .map_err(|e| e.into())
+    }
+    pub(super) fn stop_deflect(&mut self) -> Verb<()> {
+        self.ctx.stop_deflect(&self.name).map_err(|e| e.into())
+    }
     pub(super) fn attended_transfer_agent(&mut self, target: Agent) -> Verb<()> {
         self.ctx
             .attended_transfer_agent(&self.name, &target.name)

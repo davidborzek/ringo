@@ -403,6 +403,31 @@ impl Ctx {
         Ok(())
     }
 
+    // ── inbound deflection (302) ──
+    /// Deflect `name`'s inbound calls to another agent (302 + Contact at its AOR,
+    /// plus a Diversion header naming `name`'s own AOR). Arm before the caller dials.
+    pub fn deflect_to_agent(&self, name: &str, target: &str) -> Result<(), String> {
+        let uri = self.with_session(target, |s| s.aor.clone())?;
+        let own = self.with_session(name, |s| s.aor.clone())?;
+        self.with_session(name, |s| s.deflect_incoming(&uri, Some(&own)))?;
+        self.act(name, "deflect", Some(&uri));
+        Ok(())
+    }
+    /// Deflect `name`'s inbound calls to a literal URI or bare number/extension.
+    pub fn deflect_to_uri(&self, name: &str, target: &str) -> Result<(), String> {
+        let uri = self.resolve_uri(name, target)?;
+        let own = self.with_session(name, |s| s.aor.clone())?;
+        self.with_session(name, |s| s.deflect_incoming(&uri, Some(&own)))?;
+        self.act(name, "deflect", Some(&uri));
+        Ok(())
+    }
+    /// Stop deflecting — inbound calls are accepted normally again.
+    pub fn stop_deflect(&self, name: &str) -> Result<(), String> {
+        self.with_session(name, |s| s.disarm_invite_response())?;
+        self.act(name, "stop-deflect", None);
+        Ok(())
+    }
+
     // ── audio support (used by the audio verbs) ──
     pub fn set_audio_source(&self, name: &str, spec: &str) -> Result<(), String> {
         self.with_session(name, |s| s.set_audio_source(spec))

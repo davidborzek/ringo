@@ -282,6 +282,35 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
     );
     reg!(
         engine,
+        "deflect",
+        ["agent: Agent", "target: Agent", "()"],
+        "/// Deflect inbound calls with a 302 Moved Temporarily to another agent's AOR\n\
+         /// (a Diversion header names the deflecting agent). Arm it *before* the\n\
+         /// caller dials; stays active until `stop_deflect()`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// callee.deflect(target);     // future calls to `callee` go to `target`\n\
+         /// caller.dial(callee);\n\
+         /// await_until(|| assert(target.state).equals(State::Ringing), \"15s\");\n\
+         /// ```",
+        Agent::deflect_agent
+    );
+    reg!(
+        engine,
+        "deflect",
+        ["agent: Agent", "target: string", "()"],
+        "/// Deflect inbound calls (302) to a literal URI or bare number/extension.",
+        Agent::deflect_uri
+    );
+    reg!(
+        engine,
+        "stop_deflect",
+        ["agent: Agent", "()"],
+        "/// Stop deflecting — inbound calls are accepted normally again.",
+        Agent::stop_deflect
+    );
+    reg!(
+        engine,
         "attended_transfer",
         ["agent: Agent", "target: Agent", "()"],
         "/// Start an attended transfer: place a consultation call to another agent.\n\
@@ -328,8 +357,16 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         move |name: &str, config: Map| -> Result<Agent, Box<EvalAltResult>> {
             let account = convert::account_from_map(name, &config)?;
             let headers = convert::headers_from_map(&config)?;
+            let deflect_to = config
+                .get("deflect_to")
+                .and_then(|d| d.clone().into_string().ok());
             c.connect_agent(name, account, &headers)
                 .map_err(|e| -> Box<EvalAltResult> { e.into() })?;
+            // Arm declared deflection right after connect, before any inbound call.
+            if let Some(target) = deflect_to {
+                c.deflect_to_uri(name, &target)
+                    .map_err(|e| -> Box<EvalAltResult> { e.into() })?;
+            }
             Ok(Agent {
                 name: name.to_string(),
                 ctx: c.clone(),

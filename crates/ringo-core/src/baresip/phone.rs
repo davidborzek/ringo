@@ -328,6 +328,17 @@ impl Phone for BaresipPhone {
             let _ = CString::from_raw(device_ptr as *mut c_char);
         });
     }
+
+    fn arm_invite_response(&self, scode: u16, reason: &str, headers: Vec<String>) {
+        // Plain mutex update (no FFI) — run synchronously, not via on_re_thread,
+        // so it's in place before a subsequent dial triggers the inbound INVITE.
+        // The RE-thread bevent handler reads the same map under the lock.
+        super::events::arm_invite_response(self.ua, scode, reason.to_string(), headers);
+    }
+
+    fn disarm_invite_response(&self) {
+        super::events::disarm_invite_response(self.ua);
+    }
 }
 
 /// Opaque handle — drop ends the backend session + cleanup.

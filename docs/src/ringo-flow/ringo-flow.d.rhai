@@ -567,6 +567,7 @@ fn accept(agent: Agent) -> ();
 /// | `mwi` | bool | subscribe to message-waiting indication |
 /// | `dtmf_mode` | string | `"info"` for reliable headless DTMF (SIP INFO) |
 /// | `headers` | map | extra SIP headers on the INVITE, e.g. `#{ "X-Foo": "bar" }` |
+/// | `deflect_to` | string | deflect inbound calls with a 302 to this URI/number (toggle at runtime with `deflect()`/`stop_deflect()`) |
 ///
 /// # Example
 /// ```rhai
@@ -631,6 +632,20 @@ fn contains(a: Assertion, needle: string) -> Assertion;
 
 /// Set the default `await_until` timeout for the rest of the script (e.g. `"10s"`).
 fn default_timeout(duration: string) -> ();
+
+/// Deflect inbound calls with a 302 Moved Temporarily to another agent's AOR
+/// (a Diversion header names the deflecting agent). Arm it *before* the
+/// caller dials; stays active until `stop_deflect()`.
+/// # Example
+/// ```rhai
+/// callee.deflect(target);     // future calls to `callee` go to `target`
+/// caller.dial(callee);
+/// await_until(|| assert(target.state).equals(State::Ringing), "15s");
+/// ```
+fn deflect(agent: Agent, target: Agent) -> ();
+
+/// Deflect inbound calls (302) to a literal URI or bare number/extension.
+fn deflect(agent: Agent, target: string) -> ();
 
 /// Label this assertion so the log line names it: `assert(caller.registered)
 /// .describe("caller registered").is_true()` → `caller registered: ✓ expect …`.
@@ -1066,6 +1081,9 @@ fn skip(reason: string) -> ();
 
 /// Stop the server now (it otherwise stops automatically at scenario end).
 fn stop(mock: HttpMock) -> ();
+
+/// Stop deflecting — inbound calls are accepted normally again.
+fn stop_deflect(agent: Agent) -> ();
 
 /// Run after each scenario (even on failure); receives the `setup` context.
 /// # Example

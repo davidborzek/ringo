@@ -263,6 +263,12 @@ pub(super) const AGENT_CONFIG: &[ConfigField] = &[
         required: false,
         desc: "extra SIP headers on the INVITE, e.g. `#{ \"X-Foo\": \"bar\" }`",
     },
+    ConfigField {
+        key: "deflect_to",
+        ty: "string",
+        required: false,
+        desc: "deflect inbound calls with a 302 to this URI/number (toggle at runtime with `deflect()`/`stop_deflect()`)",
+    },
 ];
 
 /// The `http(method, url, #{…})` options-map schema (single source for the docs

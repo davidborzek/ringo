@@ -27,6 +27,7 @@ Connect a headless baresip agent and return a handle.
 | `mwi` | bool | subscribe to message-waiting indication |
 | `dtmf_mode` | string | `"info"` for reliable headless DTMF (SIP INFO) |
 | `headers` | map | extra SIP headers on the INVITE, e.g. `#{ "X-Foo": "bar" }` |
+| `deflect_to` | string | deflect inbound calls with a 302 to this URI/number (toggle at runtime with `deflect()`/`stop_deflect()`) |
 
 **Example**
 
@@ -95,6 +96,32 @@ Start an attended transfer to a literal URI or bare number.
 **Receiver** [`Agent`](agents.md)
 
 Complete the pending attended transfer (REFER with Replaces).
+
+<a id="deflect"></a>
+
+### agent.deflect(target: Agent)
+
+**Receiver** [`Agent`](agents.md) · **Takes** [`Agent`](agents.md)
+
+Deflect inbound calls with a 302 Moved Temporarily to another agent's AOR
+(a Diversion header names the deflecting agent). Arm it *before* the
+caller dials; stays active until `stop_deflect()`.
+
+**Example**
+
+```rust
+callee.deflect(target);     // future calls to `callee` go to `target`
+caller.dial(callee);
+await_until(|| assert(target.state).equals(State::Ringing), "15s");
+```
+
+<a id="deflect"></a>
+
+### agent.deflect(target: string)
+
+**Receiver** [`Agent`](agents.md)
+
+Deflect inbound calls (302) to a literal URI or bare number/extension.
 
 <a id="dial"></a>
 
@@ -248,6 +275,14 @@ Switch the agent's active-call audio source: `tone(Hz)`, `file(path)` or `silent
 a.send_audio(tone(440));         // play a 440 Hz tone
 a.send_audio(file("prompt.wav"));
 ```
+
+<a id="stop_deflect"></a>
+
+### agent.stop_deflect()
+
+**Receiver** [`Agent`](agents.md)
+
+Stop deflecting — inbound calls are accepted normally again.
 
 <a id="to_json"></a>
 
