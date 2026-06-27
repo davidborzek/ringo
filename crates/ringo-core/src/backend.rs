@@ -49,8 +49,6 @@ pub struct Session {
     pub phone: Box<dyn Phone>,
     /// Log file path (for TUI display / debugging).
     pub log_path: Option<PathBuf>,
-    /// Directory holding call recordings (if `record_audio` was enabled).
-    pub recording_dir: Option<PathBuf>,
     /// Poll for inbound INVITE headers. Returns `None` when there is nothing
     /// new; `Some(headers)` when new headers have been parsed. `None` on the
     /// closure itself means the backend exposes headers directly in events
@@ -65,7 +63,6 @@ impl Session {
         events: Receiver<AppEvent>,
         phone: Box<dyn Phone>,
         log_path: Option<PathBuf>,
-        recording_dir: Option<PathBuf>,
         header_poll: Option<Box<dyn Fn() -> Option<InviteHeaders> + Send + Sync>>,
         handle: Box<dyn Send>,
     ) -> Self {
@@ -73,7 +70,6 @@ impl Session {
             events,
             phone,
             log_path,
-            recording_dir,
             header_poll,
             handle,
         }

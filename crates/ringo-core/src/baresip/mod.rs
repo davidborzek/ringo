@@ -132,9 +132,11 @@ impl Backend for BaresipBackend {
             // any early `bail!` below — so a failure can't deadlock the RE thread.
             let _guard = enter_re_thread();
 
-            // Set conf_path to a temp dir so baresip does NOT read
-            // ~/.baresip/accounts or ~/.baresip/config. Create it 0700 so the
-            // call recordings written there aren't world-readable on a shared host.
+            // Set conf_path to a per-process temp dir so baresip does NOT read
+            // ~/.baresip/accounts or ~/.baresip/config (our config is in-memory
+            // via conf_configure_buf). baresip only writes its `uuid` file here;
+            // 0700 keeps it private on a shared host. Removed on shutdown
+            // (stop_re_thread), so a clean exit leaves nothing in /tmp.
             let dir = format!("/tmp/ringo-baresip-{}", std::process::id());
             {
                 use std::os::unix::fs::DirBuilderExt;
@@ -277,10 +279,6 @@ impl Backend for BaresipBackend {
         let ua_usize = ua_ptr as usize;
 
         let log_path: Option<PathBuf> = Some(PathBuf::from(format!("/tmp/ringo-{}.log", name)));
-        let recording_dir: Option<PathBuf> = Some(PathBuf::from(format!(
-            "/tmp/ringo-baresip-{}",
-            std::process::id()
-        )));
 
         // The registry key for ringo's audio source module (only in aubridge
         // mode; with real audio the source isn't ours and set_audio_source falls
@@ -294,13 +292,6 @@ impl Backend for BaresipBackend {
         let handle = Box::new(BaresipSessionHandle::new(ua_usize, audio_key));
         let header_poll = Some(make_header_poll(ua_usize));
 
-        Ok(Session::new(
-            msg_rx,
-            phone,
-            log_path,
-            recording_dir,
-            header_poll,
-            handle,
-        ))
+        Ok(Session::new(msg_rx, phone, log_path, header_poll, handle))
     }
 }
