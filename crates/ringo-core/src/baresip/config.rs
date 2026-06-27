@@ -76,10 +76,18 @@ pub fn build_config_string(account: &Account, options: &BackendOptions) -> Strin
     lines.push("audio_jitter_buffer_ms    100-200".to_string());
     lines.push("audio_jitter_buffer_size  50".to_string());
 
-    // Call settings (same as old process backend):
-    lines.push("call_local_timeout  120".to_string());
-    lines.push("call_max_calls      4".to_string());
-    lines.push("call_hold_other_calls yes".to_string());
+    // Call settings — defaults match the old process backend, overridable via
+    // BackendOptions (e.g. the scenario runner disables hold_other_calls).
+    let local_timeout = options.local_timeout_s.unwrap_or(120);
+    let max_calls = options.max_calls.unwrap_or(4);
+    let hold_other = if options.hold_other_calls.unwrap_or(true) {
+        "yes"
+    } else {
+        "no"
+    };
+    lines.push(format!("call_local_timeout  {local_timeout}"));
+    lines.push(format!("call_max_calls      {max_calls}"));
+    lines.push(format!("call_hold_other_calls {hold_other}"));
 
     // QoS markings (same as old process backend):
     lines.push("sip_tos             160".to_string());

@@ -26,6 +26,10 @@ use ringo_core::account::BackendOptions;
 pub(crate) fn agent_options() -> BackendOptions {
     BackendOptions {
         audio_driver: Some("aubridge".into()),
+        // A scenario drives hold/resume explicitly, so disable baresip's
+        // auto-hold-other-calls (which would silently hold a call when another
+        // arrives and skew assertions).
+        hold_other_calls: Some(false),
         // record_audio (full in-process capture) is set per run from --save-audio
         // by the caller; verification uses the rolling window regardless.
         ..Default::default()

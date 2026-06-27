@@ -32,6 +32,14 @@ pub struct BackendOptions {
     pub sip_cafile: Option<String>,
     /// `None` = auto-detect; `Some("")` = explicitly disable.
     pub sip_capath: Option<String>,
+    /// Max simultaneous calls (`call_max_calls`). `None` = 4.
+    pub max_calls: Option<u32>,
+    /// Auto-hold the active call when another comes up / the user switches
+    /// (`call_hold_other_calls`). `None` = on. The scenario runner turns this
+    /// off so a test keeps explicit control over hold/resume.
+    pub hold_other_calls: Option<bool>,
+    /// Outgoing-call ring timeout in seconds (`call_local_timeout`). `None` = 120.
+    pub local_timeout_s: Option<u32>,
     /// Arbitrary extra config lines appended at the end (key, value).
     pub extra: Vec<(String, String)>,
     /// Capture the full call's sent + received audio in-process (for the
