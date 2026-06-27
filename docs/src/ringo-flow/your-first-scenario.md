@@ -3,7 +3,7 @@
 Let's write a complete test: two agents place, answer and tear down a call. We'll
 build it line by line — every concept you need for most scenarios is here.
 
-You'll need [baresip in your `$PATH`](getting-started.md) and two SIP accounts.
+You'll need two SIP accounts.
 
 ## The whole script
 

@@ -26,14 +26,16 @@ webhooks, running in CI) and the generated
 
 ## Requirements
 
-[baresip](https://github.com/baresip/baresip) >= 3.14 in `$PATH`. For CI there's
-also a small Docker image with baresip compiled in (`ghcr.io/davidborzek/ringo-flow`) —
-see [Running in CI](https://davidborzek.github.io/ringo/ringo-flow/running-in-ci.html).
+**Rust 1.85+** and a **C toolchain + CMake** to build the vendored
+baresip/libre/OpenSSL, which are **statically linked** — so no separate `baresip`
+install is needed, at build or run time. For CI there's also a small self-contained
+Docker image (`ghcr.io/davidborzek/ringo-flow`) — see
+[Running in CI](https://davidborzek.github.io/ringo/ringo-flow/running-in-ci.html).
 
 ## Install
 
 ```sh
-brew install davidborzek/tap/ringo-flow   # Homebrew (macOS/Linux); also installs baresip
+brew install davidborzek/tap/ringo-flow   # Homebrew (macOS/Linux)
 cargo install --git https://github.com/davidborzek/ringo ringo-flow
 ```
 
@@ -58,7 +60,7 @@ SIP_DOMAIN=example.com A_USER=alice A_PASS=… B_USER=bob B_PASS=… \
   ringo-flow run scenario.rhai
 
 ringo-flow run scenarios/        # a directory (all *.rhai, recursively)
-ringo-flow check scenario.rhai   # syntax-check only (no baresip)
+ringo-flow check scenario.rhai   # syntax-check only (no SIP traffic)
 ```
 
 The [**Your first scenario**](https://davidborzek.github.io/ringo/ringo-flow/your-first-scenario.html)

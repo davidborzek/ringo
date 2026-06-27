@@ -24,8 +24,8 @@ automated call testing, both sharing one engine.
 
 ## Requirements
 
-- [baresip](https://github.com/baresip/baresip) >= 3.14 in `$PATH` (used by both the softphone and the test runner)
-- Rust 1.85+ to build
+- **Rust 1.85+** to build
+- A **C toolchain + CMake** to build the vendored [baresip](https://github.com/baresip/baresip)/libre/OpenSSL, which are **statically linked** — so neither the softphone nor the test runner needs a separate `baresip` install, at build or run time
 
 ## Quick start
 

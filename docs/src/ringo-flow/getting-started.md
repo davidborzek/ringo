@@ -2,16 +2,9 @@
 
 ## Install
 
-### 1. baresip
+baresip is built in and statically linked — no separate `baresip` install needed.
 
-ringo-flow needs [baresip](https://github.com/baresip/baresip) ≥ 3.14 in your
-`$PATH` (`baresip -v` to check). See
-[Supported platforms](https://github.com/baresip/baresip/wiki/Supported-platforms)
-for install instructions (`pacman -S baresip`, `brew install baresip`, …).
-
-### 2. ringo-flow
-
-**Homebrew (macOS / Linux)** — also installs baresip, so you can skip step 1:
+**Homebrew (macOS / Linux):**
 
 ```sh
 brew install davidborzek/tap/ringo-flow
@@ -60,7 +53,7 @@ SIP_DOMAIN=example.com A_USER=alice A_PASS=… B_USER=bob B_PASS=… \
 ```sh
 ringo-flow run scenario.rhai     # one file
 ringo-flow run scenarios/        # a directory (all *.rhai, recursively)
-ringo-flow check scenario.rhai   # syntax-check only (no baresip)
+ringo-flow check scenario.rhai   # syntax-check only (no SIP traffic)
 ```
 
 The exit code is non-zero if any scenario fails.

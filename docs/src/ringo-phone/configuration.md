@@ -39,12 +39,11 @@ Ready-made themes (Catppuccin Mocha, Gruvbox, Nord, Tokyo Night) live in
 
 ## baresip
 
-ringo auto-detects the baresip module path and audio driver; override any of these
+ringo auto-detects the audio driver; override any of these
 in `ringo.toml`:
 
 ```toml
 [baresip]
-module_path  = "/usr/lib/baresip/modules"  # baresip modules
 audio_driver = "pipewire"                   # alsa | pulse | pipewire | coreaudio
 audio_player_device = "default"
 audio_source_device = "default"
