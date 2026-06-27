@@ -145,7 +145,7 @@ where
             "⚠ ringo-flow: TLS certificate verification is DISABLED for http(...) (--insecure-http)"
         );
     }
-    let (logs, save_audio) = (output.logs, output.save_audio);
+    let save_audio = output.save_audio;
     let multi = programs.len() > 1;
 
     // NOT `?` on the join — cleanup must run even if a script panics, so baresip
@@ -154,7 +154,7 @@ where
     let c = ctx.clone();
     let join = rt.block_on(async move {
         tokio::task::spawn_blocking(move || {
-            run_files(programs, &c, &selector, logs, save_audio, multi)
+            run_files(programs, &c, &selector, save_audio, multi)
         })
         .await
     });
@@ -244,7 +244,6 @@ fn run_files<H, F>(
     programs: Vec<(String, F)>,
     ctx: &Arc<Ctx>,
     selector: &Selector,
-    logs: bool,
     save_audio: bool,
     multi: bool,
 ) -> Aggregate
@@ -280,7 +279,7 @@ where
                 if multi {
                     ctx.emit(&Event::FileStarted { path: &label });
                 }
-                dump_artifacts(ctx, logs, save_audio);
+                dump_artifacts(ctx, save_audio);
                 ctx.reset_sessions();
                 let ok = r.is_ok();
                 ctx.emit(&Event::Finished {
@@ -331,7 +330,6 @@ where
             ctx,
             selector,
             focus,
-            logs,
             save_audio,
         );
         ctx.reset_sessions(); // isolate the next file (fresh agents)
@@ -378,7 +376,6 @@ fn run_suite<H: ScriptHost>(
     ctx: &Arc<Ctx>,
     selector: &Selector,
     focus: bool,
-    logs: bool,
     save_audio: bool,
 ) -> (usize, usize, usize) {
     let (mut total, mut passed, mut skipped) = (0, 0, 0);
@@ -399,7 +396,7 @@ fn run_suite<H: ScriptHost>(
         }
         ctx.emit(&Event::ScenarioStarted { name: &info.name });
         let result = host.run_scenario(&info.name);
-        dump_artifacts(ctx, logs, save_audio); // before reset drops this scenario's sessions
+        dump_artifacts(ctx, save_audio); // before reset drops this scenario's sessions
         ctx.reset_sessions(); // isolation: fresh agents for the next scenario
         match result {
             ScenarioResult::Passed => {
@@ -427,19 +424,14 @@ fn run_suite<H: ScriptHost>(
     (total, passed, skipped)
 }
 
-/// Dump `--logs` / `--save-audio` for the currently-live sessions. Called while
+/// Save `--save-audio` recordings for the currently-live sessions. Called while
 /// they still exist (per scenario in suite mode; before teardown in single mode).
-fn dump_artifacts(ctx: &Arc<Ctx>, logs: bool, save_audio: bool) {
-    if !logs && !save_audio {
+fn dump_artifacts(ctx: &Arc<Ctx>, save_audio: bool) {
+    if !save_audio {
         return;
     }
     let sessions = ctx.sessions.lock().unwrap_or_else(|e| e.into_inner());
-    if logs {
-        dump_logs(&sessions);
-    }
-    if save_audio {
-        save_recordings(&sessions);
-    }
+    save_recordings(&sessions);
 }
 
 /// Tear all sessions down (hang up, let baresip flush BYEs, drop). Runs on the
@@ -470,22 +462,6 @@ fn teardown(ctx: &Arc<Ctx>, rt: &tokio::runtime::Runtime) {
         }
     });
     drop(sessions);
-}
-
-/// Print each agent's baresip log (SIP signaling) to stderr (`--logs`).
-fn dump_logs(sessions: &HashMap<String, AgentSession>) {
-    let mut names: Vec<&String> = sessions.keys().collect();
-    names.sort();
-    for name in names {
-        eprintln!("\n── baresip log: {name} ──");
-        match std::fs::read_to_string(sessions[name].log_path()) {
-            Ok(content) => eprint!("{content}"),
-            Err(e) => eprintln!(
-                "(could not read {}: {e})",
-                sessions[name].log_path().display()
-            ),
-        }
-    }
 }
 
 /// Write each agent's in-process captured audio (sent + received) to the cwd as

@@ -82,9 +82,10 @@ enum Commands {
         /// Skip scenarios carrying any of these tags (repeatable; comma-separated)
         #[arg(long = "exclude-tag", value_name = "TAG", value_delimiter = ',')]
         exclude_tag: Vec<String>,
-        /// Print each agent's baresip log (SIP signaling) at the end
-        #[arg(long)]
-        logs: bool,
+        /// Write the backend log (SIP signaling etc.). Off by default — nothing
+        /// is written. `--log` → stderr; `--log <FILE>` → that file.
+        #[arg(long, value_name = "FILE", num_args = 0..=1)]
+        log: Option<Option<PathBuf>>,
         /// Save each agent's call recordings (sent/received WAV) to the cwd
         #[arg(long)]
         save_audio: bool,
@@ -155,7 +156,7 @@ fn main() -> Result<()> {
             scenario,
             tag,
             exclude_tag,
-            logs,
+            log,
             save_audio,
             json,
             verbose,
@@ -163,6 +164,12 @@ fn main() -> Result<()> {
             no_color,
             insecure_http,
         } => {
+            // Backend log destination (process-global): off unless --log is given.
+            match &log {
+                None => {}
+                Some(None) => ringo_core::log::init_stderr(),
+                Some(Some(path)) => ringo_core::log::init_file(path),
+            }
             // Color off if `--no-color`/`--no-ansi` or the `NO_COLOR` env var is set
             // (https://no-color.org); the reporter additionally requires a TTY.
             let color = !no_color && std::env::var_os("NO_COLOR").is_none();
@@ -175,7 +182,6 @@ fn main() -> Result<()> {
                 json,
                 quiet,
                 verbose: verbose > 0,
-                logs,
                 save_audio,
                 insecure_http,
             };

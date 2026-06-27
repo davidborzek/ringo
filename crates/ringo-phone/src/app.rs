@@ -28,7 +28,10 @@ pub fn run(name: Option<String>, notify: bool, headless: bool) -> Result<()> {
 }
 
 fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
-    crate::log::init(name);
+    // Backend log goes to the XDG state dir (e.g. ~/.local/state/ringo/<name>.log),
+    // not /tmp. init_file creates the dir; a bad path just leaves logging silent.
+    let log_path = profile::state_dir()?.join(format!("{name}.log"));
+    crate::log::init_file(&log_path);
 
     let dir = profile::profile_dir(name)?;
     if !dir.join("profile.toml").exists() {
@@ -64,6 +67,7 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     let params = crate::tui::SessionParams {
         profile_name: name.to_string(),
         account_aor: prof.aor(),
+        log_path,
         session,
         control_socket,
         call_history_path: Some(dir.join("call_history")),

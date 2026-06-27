@@ -24,7 +24,6 @@ mod sounds;
 
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use anyhow::{Result, bail};
@@ -109,7 +108,7 @@ impl Backend for BaresipBackend {
     fn spawn_session(
         &self,
         _rt: &tokio::runtime::Handle,
-        name: &str,
+        _name: &str,
         account: &Account,
         options: &BackendOptions,
     ) -> Result<Session> {
@@ -278,8 +277,6 @@ impl Backend for BaresipBackend {
 
         let ua_usize = ua_ptr as usize;
 
-        let log_path: Option<PathBuf> = Some(PathBuf::from(format!("/tmp/ringo-{}.log", name)));
-
         // The registry key for ringo's audio source module (only in aubridge
         // mode; with real audio the source isn't ours and set_audio_source falls
         // back to baresip's transient audio_set_source).
@@ -292,6 +289,6 @@ impl Backend for BaresipBackend {
         let handle = Box::new(BaresipSessionHandle::new(ua_usize, audio_key));
         let header_poll = Some(make_header_poll(ua_usize));
 
-        Ok(Session::new(msg_rx, phone, log_path, header_poll, handle))
+        Ok(Session::new(msg_rx, phone, header_poll, handle))
     }
 }

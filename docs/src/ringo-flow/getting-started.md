@@ -71,7 +71,7 @@ The exit code is non-zero if any scenario fails.
 - `--tag <tag>` / `--exclude-tag <tag>` — filter by tag (repeatable, comma-separated).
 - `--env-file FILE` — load variables for `env(...)` (a sibling `<scenario>.env`
   is layered on top per file).
-- `--logs` — print each agent's SIP signaling at the end.
+- `--log [<file>]` — write the backend/SIP log to stderr (or a file); off by default.
 - `--save-audio` — save sent/received WAVs to the working directory.
 - `--json` — emit NDJSON events (for CI).
 - `-q` / `-v`, `--no-color`.

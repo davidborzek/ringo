@@ -10,7 +10,6 @@ use ringo_core::backend::BaresipBackend;
 use ringo_core::event::AppEvent;
 use ringo_core::event::InviteHeaders;
 use ringo_core::phone::Phone;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -26,7 +25,6 @@ pub struct AgentSession {
     audio_key: String,
     phone: Box<dyn Phone>,
     state_rx: watch::Receiver<AgentState>,
-    log_path: Option<PathBuf>,
     _handle: Box<dyn Send>,
 }
 
@@ -91,7 +89,6 @@ impl AgentSession {
             audio_key: account.username.clone(),
             phone: session.phone,
             state_rx,
-            log_path: session.log_path,
             _handle: session.handle,
         })
     }
@@ -105,11 +102,6 @@ impl AgentSession {
     /// A fresh receiver on this agent's state (used by `wait` to guard calls).
     pub fn state(&self) -> watch::Receiver<AgentState> {
         self.state_rx.clone()
-    }
-
-    /// Path to this agent's backend log (valid until the session is dropped).
-    pub fn log_path(&self) -> &Path {
-        self.log_path.as_deref().unwrap_or_else(|| Path::new(""))
     }
 
     /// Switch the agent's audio source on its active call.

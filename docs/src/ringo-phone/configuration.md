@@ -75,7 +75,8 @@ Manage them in the TUI (contacts overlay → `a`/`e`/`d`) or with `$EDITOR` (`E`
 ## Hooks
 
 Run shell commands on events; each hook gets context via environment variables and
-runs in a background thread (errors go to `/tmp/ringo-<name>.log`).
+runs in a background thread (errors go to the log at
+`$XDG_STATE_HOME/ringo/<name>.log`, default `~/.local/state/ringo/<name>.log`).
 
 ```toml
 [[hooks]]

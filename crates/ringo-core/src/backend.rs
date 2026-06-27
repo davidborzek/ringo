@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 use anyhow::Result;
@@ -47,8 +46,6 @@ pub struct Session {
     pub events: Receiver<AppEvent>,
     /// Phone command interface.
     pub phone: Box<dyn Phone>,
-    /// Log file path (for TUI display / debugging).
-    pub log_path: Option<PathBuf>,
     /// Poll for inbound INVITE headers. Returns `None` when there is nothing
     /// new; `Some(headers)` when new headers have been parsed. `None` on the
     /// closure itself means the backend exposes headers directly in events
@@ -62,14 +59,12 @@ impl Session {
     pub fn new(
         events: Receiver<AppEvent>,
         phone: Box<dyn Phone>,
-        log_path: Option<PathBuf>,
         header_poll: Option<Box<dyn Fn() -> Option<InviteHeaders> + Send + Sync>>,
         handle: Box<dyn Send>,
     ) -> Self {
         Self {
             events,
             phone,
-            log_path,
             header_poll,
             handle,
         }

@@ -41,8 +41,6 @@ pub struct Output {
     pub quiet: bool,
     /// Add observed state to every assertion.
     pub verbose: bool,
-    /// Dump each agent's baresip log (to stderr) at the end.
-    pub logs: bool,
     /// Copy each agent's call recordings (sent/received WAV) to the cwd.
     pub save_audio: bool,
     /// Disable TLS certificate verification for `http(...)` (DANGER).

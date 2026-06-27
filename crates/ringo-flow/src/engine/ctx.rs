@@ -164,7 +164,6 @@ impl Ctx {
         headers: &[(String, String)],
     ) -> Result<(), String> {
         let aor = format!("sip:{}@{}", account.username, account.domain);
-        ringo_core::log::init(name);
         let mut options = agent_options();
         // Full per-call capture only when saving recordings; verify always uses
         // the rolling in-process window regardless.

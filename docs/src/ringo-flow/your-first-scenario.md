@@ -79,7 +79,7 @@ both return to `Idle`.
 
 Assertions report `expect … — actual …`, and the exit code is non-zero if any
 assertion fails — so this runs cleanly in CI. Add `-v` to see every assertion, or
-`--logs` to dump each agent's SIP signaling when something's off.
+`--log` (SIP signaling to stderr, or `--log <file>`) when something's off.
 
 ## Next
 

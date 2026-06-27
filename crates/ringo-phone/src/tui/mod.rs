@@ -28,6 +28,8 @@ use ringo_core::backend::Session;
 pub struct SessionParams {
     pub profile_name: String,
     pub account_aor: String,
+    /// Backend log file path (for TUI display); the binary owns the location.
+    pub log_path: PathBuf,
     pub session: Session,
     pub control_socket: PathBuf,
     pub call_history_path: Option<PathBuf>,
@@ -59,7 +61,7 @@ type SetupParts = (
 fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
     let (remote_tx, remote_rx) = mpsc::channel::<crate::control::RemoteRequest>();
 
-    let log_path = p.session.log_path.clone();
+    let log_path = Some(p.log_path.clone());
     let msg_rx = p.session.events;
     let phone = p.session.phone;
     let backend_handle = p.session.handle;
