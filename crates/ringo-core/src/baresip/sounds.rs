@@ -133,10 +133,10 @@ pub fn play_alert(filename: &str) {
     stop_alert();
     let wav = match filename {
         "ring.wav" => EmbeddedWav {
-            data: include_bytes!("../../../../vendor/baresip/share/ring.wav"),
+            data: include_bytes!("../../vendor/baresip/share/ring.wav"),
         },
         "ringback.wav" => EmbeddedWav {
-            data: include_bytes!("../../../../vendor/baresip/share/ringback.wav"),
+            data: include_bytes!("../../vendor/baresip/share/ringback.wav"),
         },
         _ => return,
     };

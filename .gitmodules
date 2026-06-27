@@ -1,6 +1,6 @@
 [submodule "vendor/re"]
-	path = vendor/re
+	path = crates/ringo-core/vendor/re
 	url = https://github.com/baresip/re.git
 [submodule "vendor/baresip"]
-	path = vendor/baresip
+	path = crates/ringo-core/vendor/baresip
 	url = https://github.com/baresip/baresip.git
