@@ -9,7 +9,8 @@ pub mod log;
 pub mod phone;
 
 pub use backend::{
-    call_count, is_registered, received_audio, sent_audio, set_sip_trace, shutdown,
+    call_count, is_registered, received_audio, sent_audio, shutdown, sip_trace_file,
+    sip_trace_stderr,
 };
 
 mod baresip;

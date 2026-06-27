@@ -11,7 +11,7 @@ pub use crate::baresip::call_count;
 pub use crate::baresip::is_registered;
 pub use crate::baresip::received_audio;
 pub use crate::baresip::sent_audio;
-pub use crate::baresip::set_sip_trace;
+pub use crate::baresip::{sip_trace_file, sip_trace_stderr};
 
 /// Shut down the backend's global runtime: hang up calls, tear down the user
 /// agents, stop the event loop and join its thread. Call once at process exit;

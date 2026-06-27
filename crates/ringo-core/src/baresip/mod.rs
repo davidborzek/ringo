@@ -41,11 +41,16 @@ use self::re_thread::{EVENT_TX, enter_re_thread, on_re_thread, redirect_logging,
 
 pub use self::re_thread::stop_re_thread;
 
-/// Request SIP message tracing (every request/response logged through the ringo
-/// log). Call before the first session is spawned; the handler is installed
-/// during baresip init. Output goes to whatever log sink the binary set up.
-pub fn set_sip_trace(on: bool) {
-    siptrace::set_requested(on);
+/// Trace every SIP request/response to `path` (its own file, separate from the
+/// log). Call before the first session is spawned — the handler is installed
+/// during baresip init.
+pub fn sip_trace_file(path: impl AsRef<std::path::Path>) {
+    siptrace::init_file(path);
+}
+
+/// Trace every SIP request/response to stderr (separate from the log).
+pub fn sip_trace_stderr() {
+    siptrace::init_stderr();
 }
 
 /// Returns true if any UA is still registered. Checks `uag_list()` on the

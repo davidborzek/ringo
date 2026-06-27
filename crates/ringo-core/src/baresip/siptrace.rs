@@ -1,30 +1,49 @@
 //! Optional SIP message tracing — every SIP request/response (sent + received)
-//! is logged through the ringo log, for debugging signaling flows.
+//! written to its OWN sink (file or stderr), independent of the regular log.
 //!
 //! baresip's own `uag_enable_sip_trace()` prints via `re_printf` to stdout
 //! (with ANSI), which would corrupt ringo-flow's reporter/NDJSON output and
 //! ringo-phone's TUI. So we install our OWN handler via libre's
-//! `sip_set_trace_handler()` and route the trace through `rlog!` (→ whatever log
-//! sink the binary configured: file, stderr, or none).
+//! `sip_set_trace_handler()` and write to a dedicated sink the binary picks.
 
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::os::raw::c_void;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use super::bindings::*;
 
-/// Whether SIP tracing was requested (set by the binary before the RE thread
-/// starts). The handler is installed once baresip is initialized.
-static REQUESTED: AtomicBool = AtomicBool::new(false);
+/// Dedicated SIP-trace sink. Set ⇒ tracing is on (the handler is installed in
+/// baresip init); unset ⇒ off. Separate from the regular log sink.
+static SINK: OnceLock<Mutex<Box<dyn Write + Send>>> = OnceLock::new();
 
-/// Request SIP tracing. Takes effect when the UA stack is initialized (the
-/// handler is installed from `spawn_session`'s one-time init).
-pub fn set_requested(on: bool) {
-    REQUESTED.store(on, Ordering::Release);
+/// Trace SIP messages to `path` (created, truncated; parent dirs made). Call
+/// before the first session is spawned. First call wins.
+pub fn init_file(path: impl AsRef<Path>) {
+    let path = path.as_ref();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(f) = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+    {
+        let _ = SINK.set(Mutex::new(Box::new(f)));
+    }
 }
 
-/// libre SIP trace callback: log the raw message (it's text) with direction and
-/// transport. Runs on the RE thread; a panic here would cross FFI, so guard it.
+/// Trace SIP messages to stderr. Call before the first session is spawned.
+pub fn init_stderr() {
+    let _ = SINK.set(Mutex::new(Box::new(std::io::stderr())));
+}
+
+/// libre SIP trace callback: write the raw message (it's text) with direction
+/// and transport to the trace sink. Runs on the RE thread; a panic here would
+/// cross FFI, so guard it.
 unsafe extern "C" fn trace_cb(
     tx: bool,
     tp: sip_transp,
@@ -35,6 +54,9 @@ unsafe extern "C" fn trace_cb(
     _arg: *mut c_void,
 ) {
     let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+        let Some(mtx) = SINK.get() else {
+            return;
+        };
         if pkt.is_null() || len == 0 {
             return;
         }
@@ -49,14 +71,17 @@ unsafe extern "C" fn trace_cb(
                 unsafe { std::ffi::CStr::from_ptr(p) }.to_str().unwrap_or("?")
             }
         };
-        crate::rlog!(Info, "SIP {dir} {transp}\n{}", msg.trim_end());
+        if let Ok(mut w) = mtx.lock() {
+            let ts = chrono::Local::now().format("%H:%M:%S%.3f");
+            let _ = writeln!(w, "[{ts}] SIP {dir} {transp}\n{}\n", msg.trim_end());
+        }
     }));
 }
 
-/// Install the trace handler if tracing was requested. Called from the one-time
+/// Install the trace handler if a sink was configured. Called from the one-time
 /// baresip init (already on the RE thread, after `ua_init`).
 pub(super) fn install_if_requested() {
-    if !REQUESTED.load(Ordering::Acquire) {
+    if SINK.get().is_none() {
         return;
     }
     unsafe {

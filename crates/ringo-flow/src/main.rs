@@ -86,10 +86,11 @@ enum Commands {
         /// is written. `--log` → stderr; `--log <FILE>` → that file.
         #[arg(long, value_name = "FILE", num_args = 0..=1)]
         log: Option<Option<PathBuf>>,
-        /// Trace every SIP request/response to the log (for debugging flows).
-        /// Implies a log sink: without `--log`, the trace goes to stderr.
-        #[arg(long = "sip-trace")]
-        sip_trace: bool,
+        /// Trace every SIP request/response to its own destination (separate from
+        /// `--log`). Off by default. `--sip-trace` → stderr; `--sip-trace <FILE>`
+        /// → that file.
+        #[arg(long = "sip-trace", value_name = "FILE", num_args = 0..=1)]
+        sip_trace: Option<Option<PathBuf>>,
         /// Save each agent's call recordings (sent/received WAV) to the cwd
         #[arg(long)]
         save_audio: bool,
@@ -170,15 +171,16 @@ fn main() -> Result<()> {
             insecure_http,
         } => {
             // Backend log destination (process-global): off unless --log is given.
-            // --sip-trace needs a sink, so it falls back to stderr when --log is absent.
             match &log {
-                None if sip_trace => ringo_core::log::init_stderr(),
                 None => {}
                 Some(None) => ringo_core::log::init_stderr(),
                 Some(Some(path)) => ringo_core::log::init_file(path),
             }
-            if sip_trace {
-                ringo_core::set_sip_trace(true);
+            // SIP trace — its own sink, independent of --log.
+            match &sip_trace {
+                None => {}
+                Some(None) => ringo_core::sip_trace_stderr(),
+                Some(Some(path)) => ringo_core::sip_trace_file(path),
             }
             // Color off if `--no-color`/`--no-ansi` or the `NO_COLOR` env var is set
             // (https://no-color.org); the reporter additionally requires a TTY.
