@@ -39,6 +39,9 @@ pub struct BackendOptions {
     pub hold_other_calls: Option<bool>,
     /// Outgoing-call ring timeout in seconds (`call_local_timeout`). `None` = 120.
     pub local_timeout_s: Option<u32>,
+    /// SIP `User-Agent` string passed to `ua_init` (e.g. `ringo-phone/0.11.0`).
+    /// `None` = bare `ringo`. Set by the binary so it carries its own version.
+    pub user_agent: Option<String>,
     /// Arbitrary extra config lines appended at the end (key, value).
     pub extra: Vec<(String, String)>,
     /// Capture the full call's sent + received audio in-process (for the
