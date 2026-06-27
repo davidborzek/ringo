@@ -1,0 +1,62 @@
+name: Docker image (GHCR)
+
+# Reusable: build + push the ringo-flow image to GHCR. Called by release-plz on
+# release; also `workflow_dispatch`able to re-push an image for a tag without a
+# full release.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to build"
+        type: string
+        required: true
+      flow_tag:
+        description: "ringo-flow tag (ringo-flow-vX.Y.Z) → image version"
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build"
+        type: string
+        required: true
+      flow_tag:
+        description: "ringo-flow tag (ringo-flow-vX.Y.Z) → image version"
+        type: string
+        required: true
+
+jobs:
+  push:
+    name: Build & push ringo-flow image (GHCR)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: true
+      - name: Compute image tags
+        id: tags
+        run: |
+          version="${FLOW_TAG#ringo-flow-v}"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/ringo-flow"
+          echo "tags=${image}:${version},${image}:latest" >> "$GITHUB_OUTPUT"
+        env:
+          FLOW_TAG: ${{ inputs.flow_tag }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/ringo-flow/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
