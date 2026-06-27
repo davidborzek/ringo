@@ -146,7 +146,9 @@ impl Backend for BaresipBackend {
 
             // Set conf_path to a per-process temp dir so baresip does NOT read
             // ~/.baresip/accounts or ~/.baresip/config (our config is in-memory
-            // via conf_configure_buf). baresip only writes its `uuid` file here;
+            // via conf_configure_buf). baresip still requires a valid conf_path,
+            // but the dir stays empty in practice: the only writer would be the
+            // `uuid` module (writes <conf_path>/uuid), and we don't load it.
             // 0700 keeps it private on a shared host. Removed on shutdown
             // (stop_re_thread), so a clean exit leaves nothing in /tmp.
             let dir = format!("/tmp/ringo-baresip-{}", std::process::id());
