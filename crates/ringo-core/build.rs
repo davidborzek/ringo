@@ -423,6 +423,7 @@ fn generate_bindings() {
         .allowlist_function("ausrc_register|baresip_ausrcl|auplay_register|baresip_auplayl|auframe_init|aufmt_sample_size|mem_zalloc|mem_alloc")
         .allowlist_function("bevent_.*")
         .allowlist_function("uag_sip|sip_set_trace_handler|sip_transp_name")
+        .allowlist_function("sa_af|sa_in|sa_in6|sa_port")
         .allowlist_function("log_enable_.*|log_register_handler|log_unregister_handler|log_level_set|log_level_get")
         .allowlist_function("play_.*|baresip_player|play_set_.*")
         .allowlist_function("mbuf_.*")
