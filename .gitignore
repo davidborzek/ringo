@@ -19,3 +19,7 @@ docs/*/book/
 
 # local docs preview (built by hand for `mdbook`/http.server)
 /preview/
+
+# stray local trace/log artifacts
+*.log
+*.pcap

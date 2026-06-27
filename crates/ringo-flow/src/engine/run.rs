@@ -153,10 +153,8 @@ where
     // the blocking thread because verbs `block_on`.
     let c = ctx.clone();
     let join = rt.block_on(async move {
-        tokio::task::spawn_blocking(move || {
-            run_files(programs, &c, &selector, save_audio, multi)
-        })
-        .await
+        tokio::task::spawn_blocking(move || run_files(programs, &c, &selector, save_audio, multi))
+            .await
     });
 
     let agg = match join {
@@ -324,14 +322,8 @@ where
         if multi {
             ctx.emit(&Event::FileStarted { path: &d.label });
         }
-        let (total, passed, skipped) = run_suite(
-            &mut d.host,
-            &d.scenarios,
-            ctx,
-            selector,
-            focus,
-            save_audio,
-        );
+        let (total, passed, skipped) =
+            run_suite(&mut d.host, &d.scenarios, ctx, selector, focus, save_audio);
         ctx.reset_sessions(); // isolate the next file (fresh agents)
         ctx.emit(&Event::SuiteFinished {
             total,

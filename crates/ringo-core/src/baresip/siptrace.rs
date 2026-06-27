@@ -68,7 +68,9 @@ unsafe extern "C" fn trace_cb(
             if p.is_null() {
                 "?"
             } else {
-                unsafe { std::ffi::CStr::from_ptr(p) }.to_str().unwrap_or("?")
+                unsafe { std::ffi::CStr::from_ptr(p) }
+                    .to_str()
+                    .unwrap_or("?")
             }
         };
         if let Ok(mut w) = mtx.lock() {
