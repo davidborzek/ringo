@@ -109,7 +109,6 @@ fn account_from(p: &profile::Profile) -> crate::account::Account {
 /// Map ringo's `[baresip]` config section to the engine's backend options.
 fn backend_options(c: &crate::config::BaresipConfig) -> crate::account::BackendOptions {
     crate::account::BackendOptions {
-        module_path: c.module_path.clone(),
         audio_driver: c.audio_driver.clone(),
         audio_player_device: c.audio_player_device.clone(),
         audio_source_device: c.audio_source_device.clone(),

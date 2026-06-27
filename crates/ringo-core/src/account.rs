@@ -24,7 +24,6 @@ pub struct Account {
 /// is auto-detected at spawn time.
 #[derive(Debug, Clone, Default)]
 pub struct BackendOptions {
-    pub module_path: Option<String>,
     pub audio_driver: Option<String>,
     pub audio_player_device: Option<String>,
     pub audio_source_device: Option<String>,
