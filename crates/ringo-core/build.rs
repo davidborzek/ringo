@@ -35,6 +35,20 @@ fn build_vendored() {
         None
     };
 
+    // On macOS, a build script's `cfg!(target_os/arch)` reflects the HOST, not
+    // the target. For a cross-arch build (e.g. the x86_64 target on an arm64
+    // runner) cmake would otherwise build libre/libbaresip for the host arch and
+    // fail to link the target-arch OpenSSL ("required architecture arm64").
+    // Pin cmake to the Rust target arch via CMAKE_OSX_ARCHITECTURES.
+    let macos_arch: Option<&str> = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
+            Ok("aarch64") => Some("arm64"),
+            _ => Some("x86_64"),
+        }
+    } else {
+        None
+    };
+
     // ─── Build libre (re) ───────────────────────────────────────────────
     let re_build = out.join("re-build");
     let re_install = out.join("re-install");
@@ -59,6 +73,9 @@ fn build_vendored() {
     if let Some(ref root) = openssl_root {
         re_cmake_args.push(format!("-DOPENSSL_ROOT_DIR={}", root.display()));
         re_cmake_args.push(format!("-DOPENSSL_INCLUDE_DIR={}", openssl_include));
+    }
+    if let Some(arch) = macos_arch {
+        re_cmake_args.push(format!("-DCMAKE_OSX_ARCHITECTURES={arch}"));
     }
     run(
         "cmake",
@@ -143,6 +160,9 @@ fn build_vendored() {
     if let Some(ref root) = openssl_root {
         baresip_cmake_args.push(format!("-DOPENSSL_ROOT_DIR={}", root.display()));
         baresip_cmake_args.push(format!("-DOPENSSL_INCLUDE_DIR={}", openssl_include));
+    }
+    if let Some(arch) = macos_arch {
+        baresip_cmake_args.push(format!("-DCMAKE_OSX_ARCHITECTURES={arch}"));
     }
     run(
         "cmake",
