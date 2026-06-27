@@ -43,7 +43,6 @@ impl HookEvent {
 /// Example in ringo.toml:
 /// ```toml
 /// [baresip]
-/// module_path  = "/usr/lib/baresip/modules"
 /// audio_driver = "pulse"
 /// sip_cafile   = "/etc/ssl/certs/ca-certificates.crt"
 /// sip_capath   = "/etc/ssl/certs"
@@ -52,7 +51,6 @@ impl HookEvent {
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct BaresipConfig {
-    pub module_path: Option<String>,
     pub audio_driver: Option<String>,
     pub audio_player_device: Option<String>,
     pub audio_source_device: Option<String>,

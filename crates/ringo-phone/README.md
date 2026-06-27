@@ -20,8 +20,8 @@ and integrations.
 
 ## Requirements
 
-- [baresip](https://github.com/baresip/baresip) >= 3.14 in `$PATH`
-- Rust 1.85+ (to build)
+- **Rust 1.85+** to build
+- A **C toolchain + CMake** to build the vendored baresip/libre/OpenSSL, which are **statically linked** — so no separate `baresip` install is needed, at build or run time
 
 ## Install
 
@@ -37,7 +37,7 @@ ask you to trust the third-party tap first (`brew trust --formula davidborzek/ta
 see [Getting started](https://davidborzek.github.io/ringo/ringo-phone/getting-started.html).
 
 See [Getting started](https://davidborzek.github.io/ringo/ringo-phone/getting-started.html)
-for installing baresip and other options.
+for other install options.
 
 ## Getting started
 

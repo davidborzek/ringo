@@ -21,6 +21,27 @@ pub trait Phone: Send {
     /// `aufile,/path.wav` to play a file, or `aubridge,default` to go silent.
     /// Applies to the active call.
     fn set_audio_source(&self, spec: &str);
+
+    /// Arm a custom SIP response for the next inbound INVITE(s): answer with
+    /// `scode`/`reason` and the extra `headers` (each a full header line like
+    /// `Contact: <sip:…>`, no trailing CRLF) instead of accepting the call.
+    /// Sticky until [`Phone::disarm_invite_response`]. Arm it *before* the call
+    /// arrives for deterministic behaviour.
+    fn arm_invite_response(&self, scode: u16, reason: &str, headers: Vec<String>);
+
+    /// Clear any armed response — subsequent inbound INVITEs are accepted again.
+    fn disarm_invite_response(&self);
+
+    /// Deflect inbound calls to `contact` with a `302 Moved Temporarily` (plus an
+    /// RFC 5806 `Diversion` header when `diversion` is set). Thin wrapper over
+    /// [`Phone::arm_invite_response`].
+    fn deflect_incoming(&self, contact: &str, diversion: Option<&str>) {
+        let mut headers = vec![format!("Contact: <{contact}>")];
+        if let Some(div) = diversion {
+            headers.push(format!("Diversion: <{div}>"));
+        }
+        self.arm_invite_response(302, "Moved Temporarily", headers);
+    }
 }
 
 // ─── Test mock ────────────────────────────────────────────────────────────────
@@ -100,6 +121,15 @@ impl Phone for MockPhone {
     }
     fn set_audio_source(&self, spec: &str) {
         self.send("ausrc", spec);
+    }
+    fn arm_invite_response(&self, scode: u16, reason: &str, headers: Vec<String>) {
+        self.send(
+            "armresponse",
+            &format!("{scode} {reason} [{}]", headers.join("; ")),
+        );
+    }
+    fn disarm_invite_response(&self) {
+        self.send("disarmresponse", "");
     }
 }
 

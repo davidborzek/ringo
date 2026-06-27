@@ -263,6 +263,12 @@ pub(super) const AGENT_CONFIG: &[ConfigField] = &[
         required: false,
         desc: "extra SIP headers on the INVITE, e.g. `#{ \"X-Foo\": \"bar\" }`",
     },
+    ConfigField {
+        key: "deflect_to",
+        ty: "string",
+        required: false,
+        desc: "deflect inbound calls with a 302 to this URI/number (toggle at runtime with `deflect()`/`stop_deflect()`)",
+    },
 ];
 
 /// The `http(method, url, #{…})` options-map schema (single source for the docs
@@ -431,6 +437,26 @@ pub(super) fn headers_from_map(map: &Map) -> Result<Vec<(String, String)>, Box<E
         if let Ok(val) = v.clone().into_string() {
             out.push((k.to_string(), val));
         }
+    }
+    Ok(out)
+}
+
+/// `#{ "Contact": "<sip:…>" }` → full header lines (`Contact: <sip:…>`) for a
+/// custom INVITE response. Names are validated as SIP tokens; values are
+/// rejected on CR/LF so they can't inject extra headers into the reply.
+pub(super) fn response_headers_from_map(map: &Map) -> Result<Vec<String>, Box<EvalAltResult>> {
+    let mut out = Vec::new();
+    for (k, v) in map.iter() {
+        if !is_header_token(k) {
+            return Err(format!("`{k}` is not a valid SIP header name").into());
+        }
+        let Ok(val) = v.clone().into_string() else {
+            continue;
+        };
+        if val.contains(['\r', '\n']) {
+            return Err(format!("header `{k}` value must not contain CR/LF").into());
+        }
+        out.push(format!("{k}: {val}"));
     }
     Ok(out)
 }

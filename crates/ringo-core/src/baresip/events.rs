@@ -1,4 +1,4 @@
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Mutex, OnceLock};
@@ -19,6 +19,82 @@ static INBOUND_HEADERS: OnceLock<Mutex<InboundHeaderMap>> = OnceLock::new();
 
 pub fn inbound_headers_store() -> &'static Mutex<InboundHeaderMap> {
     INBOUND_HEADERS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// A custom SIP response armed for a UA's next inbound INVITE(s), instead of
+/// accepting the call. The deflection (302 + Contact) helper is just one shape
+/// of this generic response.
+#[derive(Clone)]
+struct ArmedResponse {
+    scode: u16,
+    reason: String,
+    /// Extra header lines (without trailing CRLF), e.g. `Contact: <sip:…>`.
+    headers: Vec<String>,
+}
+
+/// UA pointer → armed response. Sticky (like baresip-apps `redirect`): stays
+/// until [`disarm_invite_response`] or the UA is gone.
+static ARMED_RESPONSES: OnceLock<Mutex<std::collections::HashMap<usize, ArmedResponse>>> =
+    OnceLock::new();
+
+fn armed_responses() -> &'static Mutex<std::collections::HashMap<usize, ArmedResponse>> {
+    ARMED_RESPONSES.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Arm `ua` so its next inbound INVITE is answered with `scode`/`reason` plus
+/// `headers`, instead of being accepted. Sticky until [`disarm_invite_response`].
+pub(crate) fn arm_invite_response(ua: usize, scode: u16, reason: String, headers: Vec<String>) {
+    armed_responses()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(
+            ua,
+            ArmedResponse {
+                scode,
+                reason,
+                headers,
+            },
+        );
+}
+
+/// Clear any armed response for `ua` (subsequent INVITEs are accepted normally).
+pub(crate) fn disarm_invite_response(ua: usize) {
+    armed_responses()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&ua);
+}
+
+/// Answer an inbound INVITE `msg` directly with `scode`/`reason` + extra
+/// `headers`, the way baresip rejects pre-call INVITEs (`sip_treplyf`,
+/// fire-and-forget — `stp`/`mbp` NULL, no transaction to free). Must run on the
+/// RE thread (called from the bevent handler). `false` on a NUL byte or send
+/// error. The `"%s"` format keeps `%` inside header values from being read as
+/// printf specifiers.
+fn respond_to_invite(msg: *const SipMsg, scode: u16, reason: &str, headers: &[String]) -> bool {
+    let mut body = String::new();
+    for h in headers {
+        body.push_str(h);
+        body.push_str("\r\n");
+    }
+    body.push_str("Content-Length: 0\r\n\r\n");
+    let (Ok(reason_c), Ok(body_c)) = (CString::new(reason), CString::new(body)) else {
+        return false;
+    };
+    let rc = unsafe {
+        sip_treplyf(
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            uag_sip(),
+            msg,
+            false,
+            scode,
+            reason_c.as_ptr(),
+            c"%s".as_ptr(),
+            body_c.as_ptr(),
+        )
+    };
+    rc == 0
 }
 
 /// Callback for list_apply: collect each SIP header name+value.
@@ -67,8 +143,11 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
                 std::ptr::null_mut()
             };
             if !msg.is_null() && !ua.is_null() {
+                // Extract + store all INVITE headers first, keyed by UA — so the
+                // header poll surfaces them even when we deflect (the call is
+                // answered with a 302 and no call object is ever created, but a
+                // scenario can still read the INVITE's custom headers).
                 let call_id = pl_to_string(unsafe { &(*msg).callid as *const Pl });
-                // Extract all headers from msg->hdrl
                 let mut collector = HeaderVec(Vec::new());
                 unsafe {
                     list_apply(
@@ -82,6 +161,30 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .insert((ua as usize, call_id), collector.0);
+
+                // If this UA is armed with a custom response (e.g. a 302 deflect),
+                // answer the INVITE directly and skip acceptance — no call object.
+                let armed = armed_responses()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&(ua as usize))
+                    .cloned();
+                if let Some(r) = armed {
+                    if respond_to_invite(msg, r.scode, &r.reason, &r.headers) {
+                        crate::rlog!(
+                            Info,
+                            "answered inbound INVITE with {} {}",
+                            r.scode,
+                            r.reason
+                        );
+                    } else {
+                        crate::rlog!(Warn, "failed to send armed {} response", r.scode);
+                    }
+                    // Stop propagation so nothing else accepts the call.
+                    unsafe { bevent_stop(event) };
+                    return;
+                }
+
                 // Accept the call (creates call object, sends 180 Ringing,
                 // emits BEVENT_CALL_INCOMING).
                 let rc = unsafe { ua_accept(ua, msg) };

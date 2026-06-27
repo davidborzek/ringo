@@ -2,20 +2,7 @@
 
 ## Install
 
-### 1. baresip
-
-ringo needs [baresip](https://github.com/baresip/baresip) ≥ 3.14 in your `$PATH`
-(`baresip -v` to check). See
-[Supported platforms](https://github.com/baresip/baresip/wiki/Supported-platforms);
-on most systems:
-
-```sh
-sudo pacman -S baresip   # Arch
-sudo apt install baresip # Debian/Ubuntu (may need >= 3.14 from a PPA/source)
-brew install baresip     # macOS
-```
-
-### 2. ringo
+baresip is built in and statically linked — no separate `baresip` install needed.
 
 **Homebrew (macOS / Linux):**
 

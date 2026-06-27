@@ -411,6 +411,8 @@ mod tests {
             self.log.lock().unwrap().push(format!("rm {key}"));
         }
         fn set_audio_source(&self, _: &str) {}
+        fn arm_invite_response(&self, _: u16, _: &str, _: Vec<String>) {}
+        fn disarm_invite_response(&self) {}
     }
 
     fn app_with_headers(headers: Vec<(&str, &str)>, phone: RecordingPhone) -> App {
