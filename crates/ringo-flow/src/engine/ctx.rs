@@ -313,14 +313,24 @@ impl Ctx {
     /// session lock is taken per digit, so the gap doesn't block other access.
     pub fn dtmf(&self, name: &str, digits: &str, gap: Duration) -> Result<(), String> {
         let digits: Vec<char> = digits.chars().filter(|c| !c.is_whitespace()).collect();
+        let detail: String = digits.iter().collect();
+        // Log before sending (with the inter-digit gap) and again after — the
+        // send is synchronous and a long digit string with a gap can take a
+        // while, so a single end-of-send line would look like the *next* step
+        // (e.g. a `wait`) ran long.
+        let start = if gap.is_zero() {
+            detail.clone()
+        } else {
+            format!("{detail} (with {}ms gap)", gap.as_millis())
+        };
+        self.act(name, "dtmf-start", Some(&start));
         for (i, c) in digits.iter().enumerate() {
             if i > 0 && !gap.is_zero() {
                 std::thread::sleep(gap);
             }
             self.with_session(name, |s| s.send_dtmf(*c))?;
         }
-        let detail: String = digits.iter().collect();
-        self.act(name, "dtmf", Some(&detail));
+        self.act(name, "dtmf-done", Some(&detail));
         Ok(())
     }
 
