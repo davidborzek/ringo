@@ -73,7 +73,8 @@ The exit code is non-zero if any scenario fails.
   is layered on top per file).
 - `--log [<file>]` — write the backend/SIP log to stderr (or a file); off by default.
 - `--sip-trace [<file>]` — trace every SIP request/response to its own destination
-  (stderr, or a file); separate from `--log`, off by default.
+  (stderr, or a file); separate from `--log`, off by default. A `.pcap` path writes
+  a capture for sngrep/Wireshark — see [Debugging](debugging.md).
 - `--save-audio` — save sent/received WAVs to the working directory.
 - `--json` — emit NDJSON events (for CI).
 - `-q` / `-v`, `--no-color`.
