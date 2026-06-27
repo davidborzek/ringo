@@ -11,9 +11,8 @@ fn main() {
 
 fn build_vendored() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let workspace_root = manifest.join("../..");
-    let re_dir = workspace_root.join("vendor/re");
-    let baresip_dir = workspace_root.join("vendor/baresip");
+    let re_dir = manifest.join("vendor/re");
+    let baresip_dir = manifest.join("vendor/baresip");
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let profile = env::var("PROFILE").unwrap_or("debug".into());
 
@@ -294,15 +293,15 @@ fn build_vendored() {
     // would truncate this line-oriented `cargo:` directive.
     println!("cargo:link_after_archives={}", after.join("\u{1f}"));
 
-    // Tell Rust that the build depends on the vendored sources. Absolute paths
-    // (workspace root), since these live at <root>/vendor, not under the crate dir.
+    // Tell Rust that the build depends on the vendored sources (submodules under
+    // the crate dir, so they ship inside the published package tarball).
     println!(
         "cargo:rerun-if-changed={}",
-        workspace_root.join("vendor/re/src").display()
+        manifest.join("vendor/re/src").display()
     );
     println!(
         "cargo:rerun-if-changed={}",
-        workspace_root.join("vendor/baresip/src").display()
+        manifest.join("vendor/baresip/src").display()
     );
 }
 
@@ -406,9 +405,8 @@ fn generate_bindings() {
     // Include paths: vendored headers + build output (for generated config headers).
     let mut include_paths: Vec<PathBuf> = Vec::new();
 
-    let workspace_root = manifest.join("../..");
-    include_paths.push(workspace_root.join("vendor/re/include"));
-    include_paths.push(workspace_root.join("vendor/baresip/include"));
+    include_paths.push(manifest.join("vendor/re/include"));
+    include_paths.push(manifest.join("vendor/baresip/include"));
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     include_paths.push(out.join("re-install/include"));
     include_paths.push(out.join("baresip-install/include"));
