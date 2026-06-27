@@ -199,11 +199,7 @@ impl FormState {
         let hint_area = chunks[1];
         let visible = fields_area.height as usize;
 
-        let scroll = if self.focused + 1 > visible {
-            self.focused + 1 - visible
-        } else {
-            0
-        };
+        let scroll = (self.focused + 1).saturating_sub(visible);
 
         let value_x = fields_area.x + LABEL_W + SEP_W;
         let value_w = fields_area.width.saturating_sub(LABEL_W + SEP_W) as usize;

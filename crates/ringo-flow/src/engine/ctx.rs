@@ -8,7 +8,7 @@ use crate::runtime::agent_options;
 use crate::runtime::report::{Event, Reporter};
 use crate::runtime::session::AgentSession;
 use crate::runtime::state::{CallPhase, received_header_value};
-use ringo_core::baresip::Account;
+use ringo_core::account::Account;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -100,6 +100,8 @@ pub struct Ctx {
     default_timeout_ms: AtomicU64,
     /// Disable TLS cert verification for `http(...)` (the `--insecure-http` escape hatch).
     http_insecure: AtomicBool,
+    /// Capture full-call sent/received audio in-process for `--save-audio`.
+    save_audio: AtomicBool,
 }
 
 impl Ctx {
@@ -111,7 +113,13 @@ impl Ctx {
             mock_servers: Mutex::new(Vec::new()),
             default_timeout_ms: AtomicU64::new(default_timeout.as_millis() as u64),
             http_insecure: AtomicBool::new(false),
+            save_audio: AtomicBool::new(false),
         }
+    }
+
+    /// Enable full-call in-process audio capture (for `--save-audio`).
+    pub fn set_save_audio(&self, on: bool) {
+        self.save_audio.store(on, Ordering::Relaxed);
     }
 
     /// Disable TLS certificate verification for `http(...)`. DANGER — only for
@@ -156,9 +164,13 @@ impl Ctx {
         headers: &[(String, String)],
     ) -> Result<(), String> {
         let aor = format!("sip:{}@{}", account.username, account.domain);
+        let mut options = agent_options();
+        // Full per-call capture only when saving recordings; verify always uses
+        // the rolling in-process window regardless.
+        options.record_audio = self.save_audio.load(Ordering::Relaxed);
         let session = self
             .rt
-            .block_on(AgentSession::connect(name, account, &agent_options()))
+            .block_on(AgentSession::connect(name, account, &options))
             .map_err(|e| format!("agent `{name}`: connect failed: {e}"))?;
         self.emit(&Event::AgentStarted { name, aor: &aor });
         for (key, value) in headers {
@@ -300,14 +312,24 @@ impl Ctx {
     /// session lock is taken per digit, so the gap doesn't block other access.
     pub fn dtmf(&self, name: &str, digits: &str, gap: Duration) -> Result<(), String> {
         let digits: Vec<char> = digits.chars().filter(|c| !c.is_whitespace()).collect();
+        let detail: String = digits.iter().collect();
+        // Log before sending (with the inter-digit gap) and again after — the
+        // send is synchronous and a long digit string with a gap can take a
+        // while, so a single end-of-send line would look like the *next* step
+        // (e.g. a `wait`) ran long.
+        let start = if gap.is_zero() {
+            detail.clone()
+        } else {
+            format!("{detail} (with {}ms gap)", gap.as_millis())
+        };
+        self.act(name, "dtmf-start", Some(&start));
         for (i, c) in digits.iter().enumerate() {
             if i > 0 && !gap.is_zero() {
                 std::thread::sleep(gap);
             }
             self.with_session(name, |s| s.send_dtmf(*c))?;
         }
-        let detail: String = digits.iter().collect();
-        self.act(name, "dtmf", Some(&detail));
+        self.act(name, "dtmf-done", Some(&detail));
         Ok(())
     }
 
@@ -385,8 +407,9 @@ impl Ctx {
     pub fn set_audio_source(&self, name: &str, spec: &str) -> Result<(), String> {
         self.with_session(name, |s| s.set_audio_source(spec))
     }
-    pub fn recording_dir(&self, name: &str) -> Result<std::path::PathBuf, String> {
-        self.with_session(name, |s| s.recording_dir().to_path_buf())
+    /// This agent's in-process captured received audio (samples + sample rate).
+    pub fn received_audio(&self, name: &str) -> Result<Option<(Vec<i16>, u32)>, String> {
+        self.with_session(name, |s| s.received_audio())
     }
     pub fn emit_action(&self, name: &str, kind: &'static str, detail: Option<&str>) {
         self.act(name, kind, detail);
@@ -463,13 +486,29 @@ impl Ctx {
             s.hangup_all();
         }
         self.rt.block_on(async {
-            // Await server shutdown so ports are freed, then let baresip flush BYEs.
+            // Await server shutdown so ports are freed.
             for task in server_tasks {
                 let _ = task.await;
             }
-            tokio::time::sleep(Duration::from_millis(200)).await;
         });
         drop(sessions);
+        // ua_unregister sends REGISTER expires=0 asynchronously on the RE
+        // thread. Poll ua_isregistered() (without holding the RE lock) until
+        // it returns false or timeout — ensures the PBX has processed the
+        // deregister before the next scenario registers a new UA.
+        self.rt.block_on(async {
+            let deadline = tokio::time::Instant::now() + Duration::from_millis(3000);
+            loop {
+                if !ringo_core::is_registered() {
+                    break;
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    eprintln!("reset_sessions: unregister timed out (3s)");
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        });
         drop(servers);
     }
 

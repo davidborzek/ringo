@@ -42,5 +42,5 @@ custom_headers = [
 | `~/.config/ringo/profiles/<name>/profile.toml` | Profile config |
 | `~/.config/ringo/profiles/<name>/call_history` | Per-profile call history (JSONL) |
 | `~/.local/share/ringo/history` | Global dial history |
-| `/tmp/ringo-<name>-<ts>/` | Runtime temp dir (auto-cleaned) |
-| `/tmp/ringo-<name>.log` | Application log (hooks, TCP errors, lifecycle) |
+| `~/.local/state/ringo/<name>.log` | Application log (hooks, errors, lifecycle); `$XDG_STATE_HOME` |
+| `/tmp/ringo-baresip-<pid>/` | baresip conf dir (empty; auto-cleaned on exit) |

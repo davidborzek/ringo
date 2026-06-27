@@ -1,7 +1,5 @@
-// Shared backend/protocol/engine from `ringo-core`, re-exported at the crate
-// root so `crate::client`, `crate::baresip`, `crate::rlog!` etc. keep working.
 pub use ringo_core::rlog;
-pub use ringo_core::{baresip, client, event, log, phone};
+pub use ringo_core::{account, backend, event, log, phone};
 
 mod app;
 mod config;
@@ -141,7 +139,11 @@ fn main() -> Result<()> {
             profile,
             no_notify,
             headless,
-        } => app::run(profile, !no_notify, headless)?,
+        } => {
+            let result = app::run(profile, !no_notify, headless);
+            ringo_core::shutdown();
+            result?;
+        }
         Commands::List {
             plain,
             format,

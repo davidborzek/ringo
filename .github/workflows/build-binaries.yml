@@ -1,0 +1,139 @@
+name: Build binaries
+
+# Reusable: builds one package's release binaries across all shipped targets and
+# smoke-tests them. Called by ci.yml on PRs (upload=false — build + smoke only)
+# and by release-plz.yml on release (upload=true — package + attach to release),
+# so the build/link/smoke path is identical in both.
+#
+# Single binary per target — audio auto-detected by build.rs (Linux → pulse via
+# pkg-config; macOS → coreaudio system framework).
+#
+# Both Linux targets build in a debian:bullseye container (glibc 2.31) for
+# maximum compatibility and smoke-test in debian:bookworm-slim — x86_64 on the
+# x86 runner, aarch64 natively on the free public arm64 runner. No cross-compile,
+# no multiarch apt (Ubuntu's arm64 packages aren't on the default mirrors).
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: "Cargo package: ringo-phone or ringo-flow"
+        type: string
+        required: true
+      ref:
+        description: "Git ref to build (empty = the triggering ref)"
+        type: string
+        default: ""
+      upload:
+        description: "Package as tarball and attach to the release"
+        type: boolean
+        default: false
+      tag:
+        description: "Release tag (required when upload=true)"
+        type: string
+        default: ""
+
+jobs:
+  build:
+    name: ${{ inputs.package }} ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    # No `permissions:` here — a reusable workflow that requests more than the
+    # caller grants is rejected at startup. We inherit the caller job's token:
+    # release-plz grants `contents: write` (to attach tarballs); PR CI grants
+    # only read (upload is skipped there). The upload step is gated on `upload`.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          # x86_64 mac builds natively on the Intel runner — macos-latest is
+          # arm64, and its Homebrew opus/spandsp are arm64-only (can't link an
+          # x86_64 binary). macos-15-intel is the current Intel image (macos-13
+          # was retired Dec 2025). aarch64 builds natively on macos-latest.
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-apple-darwin
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          submodules: true
+
+      - name: Derive package vars
+        id: vars
+        run: |
+          if [ "${{ inputs.package }}" = "ringo-phone" ]; then
+            echo "bin=ringo"   >> "$GITHUB_OUTPUT"
+            echo "prefix=ringo" >> "$GITHUB_OUTPUT"
+            echo "smoke=docker/smoke-phone.Dockerfile" >> "$GITHUB_OUTPUT"
+          else
+            echo "bin=ringo-flow"   >> "$GITHUB_OUTPUT"
+            echo "prefix=ringo-flow" >> "$GITHUB_OUTPUT"
+            echo "smoke=docker/smoke-flow.Dockerfile" >> "$GITHUB_OUTPUT"
+          fi
+
+      # macOS builds on the host (cross within macOS via --target); Linux builds
+      # in a container that bakes in its own toolchain.
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'macOS'
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'macOS'
+        with:
+          key: ${{ matrix.target }}
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install cmake pkg-config spandsp opus
+
+      # Linux (x86_64 + aarch64): native build inside the bullseye container on
+      # the matching-arch runner. docker pulls the host-arch base, so the binary
+      # is native for that arch — no cross-compile, no multiarch apt.
+      - name: Build (Linux container)
+        if: runner.os == 'Linux'
+        run: |
+          docker build -t ringo-builder -f docker/builder.Dockerfile .
+          docker run --rm -v "$PWD:/work" \
+            -e HOST_UID=$(id -u) -e HOST_GID=$(id -g) \
+            ringo-builder sh -c \
+            'CARGO_TARGET_DIR=/work/target-linux cargo build --release -p ${{ inputs.package }} && chown -R $HOST_UID:$HOST_GID /work/target-linux'
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: cargo build --release --target ${{ matrix.target }} -p ${{ inputs.package }}
+
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cp target-linux/release/${{ steps.vars.outputs.bin }} ${{ steps.vars.outputs.bin }}
+          docker build -f ${{ steps.vars.outputs.smoke }} .
+
+      - name: Smoke test (macOS)
+        if: runner.os == 'macOS'
+        run: target/${{ matrix.target }}/release/${{ steps.vars.outputs.bin }} --help
+
+      - name: Package
+        if: inputs.upload
+        run: |
+          version="${{ inputs.tag }}"
+          version="${version#${{ inputs.package }}-v}"
+          target="${{ matrix.target }}"
+          dir="${{ steps.vars.outputs.prefix }}-${version}-${target}"
+          mkdir -p "$dir"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            cp "target-linux/release/${{ steps.vars.outputs.bin }}" "$dir/"
+          else
+            cp "target/${target}/release/${{ steps.vars.outputs.bin }}" "$dir/"
+          fi
+          tar czf "${dir}.tar.gz" "$dir"
+
+      - name: Attach to release
+        if: inputs.upload
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: ${{ steps.vars.outputs.prefix }}-*.tar.gz

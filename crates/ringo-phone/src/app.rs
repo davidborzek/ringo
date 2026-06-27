@@ -6,6 +6,7 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{fs, io};
 
+use crate::backend::Backend;
 use crate::profile;
 
 pub fn run(name: Option<String>, notify: bool, headless: bool) -> Result<()> {
@@ -27,7 +28,10 @@ pub fn run(name: Option<String>, notify: bool, headless: bool) -> Result<()> {
 }
 
 fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
-    crate::log::init(name);
+    // Backend log goes to the XDG state dir (e.g. ~/.local/state/ringo/<name>.log),
+    // not /tmp. init_file creates the dir; a bad path just leaves logging silent.
+    let log_path = profile::state_dir()?.join(format!("{name}.log"));
+    crate::log::init_file(&log_path);
 
     let dir = profile::profile_dir(name)?;
     if !dir.join("profile.toml").exists() {
@@ -38,11 +42,15 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     let config = crate::config::load();
 
     let account = account_from(&prof);
-    let options = baresip_options(&config.baresip);
-    let instance = crate::baresip::Instance::spawn(name, &account, &options)?;
+    let options = backend_options(&config.baresip);
 
-    // The control socket is bound and registered inside the session setup,
-    // *after* the socket is connectable — see `tui::setup`.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    let session =
+        crate::backend::BaresipBackend.spawn_session(rt.handle(), name, &account, &options)?;
+
     let control_socket = crate::control::socket_path(name)?;
 
     let contacts = crate::contacts::load();
@@ -59,9 +67,9 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     let params = crate::tui::SessionParams {
         profile_name: name.to_string(),
         account_aor: prof.aor(),
-        port: instance.port,
+        log_path,
+        session,
         control_socket,
-        baresip_log_path: Some(instance.log_path.clone()),
         call_history_path: Some(dir.join("call_history")),
         notify: notify && prof.notify,
         regint: prof.regint,
@@ -73,16 +81,16 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     };
 
     if headless {
-        crate::tui::run_headless(params)?;
+        crate::tui::run_headless(rt, params)?;
         Ok(None)
     } else {
-        crate::tui::run(params)
+        crate::tui::run(rt, params)
     }
 }
 
 /// Map a ringo profile to the backend-neutral account the engine registers.
-fn account_from(p: &profile::Profile) -> crate::baresip::Account {
-    crate::baresip::Account {
+fn account_from(p: &profile::Profile) -> crate::account::Account {
+    crate::account::Account {
         username: p.username.clone(),
         domain: p.domain.clone(),
         password: p.password.clone(),
@@ -99,8 +107,8 @@ fn account_from(p: &profile::Profile) -> crate::baresip::Account {
 }
 
 /// Map ringo's `[baresip]` config section to the engine's backend options.
-fn baresip_options(c: &crate::config::BaresipConfig) -> crate::baresip::BaresipOptions {
-    crate::baresip::BaresipOptions {
+fn backend_options(c: &crate::config::BaresipConfig) -> crate::account::BackendOptions {
+    crate::account::BackendOptions {
         module_path: c.module_path.clone(),
         audio_driver: c.audio_driver.clone(),
         audio_player_device: c.audio_player_device.clone(),

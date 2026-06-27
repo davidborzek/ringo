@@ -1,0 +1,6 @@
+[submodule "vendor/re"]
+	path = vendor/re
+	url = https://github.com/baresip/re.git
+[submodule "vendor/baresip"]
+	path = vendor/baresip
+	url = https://github.com/baresip/baresip.git

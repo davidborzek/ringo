@@ -1,0 +1,7 @@
+#!/bin/sh
+# Fast pre-commit guard: formatting only, so it's near-instant and won't get
+# bypassed with --no-verify. CI runs clippy + the full test suite.
+#
+# Activate (once per clone): git config core.hooksPath .cargo-husky/hooks
+set -e
+cargo fmt --all --check

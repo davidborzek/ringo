@@ -19,71 +19,8 @@ use anyhow::Result;
 use crossterm::event::{self as ct_event, Event};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{io, path::PathBuf, sync::mpsc, time::Duration};
-use tokio::{net::TcpStream, sync::mpsc as tokio_mpsc};
 
-use crate::{client, phone::BaresipPhone};
-
-/// Connect to baresip's ctrl_tcp port (retrying within `connect_timeout`),
-/// then spawn reader/writer tasks and return. On connect timeout, sends
-/// `AppEvent::BaresipConnectFailed` and returns without spawning.
-async fn run_baresip_io(
-    port: u16,
-    connect_timeout: Duration,
-    baresip_log_path: Option<PathBuf>,
-    msg_tx: mpsc::Sender<AppEvent>,
-    mut cmd_rx: tokio_mpsc::Receiver<(String, String)>,
-) {
-    use tokio::time::{Instant, sleep};
-
-    let deadline = Instant::now() + connect_timeout;
-    let stream = loop {
-        match TcpStream::connect(("127.0.0.1", port)).await {
-            Ok(s) => break s,
-            Err(e) if Instant::now() >= deadline => {
-                let reason = match baresip_log_path.as_ref() {
-                    Some(p) => format!(
-                        "Could not connect on port {} ({}). See log: {}",
-                        port,
-                        e,
-                        p.display()
-                    ),
-                    None => format!("Could not connect on port {} ({})", port, e),
-                };
-                crate::rlog!(Error, "{}", reason);
-                let _ = msg_tx.send(AppEvent::BaresipConnectFailed { reason });
-                return;
-            }
-            Err(_) => sleep(Duration::from_millis(100)).await,
-        }
-    };
-
-    let (mut reader, mut writer) = stream.into_split();
-
-    tokio::spawn(async move {
-        loop {
-            match client::read_message(&mut reader).await {
-                Ok(msg) => {
-                    if msg_tx.send(AppEvent::from(msg)).is_err() {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    crate::rlog!(Error, "tcp reader: {}", e);
-                    break;
-                }
-            }
-        }
-    });
-
-    tokio::spawn(async move {
-        while let Some((cmd, params)) = cmd_rx.recv().await {
-            if let Err(e) = client::write_command(&mut writer, &cmd, &params).await {
-                crate::rlog!(Error, "tcp writer: {} (cmd={})", e, cmd);
-                break;
-            }
-        }
-    });
-}
+use ringo_core::backend::Session;
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
@@ -91,9 +28,10 @@ async fn run_baresip_io(
 pub struct SessionParams {
     pub profile_name: String,
     pub account_aor: String,
-    pub port: u16,
+    /// Backend log file path (for TUI display); the binary owns the location.
+    pub log_path: PathBuf,
+    pub session: Session,
     pub control_socket: PathBuf,
-    pub baresip_log_path: Option<PathBuf>,
     pub call_history_path: Option<PathBuf>,
     pub notify: bool,
     pub regint: Option<u32>,
@@ -104,35 +42,29 @@ pub struct SessionParams {
     pub contacts: Vec<crate::contacts::Contact>,
 }
 
-/// Build the tokio runtime, spawn the baresip I/O + control-socket tasks, and
-/// construct the [`App`] with registration + static headers already issued.
-/// Shared by the TUI and headless entry points.
-fn setup(
-    p: SessionParams,
-) -> Result<(
+/// The pieces `setup()` returns: the runtime, the assembled [`App`], the
+/// backend event stream, the remote-control request channel, an optional
+/// session registration, and the opaque backend handle (drop ends the session).
+type SetupParts = (
     tokio::runtime::Runtime,
     App,
     mpsc::Receiver<AppEvent>,
     mpsc::Receiver<crate::control::RemoteRequest>,
     Option<crate::control::Registration>,
-)> {
-    let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
-    let (cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(32);
+    Box<dyn Send>,
+);
+
+/// Build the tokio runtime, spawn the control-socket task, and construct the
+/// [`App`] with registration + static headers already issued. The backend
+/// I/O tasks are already running (spawned by `Backend::spawn_session`).
+/// Shared by the TUI and headless entry points.
+fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
     let (remote_tx, remote_rx) = mpsc::channel::<crate::control::RemoteRequest>();
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-
-    let phone = BaresipPhone::new(cmd_tx);
-
-    rt.spawn(run_baresip_io(
-        p.port,
-        Duration::from_secs(10),
-        p.baresip_log_path.clone(),
-        msg_tx,
-        cmd_rx,
-    ));
+    let log_path = Some(p.log_path.clone());
+    let msg_rx = p.session.events;
+    let phone = p.session.phone;
+    let backend_handle = p.session.handle;
 
     // Bind the per-session control socket synchronously (within the runtime),
     // then register — so the registry entry never advertises a socket that
@@ -162,10 +94,10 @@ fn setup(
     let app = App::new(
         p.profile_name,
         p.account_aor,
-        p.baresip_log_path,
+        log_path,
         p.call_history_path,
         p.notify,
-        Box::new(phone),
+        phone,
         p.theme,
         p.hooks,
         p.profile,
@@ -187,11 +119,11 @@ fn setup(
         }
     }
 
-    Ok((rt, app, msg_rx, remote_rx, control))
+    Ok((rt, app, msg_rx, remote_rx, control, backend_handle))
 }
 
-pub fn run(params: SessionParams) -> Result<Option<String>> {
-    let (rt, mut app, msg_rx, remote_rx, _control) = setup(params)?;
+pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<String>> {
+    let (rt, mut app, msg_rx, remote_rx, _control, _backend) = setup(rt, params)?;
 
     // Set up terminal
     crossterm::terminal::enable_raw_mode()?;
@@ -251,6 +183,15 @@ pub fn run(params: SessionParams) -> Result<Option<String>> {
         crossterm::terminal::LeaveAlternateScreen
     );
 
+    // Tear down the session (fires ua_unregister) and wait for the PBX to
+    // process the de-register before the caller stops the RE thread — otherwise
+    // we leave a stale contact. Bounded so an unresponsive PBX can't hang exit.
+    drop(_backend);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    while ringo_core::is_registered() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+
     // Drop runtime without waiting for blocked TCP tasks
     rt.shutdown_background();
 
@@ -259,24 +200,23 @@ pub fn run(params: SessionParams) -> Result<Option<String>> {
     }
 
     if app.switch_to {
-        match crate::app::pick_profile(Some(&app.profile_name)) {
-            Ok(name) => return Ok(Some(name)),
-            Err(_) => {}
+        if let Ok(name) = crate::app::pick_profile(Some(&app.profile_name)) {
+            return Ok(Some(name));
         }
     }
 
     Ok(None)
 }
 
-/// Run a session without a TUI: process baresip events and remote-control
+/// Run a session without a TUI: process events and remote-control
 /// commands until a remote `shutdown` (sets `app.quit`) or Ctrl-C. Intended for
 /// automated/headless telephony testing driven via `ringo control`.
-pub fn run_headless(params: SessionParams) -> Result<()> {
+pub fn run_headless(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let profile_name = params.profile_name.clone();
-    let (rt, mut app, msg_rx, remote_rx, _control) = setup(params)?;
+    let (rt, mut app, msg_rx, remote_rx, _control, _backend) = setup(rt, params)?;
 
     let stop = Arc::new(AtomicBool::new(false));
     let stop_signal = stop.clone();
@@ -304,18 +244,19 @@ pub fn run_headless(params: SessionParams) -> Result<()> {
             };
             let _ = req.reply.send(resp);
         }
-        // `app.quit` is set by the remote `shutdown` command.
         if app.quit || stop.load(Ordering::SeqCst) {
             break;
         }
         std::thread::sleep(Duration::from_millis(40));
     }
 
-    // Hang up active calls, then give the I/O tasks a brief moment to flush —
-    // the BYE to baresip and the `shutdown` ack back to the client — before the
-    // runtime is torn down.
     app.phone.hangup_all();
-    std::thread::sleep(Duration::from_millis(150));
+    // Poll until baresip has torn down the calls (BYE sent) instead of a blind
+    // sleep; cap the wait so a stuck call can't hang shutdown forever.
+    let deadline = std::time::Instant::now() + Duration::from_millis(500);
+    while ringo_core::call_count() > 0 && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
     rt.shutdown_background();
     println!("ringo headless: stopped");
     Ok(())
@@ -373,7 +314,7 @@ fn render_loop(
     use std::time::Duration;
     loop {
         app.tick = app.tick.wrapping_add(1);
-        // Refresh baresip log every ~500ms (30 ticks × 16ms) when visible
+        // Refresh backend log every ~500ms (30 ticks × 16ms) when visible
         if app.log.show_baresip && app.tick % 30 == 0 {
             app.refresh_baresip_log();
         }
@@ -408,53 +349,4 @@ fn render_loop(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Pick an OS-assigned ephemeral port and immediately drop the listener,
-    /// so connect attempts will fail with "connection refused".
-    fn unbound_port() -> u16 {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        port
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn connect_failure_emits_baresip_connect_failed() {
-        let (msg_tx, msg_rx) = mpsc::channel::<AppEvent>();
-        let (_cmd_tx, cmd_rx) = tokio_mpsc::channel::<(String, String)>(1);
-        let port = unbound_port();
-        let log_path = PathBuf::from("/tmp/ringo-test/baresip.log");
-
-        run_baresip_io(
-            port,
-            Duration::from_millis(150),
-            Some(log_path.clone()),
-            msg_tx,
-            cmd_rx,
-        )
-        .await;
-
-        let event = msg_rx.try_recv().expect("expected an AppEvent");
-        match event {
-            AppEvent::BaresipConnectFailed { reason } => {
-                assert!(
-                    reason.contains(&format!("port {}", port)),
-                    "reason: {reason}"
-                );
-                assert!(reason.contains("See log:"), "reason: {reason}");
-                assert!(
-                    reason.contains(log_path.to_str().unwrap()),
-                    "reason: {reason}"
-                );
-                println!("UI will see: {reason}");
-            }
-            other => panic!("expected BaresipConnectFailed, got {other:?}"),
-        }
-        assert!(msg_rx.try_recv().is_err(), "no further events expected");
-    }
 }

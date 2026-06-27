@@ -1,9 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ringo::client::BaresipMessage;
 use ringo::config::Theme;
-use ringo::phone::BaresipPhone;
+use ringo::phone::MockPhone;
 use ringo::tui::{App, AppEvent, CallDirection, CallState, RegStatus, TransferMode};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -15,7 +14,7 @@ fn test_app() -> (App, tokio::sync::mpsc::Receiver<(String, String)>) {
         None,
         None,
         false,
-        Box::new(BaresipPhone::new(cmd_tx)),
+        Box::new(MockPhone::new(cmd_tx)),
         Theme::default(),
         Vec::new(),
         ringo::profile::Profile::default(),
@@ -23,16 +22,6 @@ fn test_app() -> (App, tokio::sync::mpsc::Receiver<(String, String)>) {
         Vec::new(),
     );
     (app, cmd_rx)
-}
-
-/// Build an AppEvent from a raw baresip event (exercises the From conversion).
-fn evt(type_: &str, param: &str, extra: Value) -> AppEvent {
-    AppEvent::from(BaresipMessage::Event {
-        class: "call".into(),
-        type_: type_.into(),
-        param: param.into(),
-        extra: extra.as_object().cloned().unwrap_or_default(),
-    })
 }
 
 fn key(c: char) -> KeyEvent {
@@ -60,11 +49,9 @@ fn esc() -> KeyEvent {
 #[test]
 fn register_ok_sets_status_and_aor() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "REGISTER_OK",
-        "",
-        json!({"accountaor": "sip:user@example.com"}),
-    ));
+    app.handle_message(AppEvent::RegisterOk {
+        account: "sip:user@example.com".into(),
+    });
     assert_eq!(app.reg_status, RegStatus::Ok);
     assert_eq!(app.account_aor, "sip:user@example.com");
 }
@@ -72,7 +59,9 @@ fn register_ok_sets_status_and_aor() {
 #[test]
 fn register_fail_sets_failed_status() {
     let (mut app, _) = test_app();
-    app.handle_message(evt("REGISTER_FAIL", "401 Unauthorized", json!({})));
+    app.handle_message(AppEvent::RegisterFailed {
+        reason: "401 Unauthorized".into(),
+    });
     assert!(matches!(app.reg_status, RegStatus::Failed(_)));
 }
 
@@ -91,11 +80,11 @@ fn register_ok_event_updates_status() {
 #[test]
 fn call_incoming_adds_ringing_call() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:alice@example.com"}),
-    ));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:alice@example.com".into(),
+        display_name: None,
+    });
     assert_eq!(app.calls.len(), 1);
     assert_eq!(app.calls[0].direction, CallDirection::Incoming);
     assert_eq!(app.calls[0].state, CallState::Ringing);
@@ -105,11 +94,10 @@ fn call_incoming_adds_ringing_call() {
 #[test]
 fn call_outgoing_adds_ringing_call() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_OUTGOING",
-        "",
-        json!({"id": "2", "peeruri": "sip:bob@example.com"}),
-    ));
+    app.handle_message(AppEvent::CallOutgoing {
+        call_id: "2".into(),
+        number: "sip:bob@example.com".into(),
+    });
     assert_eq!(app.calls.len(), 1);
     assert_eq!(app.calls[0].direction, CallDirection::Outgoing);
     assert_eq!(app.calls[0].state, CallState::Ringing);
@@ -118,34 +106,34 @@ fn call_outgoing_adds_ringing_call() {
 #[test]
 fn call_outgoing_during_attended_pending_selects_new_call() {
     let (mut app, _) = test_app();
-    // Establish first call
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
-    // Manually set AttendedPending (as if atransferstart was sent)
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
     app.transfer_mode = TransferMode::AttendedPending;
-    // New outgoing call arrives (Line B)
-    app.handle_message(evt(
-        "CALL_OUTGOING",
-        "",
-        json!({"id": "2", "peeruri": "sip:c@d"}),
-    ));
+    app.handle_message(AppEvent::CallOutgoing {
+        call_id: "2".into(),
+        number: "sip:c@d".into(),
+    });
     assert_eq!(app.calls.len(), 2);
-    assert_eq!(app.selected_call, 1); // auto-selected to new call
+    assert_eq!(app.selected_call, 1);
 }
 
 #[test]
 fn call_established_sets_state_and_started_at() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
     assert_eq!(app.calls[0].state, CallState::Established);
     assert!(app.calls[0].started_at.is_some());
 }
@@ -153,27 +141,36 @@ fn call_established_sets_state_and_started_at() {
 #[test]
 fn call_closed_removes_call() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
-    app.handle_message(evt("CALL_CLOSED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
+    app.handle_message(AppEvent::CallClosed {
+        call_id: "1".into(),
+        reason: "".into(),
+        error: false,
+    });
     assert_eq!(app.calls.len(), 0);
 }
 
 #[test]
 fn call_closed_missed_incoming_removes_call() {
     let (mut app, _) = test_app();
-    // Incoming but never established → missed
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
     assert_eq!(app.calls[0].started_at, None);
-    app.handle_message(evt("CALL_CLOSED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallClosed {
+        call_id: "1".into(),
+        reason: "".into(),
+        error: false,
+    });
     assert_eq!(app.calls.len(), 0);
 }
 
@@ -182,11 +179,10 @@ fn call_closed_missed_incoming_removes_call() {
 #[test]
 fn mwi_notify_messages_waiting_yes() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "MWI_NOTIFY",
-        "Messages-Waiting: yes\nVoice-Message: 3/10 (1/2)",
-        json!({}),
-    ));
+    app.handle_message(AppEvent::VoicemailStatus {
+        waiting: true,
+        new_count: 3,
+    });
     assert!(app.mwi.waiting);
     assert_eq!(app.mwi.new_messages, 3);
 }
@@ -196,11 +192,10 @@ fn mwi_notify_messages_waiting_no() {
     let (mut app, _) = test_app();
     app.mwi.waiting = true;
     app.mwi.new_messages = 5;
-    app.handle_message(evt(
-        "MWI_NOTIFY",
-        "Messages-Waiting: no\nVoice-Message: 0/10 (0/2)",
-        json!({}),
-    ));
+    app.handle_message(AppEvent::VoicemailStatus {
+        waiting: false,
+        new_count: 0,
+    });
     assert!(!app.mwi.waiting);
 }
 
@@ -217,12 +212,14 @@ fn t_without_active_call_is_noop_in_normal_mode() {
 #[test]
 fn t_with_active_call_enters_blind_input() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
     app.handle_key(key('t'));
     assert_eq!(app.transfer_mode, TransferMode::BlindInput(String::new()));
 }
@@ -230,12 +227,14 @@ fn t_with_active_call_enters_blind_input() {
 #[test]
 fn blind_input_char_appends_to_buffer() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
     app.handle_key(key('t'));
     app.handle_key(key('5'));
     assert_eq!(app.transfer_mode, TransferMode::BlindInput("5".into()));
@@ -244,12 +243,14 @@ fn blind_input_char_appends_to_buffer() {
 #[test]
 fn blind_input_backspace_clears_last_char() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
     app.handle_key(key('t'));
     app.handle_key(key('5'));
     app.handle_key(backspace());
@@ -259,12 +260,14 @@ fn blind_input_backspace_clears_last_char() {
 #[test]
 fn blind_input_esc_cancels_transfer() {
     let (mut app, _) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
     app.handle_key(key('t'));
     app.handle_key(esc());
     assert_eq!(app.transfer_mode, TransferMode::None);
@@ -273,12 +276,14 @@ fn blind_input_esc_cancels_transfer() {
 #[test]
 fn blind_input_enter_sends_transfer_command() {
     let (mut app, mut cmd_rx) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
     app.handle_key(key('t'));
     app.handle_key(key('1'));
     app.handle_key(key('2'));
@@ -293,12 +298,14 @@ fn blind_input_enter_sends_transfer_command() {
 #[test]
 fn attended_transfer_enter_sets_attended_pending() {
     let (mut app, mut cmd_rx) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
     app.handle_key(shift_key('T'));
     app.handle_key(key('4'));
     app.handle_key(key('2'));
@@ -329,17 +336,19 @@ fn attended_pending_esc_aborts_transfer() {
     assert_eq!(cmd, "atransferabort");
 }
 
-// ─── DTMF dispatch ──────────────────────────────────────────────────────────────
+// ─── DTMF dispatch ───────────────────────────────────────────────────────────
 
 #[test]
 fn dtmf_sends_sndcode_per_digit_during_call() {
     let (mut app, mut cmd_rx) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
 
     let res = app.dispatch("dtmf", "1 2#");
     assert!(res.is_ok(), "{res:?}");
@@ -360,12 +369,14 @@ fn dtmf_without_active_call_errors() {
 #[test]
 fn dtmf_rejects_invalid_digit() {
     let (mut app, _rx) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
     let err = app.dispatch("dtmf", "12x").unwrap_err();
     assert!(err.contains("Invalid DTMF"), "{err}");
 }
@@ -375,17 +386,17 @@ fn dtmf_rejects_invalid_digit() {
 #[test]
 fn status_returns_structured_json() {
     let (mut app, _rx) = test_app();
-    app.handle_message(evt(
-        "REGISTER_OK",
-        "",
-        json!({"accountaor": "sip:user@example.com"}),
-    ));
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::RegisterOk {
+        account: "sip:user@example.com".into(),
+    });
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
 
     let out = app.dispatch("status", "").unwrap();
     let v: Value = serde_json::from_str(&out).expect("status must be valid JSON");
@@ -402,13 +413,18 @@ fn status_returns_structured_json() {
 #[test]
 fn status_exposes_last_call_after_close() {
     let (mut app, _rx) = test_app();
-    app.handle_message(evt(
-        "CALL_OUTGOING",
-        "",
-        json!({"id": "1", "peeruri": "sip:bob@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
-    app.handle_message(evt("CALL_CLOSED", "486 Busy Here", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallOutgoing {
+        call_id: "1".into(),
+        number: "sip:bob@b".into(),
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
+    app.handle_message(AppEvent::CallClosed {
+        call_id: "1".into(),
+        reason: "486 Busy Here".into(),
+        error: true,
+    });
 
     let v: Value = serde_json::from_str(&app.dispatch("status", "").unwrap()).unwrap();
     assert_eq!(v["calls"].as_array().unwrap().len(), 0);
@@ -423,12 +439,14 @@ fn status_exposes_last_call_after_close() {
 #[test]
 fn shutdown_hangs_up_and_sets_quit() {
     let (mut app, mut cmd_rx) = test_app();
-    app.handle_message(evt(
-        "CALL_INCOMING",
-        "",
-        json!({"id": "1", "peeruri": "sip:a@b"}),
-    ));
-    app.handle_message(evt("CALL_ESTABLISHED", "", json!({"id": "1"})));
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: "1".into(),
+        number: "sip:a@b".into(),
+        display_name: None,
+    });
+    app.handle_message(AppEvent::CallEstablished {
+        call_id: "1".into(),
+    });
 
     assert!(app.dispatch("shutdown", "").is_ok());
     assert!(app.quit);

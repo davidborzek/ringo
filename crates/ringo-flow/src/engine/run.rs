@@ -6,6 +6,7 @@
 
 use super::ctx::Ctx;
 use crate::runtime::Output;
+use crate::runtime::audio;
 use crate::runtime::report::{Event, Human, Json, Level, Reporter};
 use crate::runtime::session::AgentSession;
 use anyhow::{Result, anyhow};
@@ -137,13 +138,14 @@ where
     };
 
     let ctx = Arc::new(Ctx::new(rt.handle().clone(), reporter, default_timeout));
+    ctx.set_save_audio(output.save_audio);
     if output.insecure_http {
         ctx.set_http_insecure(true);
         eprintln!(
             "⚠ ringo-flow: TLS certificate verification is DISABLED for http(...) (--insecure-http)"
         );
     }
-    let (logs, save_audio) = (output.logs, output.save_audio);
+    let save_audio = output.save_audio;
     let multi = programs.len() > 1;
 
     // NOT `?` on the join — cleanup must run even if a script panics, so baresip
@@ -151,10 +153,8 @@ where
     // the blocking thread because verbs `block_on`.
     let c = ctx.clone();
     let join = rt.block_on(async move {
-        tokio::task::spawn_blocking(move || {
-            run_files(programs, &c, &selector, logs, save_audio, multi)
-        })
-        .await
+        tokio::task::spawn_blocking(move || run_files(programs, &c, &selector, save_audio, multi))
+            .await
     });
 
     let agg = match join {
@@ -191,6 +191,11 @@ where
             skipped_scenarios: agg.skipped_scenarios,
         });
     }
+
+    // Shut down the tokio runtime explicitly with a timeout — background tasks
+    // (event reader, header poll) may still be running and would block the
+    // runtime drop indefinitely.
+    rt.shutdown_timeout(Duration::from_millis(500));
 
     if agg.passed_files == agg.files {
         Ok(())
@@ -237,7 +242,6 @@ fn run_files<H, F>(
     programs: Vec<(String, F)>,
     ctx: &Arc<Ctx>,
     selector: &Selector,
-    logs: bool,
     save_audio: bool,
     multi: bool,
 ) -> Aggregate
@@ -273,7 +277,7 @@ where
                 if multi {
                     ctx.emit(&Event::FileStarted { path: &label });
                 }
-                dump_artifacts(ctx, logs, save_audio);
+                dump_artifacts(ctx, save_audio);
                 ctx.reset_sessions();
                 let ok = r.is_ok();
                 ctx.emit(&Event::Finished {
@@ -318,15 +322,8 @@ where
         if multi {
             ctx.emit(&Event::FileStarted { path: &d.label });
         }
-        let (total, passed, skipped) = run_suite(
-            &mut d.host,
-            &d.scenarios,
-            ctx,
-            selector,
-            focus,
-            logs,
-            save_audio,
-        );
+        let (total, passed, skipped) =
+            run_suite(&mut d.host, &d.scenarios, ctx, selector, focus, save_audio);
         ctx.reset_sessions(); // isolate the next file (fresh agents)
         ctx.emit(&Event::SuiteFinished {
             total,
@@ -371,7 +368,6 @@ fn run_suite<H: ScriptHost>(
     ctx: &Arc<Ctx>,
     selector: &Selector,
     focus: bool,
-    logs: bool,
     save_audio: bool,
 ) -> (usize, usize, usize) {
     let (mut total, mut passed, mut skipped) = (0, 0, 0);
@@ -392,7 +388,7 @@ fn run_suite<H: ScriptHost>(
         }
         ctx.emit(&Event::ScenarioStarted { name: &info.name });
         let result = host.run_scenario(&info.name);
-        dump_artifacts(ctx, logs, save_audio); // before reset drops this scenario's sessions
+        dump_artifacts(ctx, save_audio); // before reset drops this scenario's sessions
         ctx.reset_sessions(); // isolation: fresh agents for the next scenario
         match result {
             ScenarioResult::Passed => {
@@ -420,19 +416,14 @@ fn run_suite<H: ScriptHost>(
     (total, passed, skipped)
 }
 
-/// Dump `--logs` / `--save-audio` for the currently-live sessions. Called while
+/// Save `--save-audio` recordings for the currently-live sessions. Called while
 /// they still exist (per scenario in suite mode; before teardown in single mode).
-fn dump_artifacts(ctx: &Arc<Ctx>, logs: bool, save_audio: bool) {
-    if !logs && !save_audio {
+fn dump_artifacts(ctx: &Arc<Ctx>, save_audio: bool) {
+    if !save_audio {
         return;
     }
     let sessions = ctx.sessions.lock().unwrap_or_else(|e| e.into_inner());
-    if logs {
-        dump_logs(&sessions);
-    }
-    if save_audio {
-        save_recordings(&sessions);
-    }
+    save_recordings(&sessions);
 }
 
 /// Tear all sessions down (hang up, let baresip flush BYEs, drop). Runs on the
@@ -449,57 +440,44 @@ fn teardown(ctx: &Arc<Ctx>, rt: &tokio::runtime::Runtime) {
     for s in &sessions {
         s.hangup_all();
     }
-    rt.block_on(async { tokio::time::sleep(Duration::from_millis(200)).await });
+    // Wait for all calls to hang up (BYE flush) before dropping sessions.
+    rt.block_on(async {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            if ringo_core::call_count() == 0 {
+                break;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    });
     drop(sessions);
 }
 
-/// Print each agent's baresip log (SIP signaling) to stderr (`--logs`).
-fn dump_logs(sessions: &HashMap<String, AgentSession>) {
-    let mut names: Vec<&String> = sessions.keys().collect();
-    names.sort();
-    for name in names {
-        eprintln!("\n── baresip log: {name} ──");
-        match std::fs::read_to_string(sessions[name].log_path()) {
-            Ok(content) => eprint!("{content}"),
-            Err(e) => eprintln!(
-                "(could not read {}: {e})",
-                sessions[name].log_path().display()
-            ),
-        }
-    }
-}
-
-/// Copy each agent's call recordings (sent `-enc` / received `-dec`) to the cwd,
-/// named with a shared run timestamp (`--save-audio`).
+/// Write each agent's in-process captured audio (sent + received) to the cwd as
+/// WAV, named with a shared run timestamp (`--save-audio`). The backend captures
+/// the audio in memory (no sndfile), so we serialise it ourselves.
 fn save_recordings(sessions: &HashMap<String, AgentSession>) {
     let run_ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let mut names: Vec<&String> = sessions.keys().collect();
     names.sort();
     for name in names {
-        let dir = sessions[name].recording_dir();
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-        let mut wavs: Vec<std::path::PathBuf> = entries
-            .filter_map(std::result::Result::ok)
-            .map(|e| e.path())
-            .filter(|p| {
-                p.file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.starts_with("dump-") && n.ends_with(".wav"))
-            })
-            .collect();
-        wavs.sort();
-        for src in wavs {
-            let dir_tag = if src.to_string_lossy().ends_with("-enc.wav") {
-                "sent"
-            } else {
-                "recv"
+        let session = &sessions[name];
+        for (tag, audio) in [
+            ("sent", session.sent_audio()),
+            ("recv", session.received_audio()),
+        ] {
+            let Some((samples, srate)) = audio else {
+                continue;
             };
-            let dst =
-                std::path::PathBuf::from(format!("ringo-audio-{run_ts}-{name}-{dir_tag}.wav"));
-            match std::fs::copy(&src, &dst) {
-                Ok(_) => eprintln!("saved recording: {} ({name} {dir_tag})", dst.display()),
+            if samples.is_empty() {
+                continue;
+            }
+            let dst = std::path::PathBuf::from(format!("ringo-audio-{run_ts}-{name}-{tag}.wav"));
+            match audio::write_wav(&dst, &samples, srate) {
+                Ok(()) => eprintln!("saved recording: {} ({name} {tag})", dst.display()),
                 Err(e) => eprintln!("(could not save {}: {e})", dst.display()),
             }
         }

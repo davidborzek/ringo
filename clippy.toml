@@ -1,0 +1,6 @@
+# Clippy thresholds tuned for the FFI backend. baresip/libre interop produces
+# inherently wide function signatures and complex global-registry types
+# (OnceLock<Mutex<HashMap<…>>>). Raise the thresholds rather than scattering
+# #[allow] attributes; genuine code smells are still fixed in the source.
+too-many-arguments-threshold = 12
+type-complexity-threshold = 350

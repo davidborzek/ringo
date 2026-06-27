@@ -1,12 +1,16 @@
 [package]
 name = "ringo-core"
-description = "Shared baresip backend, ctrl_tcp protocol and call engine for the ringo tools"
+description = "Shared baresip FFI backend and call engine for the ringo tools"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 rust-version.workspace = true
+
+# Expose build metadata (cargo:baresip_lib, cargo:re_lib) to downstream
+# build scripts via DEP_RINGO_CORE_BARESIP_LIB / DEP_RINGO_CORE_RE_LIB.
+links = "ringo_core"
 
 [lib]
 name = "ringo_core"
@@ -16,5 +20,26 @@ path = "src/lib.rs"
 anyhow = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-tera = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+# FFI backend (baresip C library)
+libc = "0.2"
+
+# Vendored OpenSSL — baresip/libre need OpenSSL for TLS/SRTP/DTLS-SRTP.
+# The `vendored` feature builds OpenSSL from source and links statically,
+# so the binary has no DT_NEEDED on libssl.so — runs on any glibc.
+openssl-sys = { version = "0.9", features = ["vendored"] }
+
+[features]
+# Audio driver modules to link statically into the binary.
+# `default-audio` enables platform auto-detect: pulse on Linux (via pkg-config),
+# coreaudio on macOS (system framework, always available). Without it and without
+# explicit audio features, the build is headless and uses aubridge only.
+default-audio = []
+pulse = []
+alsa = []
+coreaudio = []
+
+[build-dependencies]
+pkg-config = "0.3"
+bindgen = "0.72"

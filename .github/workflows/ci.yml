@@ -6,13 +6,65 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  # cargo-husky's build script installs git hooks for local developers on the
+  # first dev build. CI never commits, so there's nothing to install — skip it
+  # (cargo-husky's recommended CI setting).
+  CARGO_HUSKY_DONT_INSTALL_HOOKS: "true"
+
 jobs:
-  test:
-    name: Test
+  fmt:
+    name: Format
     runs-on: ubuntu-latest
+    # Formatting only parses the workspace crates — no vendored submodules, no
+    # build deps, no cache. Runs in parallel and fails fast, independent of the
+    # heavy build/test jobs.
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+        with:
+          components: rustfmt
       - run: cargo fmt --all --check
+
+  test:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake clang libclang-dev llvm-dev pkg-config perl \
+            libspandsp-dev libopus-dev libpulse-dev
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # `--workspace` unifies features so ringo-core is always built with
+      # default-audio (pulse). Build ringo-flow in isolation too, to exercise
+      # the real headless (aubridge-only) link path that Docker/release ship.
+      - run: cargo build -p ringo-flow
+
+  # Unit tests are platform-independent logic (no live FFI/audio), so they run
+  # once on Linux above. The remaining platforms only need build/link + a
+  # runtime smoke test — which the release binary build covers. We reuse the
+  # exact release workflow (upload=false) so a cross-compile/link/runtime-dep
+  # regression is caught on the PR, not after merging the Release PR. aarch64 is
+  # cross-compiled here, matching the shipped artifact.
+  build-phone:
+    name: Build (ringo-phone)
+    uses: ./.github/workflows/build-binaries.yml
+    with:
+      package: ringo-phone
+      upload: false
+
+  build-flow:
+    name: Build (ringo-flow)
+    uses: ./.github/workflows/build-binaries.yml
+    with:
+      package: ringo-flow
+      upload: false

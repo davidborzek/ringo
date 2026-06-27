@@ -32,5 +32,14 @@ tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 uuid = { version = "1", features = ["v4"] }
 
+[build-dependencies]
+
+[features]
+default = ["default-audio"]
+default-audio = ["ringo-core/default-audio"]
+pulse = ["ringo-core/pulse"]
+alsa = ["ringo-core/alsa"]
+coreaudio = ["ringo-core/coreaudio"]
+
 [dev-dependencies]
 cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }

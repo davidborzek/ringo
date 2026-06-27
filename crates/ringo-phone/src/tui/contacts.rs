@@ -425,7 +425,7 @@ fn render_contact_form(f: &mut Frame, app: &super::app::App, area: Rect) {
     let form = &app.contacts_state.form;
 
     let popup_h: u16 = 7;
-    let popup_w = area.width.saturating_sub(4).min(60).max(30);
+    let popup_w = area.width.saturating_sub(4).clamp(30, 60);
     let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_h)) / 2;
     let popup_area = Rect {

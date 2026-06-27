@@ -13,8 +13,8 @@ ringo-flow run scenarios/ --json
 ```
 
 Other handy flags: `-q` (only failures + result), `-v` (show every assertion),
-`--logs` (print each agent's SIP signaling at the end), `--save-audio` (dump
-sent/received WAVs), `--no-color`.
+`--log` (write the SIP signaling to stderr, or `--log <file>`), `--save-audio`
+(dump sent/received WAVs), `--no-color`.
 
 ## Credentials and environment
 

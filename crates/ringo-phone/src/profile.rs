@@ -89,6 +89,22 @@ pub fn dirs_base() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config").join("ringo"))
 }
 
+/// XDG state dir for ringo (`$XDG_STATE_HOME/ringo`, fallback `~/.local/state/ringo`)
+/// — the proper place for the backend log (not /tmp).
+pub fn state_dir() -> Result<PathBuf> {
+    let base = match std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+    {
+        Some(p) => p,
+        None => {
+            let home = std::env::var("HOME").context("HOME not set")?;
+            PathBuf::from(home).join(".local").join("state")
+        }
+    };
+    Ok(base.join("ringo"))
+}
+
 pub fn profile_dir(name: &str) -> Result<PathBuf> {
     Ok(profiles_dir()?.join(name))
 }
