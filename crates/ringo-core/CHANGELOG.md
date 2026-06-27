@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.10.1...ringo-core-v0.11.0) - 2026-06-27
+
+### Bug Fixes
+
+- *(ringo-core)* quote outbound URI in generated account line ([#30](https://github.com/davidborzek/ringo/pull/30))
+
+### Documentation
+
+- GitHub Pages site (ringo-phone + ringo-flow) ([#31](https://github.com/davidborzek/ringo/pull/31))
+
+### Features
+
+- call deflection via SIP 302 ([#34](https://github.com/davidborzek/ringo/pull/34))
+- replace process-based baresip backend with FFI backend ([#33](https://github.com/davidborzek/ringo/pull/33))
+
 ## [0.10.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.9.0...ringo-core-v0.10.0) - 2026-06-22
 
 ### Features
