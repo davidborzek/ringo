@@ -9,23 +9,27 @@ on:
   workflow_call:
     inputs:
       phone_tag:
-        description: "ringo-phone tag (vX.Y.Z)"
+        description: "ringo-phone tag (ringo-phone-vX.Y.Z); empty if not released"
         type: string
-        required: true
+        required: false
+        default: ""
       flow_tag:
-        description: "ringo-flow tag (ringo-flow-vX.Y.Z)"
+        description: "ringo-flow tag (ringo-flow-vX.Y.Z); empty if not released"
         type: string
-        required: true
+        required: false
+        default: ""
   workflow_dispatch:
     inputs:
       phone_tag:
-        description: "ringo-phone tag (vX.Y.Z)"
+        description: "ringo-phone tag (ringo-phone-vX.Y.Z); empty if not released"
         type: string
-        required: true
+        required: false
+        default: ""
       flow_tag:
-        description: "ringo-flow tag (ringo-flow-vX.Y.Z)"
+        description: "ringo-flow tag (ringo-flow-vX.Y.Z); empty if not released"
         type: string
-        required: true
+        required: false
+        default: ""
 
 jobs:
   update:
@@ -60,11 +64,22 @@ jobs:
           rel="https://github.com/${REPO}/releases/download"
           git clone "https://x-access-token:${TAP_TOKEN}@github.com/${OWNER}/homebrew-tap.git" tap
           mkdir -p tap/Formula
-          render .github/homebrew/ringo.rb      "${rel}/${PHONE_TAG}" ringo      "$PHONE_TAG" "${PHONE_TAG#v}"            tap/Formula/ringo.rb
-          render .github/homebrew/ringo-flow.rb "${rel}/${FLOW_TAG}"  ringo-flow "$FLOW_TAG"  "${FLOW_TAG#ringo-flow-v}" tap/Formula/ringo-flow.rb
+          # Render only the formula for a crate that was actually released — with
+          # independent versioning a run may carry just one of the two tags.
+          msg=""
+          if [ -n "$PHONE_TAG" ]; then
+            ver="${PHONE_TAG#ringo-phone-v}"
+            render .github/homebrew/ringo.rb "${rel}/${PHONE_TAG}" ringo "$PHONE_TAG" "$ver" tap/Formula/ringo.rb
+            msg="ringo $ver"
+          fi
+          if [ -n "$FLOW_TAG" ]; then
+            ver="${FLOW_TAG#ringo-flow-v}"
+            render .github/homebrew/ringo-flow.rb "${rel}/${FLOW_TAG}" ringo-flow "$FLOW_TAG" "$ver" tap/Formula/ringo-flow.rb
+            msg="${msg:+$msg, }ringo-flow $ver"
+          fi
           cd tap
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add Formula
-          git commit -m "ringo ${PHONE_TAG#v}, ringo-flow ${FLOW_TAG#ringo-flow-v}" || { echo "no changes"; exit 0; }
+          git commit -m "$msg" || { echo "no changes"; exit 0; }
           git push

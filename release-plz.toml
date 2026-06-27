@@ -18,17 +18,19 @@ commit_parsers = [
   { message = "^[Ss]tyle|^[Cc]hore|^[Cc]i", skip = true },
 ]
 
-# All three crates share one version via `version.workspace = true`, so release-plz
-# bumps the single workspace version and releases them together at the same number.
+# Each crate carries its own version, so release-plz bumps and releases only the
+# crates a change actually touches — a ringo-core bump propagates to its dependents,
+# but a ringo-phone-only change no longer drags ringo-flow along (and vice versa).
+# Tags are prefixed per crate (`<crate>-vX.Y.Z`) so they're unambiguous.
 [[package]]
 name = "ringo-core"
 # Internal support crate: publish + tag it, but no standalone GitHub release page.
 git_release_enable = false
+git_tag_name = "ringo-core-v{{ version }}"
 
 [[package]]
 name = "ringo-phone"
-# Keep the established `vX.Y.Z` tag for the app (its binaries attach to this release).
-git_tag_name = "v{{ version }}"
+git_tag_name = "ringo-phone-v{{ version }}"
 
 [[package]]
 name = "ringo-flow"

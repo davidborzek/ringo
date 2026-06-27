@@ -3,16 +3,16 @@ resolver = "2"
 members = ["crates/ringo-core", "crates/ringo-phone", "crates/ringo-flow"]
 
 # Shared metadata inherited by the member crates via `<field>.workspace = true`.
-# Bump `version` here once to release both crates in lockstep.
+# Each crate carries its own `version` (independent per-crate releasing via
+# release-plz); only these non-version fields are shared.
 [workspace.package]
-version = "0.10.1"
 edition = "2024"
 license = "MIT"
 authors = ["David Borzek <mail@davidborzek.de>"]
 repository = "https://github.com/davidborzek/ringo"
 rust-version = "1.85"
 
-# Keep the published dependency version in sync with the workspace version on
-# release (both live in this file).
+# `version` is the ringo-core release requirement; release-plz keeps it in sync
+# when ringo-core is bumped (dependents then get a matching release).
 [workspace.dependencies]
-ringo-core = { path = "crates/ringo-core", version = "0.10.1" }
+ringo-core = { path = "crates/ringo-core", version = "0.11.0" }
