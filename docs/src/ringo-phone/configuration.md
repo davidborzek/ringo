@@ -44,7 +44,7 @@ in `ringo.toml`:
 
 ```toml
 [baresip]
-audio_driver = "pipewire"                   # alsa | pulse | pipewire | coreaudio
+audio_driver = "pipewire"                   # an audio driver compiled into your build; auto-detected if unset
 audio_player_device = "default"
 audio_source_device = "default"
 audio_alert_device  = "default"
