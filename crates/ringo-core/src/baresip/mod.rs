@@ -185,7 +185,12 @@ impl Backend for BaresipBackend {
                     bail!("baresip_init() failed (rc={rc})");
                 }
 
-                let sw = CString::new("ringo").unwrap();
+                // SIP User-Agent string — the binary passes its own name+version
+                // (e.g. `ringo-phone/0.11.0`); falls back to this crate's own
+                // `ringo-core/<version>`.
+                const DEFAULT_UA: &str = concat!("ringo-core/", env!("CARGO_PKG_VERSION"));
+                let sw_str = options.user_agent.as_deref().unwrap_or(DEFAULT_UA);
+                let sw = CString::new(sw_str).unwrap_or_else(|_| CString::new(DEFAULT_UA).unwrap());
                 let rc = ua_init(sw.as_ptr(), true, true, true);
                 if rc != 0 {
                     bail!("ua_init() failed (rc={rc})");

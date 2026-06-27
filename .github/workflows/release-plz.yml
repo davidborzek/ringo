@@ -103,9 +103,13 @@ jobs:
 
   # Homebrew: render the formula templates with the release binaries' checksums
   # and push them to the tap. Runs after the binaries are attached.
+  # Runs if either crate was released; one of the binary jobs may be skipped (only
+  # the released crate builds), so guard with !cancelled() && !failure() rather than
+  # the default all-needs-succeeded. homebrew.yml renders only the formula(e) whose
+  # tag is non-empty.
   homebrew:
     needs: [release, phone-binaries, flow-binaries]
-    if: needs.release.outputs.phone_tag != ''
+    if: ${{ !cancelled() && !failure() && (needs.release.outputs.phone_tag != '' || needs.release.outputs.flow_tag != '') }}
     uses: ./.github/workflows/homebrew.yml
     secrets: inherit
     with:

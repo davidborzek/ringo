@@ -26,6 +26,7 @@ use ringo_core::account::BackendOptions;
 pub(crate) fn agent_options() -> BackendOptions {
     BackendOptions {
         audio_driver: Some("aubridge".into()),
+        user_agent: Some(concat!("ringo-flow/", env!("CARGO_PKG_VERSION")).into()),
         // A scenario drives hold/resume explicitly, so disable baresip's
         // auto-hold-other-calls (which would silently hold a call when another
         // arrives and skew assertions).

@@ -115,6 +115,7 @@ fn backend_options(c: &crate::config::BaresipConfig) -> crate::account::BackendO
         audio_alert_device: c.audio_alert_device.clone(),
         sip_cafile: c.sip_cafile.clone(),
         sip_capath: c.sip_capath.clone(),
+        user_agent: Some(concat!("ringo-phone/", env!("CARGO_PKG_VERSION")).into()),
         extra: c
             .extra
             .iter()
