@@ -4,13 +4,16 @@ name: docs
 # single mdBook (docs/) — a landing page plus one section per tool — mounted at
 # davidborzek.github.io/ringo/. Add a tool by dropping a docs/src/<tool>/ section
 # and listing it in docs/src/SUMMARY.md; no workflow change needed.
-
+#
+# Deploys on a release tag (built from that tag's tree), NOT on every main push —
+# so the live site always matches the latest *released* version, not unreleased
+# changes already merged to main. Use workflow_dispatch to redeploy manually
+# (e.g. a docs-only fix between releases).
 on:
   push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - ".github/workflows/docs.yml"
+    tags:
+      - "ringo-phone-v*"
+      - "ringo-flow-v*"
   workflow_dispatch:
 
 permissions:
