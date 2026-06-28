@@ -339,6 +339,9 @@ impl Phone for BaresipPhone {
     fn disarm_invite_response(&self) {
         super::events::disarm_invite_response(self.ua);
     }
+    fn media_stats(&self) -> Option<crate::event::MediaStats> {
+        super::stats::media_stats(self.ua)
+    }
 }
 
 /// Opaque handle — drop ends the backend session + cleanup.
@@ -364,6 +367,7 @@ impl Drop for BaresipSessionHandle {
         if let Some(key) = &self.audio_key {
             super::ausrc::remove_generator(key);
         }
+        super::stats::forget(ua);
         // ua_unregister sends REGISTER expires=0 via sipreg_unregister and
         // waits for the 200 OK. ua_stop_register would just mem_deref the
         // sipreg without sending anything — leaving stale contacts on the PBX.

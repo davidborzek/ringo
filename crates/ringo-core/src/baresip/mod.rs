@@ -22,6 +22,7 @@ mod phone;
 mod re_thread;
 mod siptrace;
 mod sounds;
+mod stats;
 
 use std::collections::HashMap;
 use std::ffi::CString;

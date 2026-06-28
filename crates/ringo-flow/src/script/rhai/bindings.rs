@@ -104,6 +104,44 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
     );
     reg!(
         engine,
+        "get$mos",
+        ["agent: Agent", "?"],
+        "/// Estimated MOS (1.0–4.5) of the active call, or the last call's value;\n\
+         /// `()` until the first RTCP report (~5s into a call).\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// await_until(|| assert(caller.mos).is_present(), \"10s\");\n\
+         /// assert(caller.mos).at_least(4.0);\n\
+         /// ```\n\
+         /// # Returns: float?",
+        Agent::mos
+    );
+    reg!(
+        engine,
+        "get$rtt",
+        ["agent: Agent", "?"],
+        "/// Round-trip time in milliseconds (RTCP), or `()` if not available yet.\n\
+         /// # Returns: float?",
+        Agent::rtt
+    );
+    reg!(
+        engine,
+        "get$jitter",
+        ["agent: Agent", "?"],
+        "/// Receive-side jitter in milliseconds (RTCP), or `()` if not available yet.\n\
+         /// # Returns: float?",
+        Agent::jitter
+    );
+    reg!(
+        engine,
+        "get$packet_loss",
+        ["agent: Agent", "?"],
+        "/// Receive-side packet loss in percent (RTCP), or `()` if not available yet.\n\
+         /// # Returns: float?",
+        Agent::packet_loss
+    );
+    reg!(
+        engine,
         "get$peer",
         ["agent: Agent", "Peer"],
         "/// The current call's remote party (the caller for an incoming call); read\n\

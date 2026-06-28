@@ -238,6 +238,28 @@ impl Ctx {
         mark_pending_label(format!("{name} header {header}"));
         self.with_session(name, |s| received_header_value(&s.state().borrow(), header))
     }
+
+    // ── RTP media stats (active call, or last call's snapshot) ──
+    /// Estimated MOS (1.0–4.5), or `None` if no stats yet.
+    pub fn mos(&self, name: &str) -> Result<Option<f64>, String> {
+        mark_pending_label(format!("{name} MOS"));
+        self.with_session(name, |s| s.media_stats().map(|m| m.mos))
+    }
+    /// Round-trip time in ms, or `None`.
+    pub fn rtt(&self, name: &str) -> Result<Option<f64>, String> {
+        mark_pending_label(format!("{name} RTT (ms)"));
+        self.with_session(name, |s| s.media_stats().map(|m| m.rtt_ms))
+    }
+    /// Receive-side jitter in ms, or `None`.
+    pub fn jitter(&self, name: &str) -> Result<Option<f64>, String> {
+        mark_pending_label(format!("{name} jitter (ms)"));
+        self.with_session(name, |s| s.media_stats().map(|m| m.jitter_ms))
+    }
+    /// Receive-side packet loss in percent, or `None`.
+    pub fn packet_loss(&self, name: &str) -> Result<Option<f64>, String> {
+        mark_pending_label(format!("{name} packet loss (%)"));
+        self.with_session(name, |s| s.media_stats().map(|m| m.packet_loss_pct))
+    }
     /// A one-shot snapshot of the agent's observable state (for `info()`/`to_json()`).
     /// Reads the session once and marks no pending label (so it can't mis-label a
     /// following assertion).

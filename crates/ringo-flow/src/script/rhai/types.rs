@@ -50,6 +50,30 @@ impl Agent {
             .map(convert::opt_to_dynamic)
             .map_err(|e| e.into())
     }
+    pub(super) fn mos(&mut self) -> Verb<Dynamic> {
+        self.ctx
+            .mos(&self.name)
+            .map(|o| o.map_or(Dynamic::UNIT, Dynamic::from))
+            .map_err(|e| e.into())
+    }
+    pub(super) fn rtt(&mut self) -> Verb<Dynamic> {
+        self.ctx
+            .rtt(&self.name)
+            .map(|o| o.map_or(Dynamic::UNIT, Dynamic::from))
+            .map_err(|e| e.into())
+    }
+    pub(super) fn jitter(&mut self) -> Verb<Dynamic> {
+        self.ctx
+            .jitter(&self.name)
+            .map(|o| o.map_or(Dynamic::UNIT, Dynamic::from))
+            .map_err(|e| e.into())
+    }
+    pub(super) fn packet_loss(&mut self) -> Verb<Dynamic> {
+        self.ctx
+            .packet_loss(&self.name)
+            .map(|o| o.map_or(Dynamic::UNIT, Dynamic::from))
+            .map_err(|e| e.into())
+    }
     /// The current call's remote party (the caller for an incoming call). Always
     /// returns a handle; its `.uri`/`.number`/`.name` fields are `()` when there's
     /// no call, and each field auto-labels itself (`caller.peer.number` →

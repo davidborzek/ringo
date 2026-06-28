@@ -705,8 +705,22 @@ fn get body(request: MockRequest) -> string;
 /// The HTTP response body as a string.
 fn get body(response: HttpResponse) -> string;
 
+/// Receive-side jitter in milliseconds (RTCP), or `()` if not available yet.
+/// # Returns: float?
+fn get jitter(agent: Agent) -> ?;
+
 /// The request method (upper-case).
 fn get method(request: MockRequest) -> string;
+
+/// Estimated MOS (1.0–4.5) of the active call, or the last call's value;
+/// `()` until the first RTCP report (~5s into a call).
+/// # Example
+/// ```rhai
+/// await_until(|| assert(caller.mos).is_present(), "10s");
+/// assert(caller.mos).at_least(4.0);
+/// ```
+/// # Returns: float?
+fn get mos(agent: Agent) -> ?;
 
 /// The remote party's display name, or `()` if absent.
 /// # Returns: string?
@@ -715,6 +729,10 @@ fn get name(peer: Peer) -> ?;
 /// The remote party's number (user-part of the URI), or `()`.
 /// # Returns: string?
 fn get number(peer: Peer) -> ?;
+
+/// Receive-side packet loss in percent (RTCP), or `()` if not available yet.
+/// # Returns: float?
+fn get packet_loss(agent: Agent) -> ?;
 
 /// The request path.
 fn get path(request: MockRequest) -> string;
@@ -732,6 +750,10 @@ fn get reason(agent: Agent) -> ?;
 
 /// Whether the agent's account is currently registered.
 fn get registered(agent: Agent) -> bool;
+
+/// Round-trip time in milliseconds (RTCP), or `()` if not available yet.
+/// # Returns: float?
+fn get rtt(agent: Agent) -> ?;
 
 /// The agent's current call phase: `Idle`, `Ringing` or `Established`.
 fn get state(agent: Agent) -> CallState;
