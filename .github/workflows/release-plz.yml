@@ -26,6 +26,10 @@ jobs:
           fetch-depth: 0
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        # The publish verify-build links the ringo-phone/ringo-flow binaries
+        # against opus + spandsp (dynamic, like the release binaries / Homebrew).
+        run: sudo apt-get update && sudo apt-get install -y libopus-dev libspandsp-dev libpulse-dev pkg-config
       - uses: MarcoIeni/release-plz-action@v0.5
         with:
           command: release-pr
@@ -47,6 +51,10 @@ jobs:
           fetch-depth: 0
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        # The publish verify-build links the ringo-phone/ringo-flow binaries
+        # against opus + spandsp (dynamic, like the release binaries / Homebrew).
+        run: sudo apt-get update && sudo apt-get install -y libopus-dev libspandsp-dev libpulse-dev pkg-config
       - name: Run release-plz
         id: release-plz
         uses: MarcoIeni/release-plz-action@v0.5
