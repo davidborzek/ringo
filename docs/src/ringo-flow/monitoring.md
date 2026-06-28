@@ -83,14 +83,15 @@ that one queue, so a manual trigger waits behind an in-flight run.
 |----------|--------|-------------|
 | `/metrics` | GET | Prometheus exposition (scrape this) |
 | `/monitors` | GET | The configured monitors as JSON |
-| `/run/{name}` | POST | Run a monitor now; waits and returns the result as JSON (200 on pass, 502 on fail, 404 if unknown) |
+| `/run/{name}` | POST | Run a monitor now; waits and returns the result (200 pass / 502 fail / 404 unknown). `?async=true` enqueues and returns **202** immediately without waiting (result lands in `/metrics`). |
 | `/healthz` | GET | Liveness — always `ok` |
 
-A run's result is grouped by the scenarios the file executed, each with its
-agents:
+A synchronous run's result is grouped by the scenarios the file executed, each
+with its agents:
 
 ```sh
-curl -X POST http://localhost:9090/run/smoke
+curl -X POST http://localhost:9090/run/smoke            # waits for the result
+curl -X POST "http://localhost:9090/run/smoke?async=true"  # 202, returns at once
 ```
 ```json
 {

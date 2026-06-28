@@ -7,11 +7,11 @@ use super::metrics::MetricsStore;
 use super::prometheus;
 use super::runner::RunOutcome;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot};
 
@@ -155,10 +155,46 @@ async fn monitors_handler(State(st): State<AppState>) -> Response {
     json_response(StatusCode::OK, &items)
 }
 
-async fn run_handler(State(st): State<AppState>, Path(name): Path<String>) -> Response {
+/// `POST /run/{name}` query: `?async=true` enqueues and returns immediately.
+#[derive(Deserialize)]
+struct RunParams {
+    #[serde(rename = "async", default)]
+    run_async: bool,
+}
+
+async fn run_handler(
+    State(st): State<AppState>,
+    Path(name): Path<String>,
+    Query(params): Query<RunParams>,
+) -> Response {
     if !st.config.monitors.iter().any(|m| m.name == name) {
         return (StatusCode::NOT_FOUND, format!("unknown monitor `{name}`\n")).into_response();
     }
+
+    // Async: enqueue and return 202 without waiting for the result (it lands in
+    // /metrics). Like a scheduled run, no reply channel.
+    if params.run_async {
+        let req = RunRequest {
+            monitor: name.clone(),
+            respond: None,
+        };
+        if st.queue.send(req).await.is_err() {
+            return (StatusCode::SERVICE_UNAVAILABLE, "server shutting down\n").into_response();
+        }
+        #[derive(Serialize)]
+        struct Queued<'a> {
+            monitor: &'a str,
+            queued: bool,
+        }
+        return json_response(
+            StatusCode::ACCEPTED,
+            &Queued {
+                monitor: &name,
+                queued: true,
+            },
+        );
+    }
+
     let (tx, rx) = oneshot::channel();
     let req = RunRequest {
         monitor: name,
