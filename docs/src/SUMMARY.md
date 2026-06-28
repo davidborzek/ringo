@@ -19,6 +19,7 @@
 - [Your first scenario](ringo-flow/your-first-scenario.md)
 - [Writing scenarios](ringo-flow/writing-scenarios.md)
 - [Audio testing](ringo-flow/audio.md)
+- [Call quality](ringo-flow/call-quality.md)
 - [Debugging](ringo-flow/debugging.md)
 - [HTTP & webhooks](ringo-flow/http-and-webhooks.md)
 - [Running in CI](ringo-flow/running-in-ci.md)
