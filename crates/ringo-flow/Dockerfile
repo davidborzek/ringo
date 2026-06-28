@@ -21,7 +21,16 @@ ENV LIBCLANG_PATH=/usr/lib/llvm-14/lib
 ENV CARGO_PROFILE_RELEASE_STRIP=true
 WORKDIR /src
 COPY . .
-RUN cargo build --release -p ringo-flow --bin ringo-flow
+# bookworm's gcc emits aarch64 outline-atomics (e.g. __aarch64_ldadd4_acq_rel)
+# into the static C deps (libre, OpenSSL), but rust links with -nodefaultlibs so
+# libgcc (which defines them) isn't pulled in — and link order makes a trailing
+# -lgcc ineffective. Build the C deps with -mno-outline-atomics so the symbols
+# are never emitted. CFLAGS is honoured by both cmake (libre/baresip) and
+# openssl-sys. arm64 only — amd64's gcc rejects the flag. TARGETARCH is set
+# automatically by buildx for the target platform.
+ARG TARGETARCH
+RUN if [ "$TARGETARCH" = "arm64" ]; then export CFLAGS="-mno-outline-atomics"; fi; \
+    cargo build --release -p ringo-flow --bin ringo-flow
 
 # ---- runtime: binary + runtime deps (no libssl — vendored) ----
 FROM debian:bookworm-slim
