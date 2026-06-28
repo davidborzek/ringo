@@ -22,6 +22,13 @@ pub trait Phone: Send {
     /// Applies to the active call.
     fn set_audio_source(&self, spec: &str);
 
+    /// RTP media stats (jitter/loss/RTT + estimated MOS) for the active call, or
+    /// the last finished call's snapshot. `None` if unavailable (no call yet, or
+    /// before the first RTCP report). Default: `None` (mocks).
+    fn media_stats(&self) -> Option<crate::event::MediaStats> {
+        None
+    }
+
     /// Arm a custom SIP response for the next inbound INVITE(s): answer with
     /// `scode`/`reason` and the extra `headers` (each a full header line like
     /// `Contact: <sip:…>`, no trailing CRLF) instead of accepting the call.

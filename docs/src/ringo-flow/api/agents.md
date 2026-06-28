@@ -374,6 +374,23 @@ caller.verify_audio_connection(callee);
 The current call's remote party (the caller for an incoming call); read
 `peer.uri` / `peer.number` / `peer.name` (each `()` if there's no call).
 
+<a id="quality"></a>
+
+### agent.quality
+
+**Receiver** [`Agent`](agents.md) · **Returns** `CallQuality`
+
+RTP media quality of the active call (or the last call's snapshot); read
+`quality.mos` / `.rtt` / `.jitter` / `.packet_loss` (each `()` until the
+first RTCP report, ~5s into a call).
+
+**Example**
+
+```rust
+await_until(|| assert(caller.quality.mos).is_present(), "10s");
+assert(caller.quality.mos).at_least(4.0);
+```
+
 <a id="reason"></a>
 
 ### agent.reason

@@ -9,6 +9,7 @@ use crate::runtime::report::{Event, Reporter};
 use crate::runtime::session::AgentSession;
 use crate::runtime::state::{CallPhase, received_header_value};
 use ringo_core::account::Account;
+use ringo_core::event::MediaStats;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -237,6 +238,13 @@ impl Ctx {
     pub fn header(&self, name: &str, header: &str) -> Result<Option<String>, String> {
         mark_pending_label(format!("{name} header {header}"));
         self.with_session(name, |s| received_header_value(&s.state().borrow(), header))
+    }
+
+    /// RTP media quality (jitter/loss/RTT + MOS) for the active call, or the
+    /// last finished call's snapshot. Field-level labels are set by the
+    /// `CallQuality` getters.
+    pub fn quality(&self, name: &str) -> Result<Option<MediaStats>, String> {
+        self.with_session(name, |s| s.media_stats())
     }
     /// A one-shot snapshot of the agent's observable state (for `info()`/`to_json()`).
     /// Reads the session once and marks no pending label (so it can't mis-label a

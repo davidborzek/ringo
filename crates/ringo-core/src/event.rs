@@ -4,6 +4,22 @@ use std::collections::HashMap;
 /// INVITE per Call-ID wins (the call-establishing one).
 pub type InviteHeaders = HashMap<String, Vec<(String, String)>>;
 
+/// RTP media quality for a call (backend-neutral). `mos` is an estimated Mean
+/// Opinion Score (1.0 = worst … 4.5 = best).
+#[derive(Debug, Clone, Copy)]
+pub struct MediaStats {
+    /// Round-trip time in milliseconds.
+    pub rtt_ms: f64,
+    /// Receive-side inter-arrival jitter in milliseconds.
+    pub jitter_ms: f64,
+    /// Cumulative received RTP packets lost.
+    pub rx_lost: i32,
+    /// Receive-side packet loss as a percentage.
+    pub packet_loss_pct: f64,
+    /// Estimated MOS (1.0–4.5).
+    pub mos: f64,
+}
+
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     Registering {

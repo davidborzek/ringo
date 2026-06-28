@@ -9,6 +9,7 @@ use ringo_core::backend::Backend;
 use ringo_core::backend::BaresipBackend;
 use ringo_core::event::AppEvent;
 use ringo_core::event::InviteHeaders;
+use ringo_core::event::MediaStats;
 use ringo_core::phone::Phone;
 use std::sync::Arc;
 use std::time::Duration;
@@ -120,6 +121,11 @@ impl AgentSession {
     /// recording.
     pub fn sent_audio(&self) -> Option<(Vec<i16>, u32)> {
         ringo_core::sent_audio(&self.audio_key)
+    }
+
+    /// RTP media stats (jitter/loss/RTT + MOS) for the active or last call.
+    pub fn media_stats(&self) -> Option<MediaStats> {
+        self.phone.media_stats()
     }
 
     // ── Commands ────────────────────────────────────────────────────────────

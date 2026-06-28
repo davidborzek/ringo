@@ -8,6 +8,7 @@ The complete scenario vocabulary, generated from the engine (so it never drifts 
   - [Peer](peer.md) — the remote party of the active call.
   - [Call state](call-state.md) — the `State::*` phases for `agent.state`.
   - [AudioSpec](audiospec.md) — audio sources for `send_audio` (`tone`, `file`, `silent`).
+- [CallQuality](callquality.md)
 - [Assertions and matchers](assertions-and-matchers.md) — the fluent `assert(x).<matcher>(…)`, used inside `await_until`.
 - [HTTP](http.md) — `http(…)` requests and the response.
 - [HTTP mock server](http-mock-server.md) — `mock_server(…)`, routes and responders for webhook-driven flows.

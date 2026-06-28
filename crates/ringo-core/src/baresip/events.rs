@@ -248,6 +248,12 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
         x if x == bevent_ev::BEVENT_CALL_CLOSED as i32 => {
             super::sounds::stop_alert();
             let call = unsafe { bevent_get_call(event) };
+            // Snapshot RTP stats while the call still exists, so a scenario can
+            // assert on call quality (MOS, loss, …) after hanging up.
+            let ua = unsafe { bevent_get_ua(event) };
+            if !ua.is_null() && !call.is_null() {
+                super::stats::snapshot_on_close(ua as usize, call);
+            }
             let call_id = call_id_str(call);
             let text = bevent_text(event);
             let scode = if !call.is_null() {

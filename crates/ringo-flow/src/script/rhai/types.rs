@@ -50,6 +50,16 @@ impl Agent {
             .map(convert::opt_to_dynamic)
             .map_err(|e| e.into())
     }
+    pub(super) fn quality(&mut self) -> Verb<CallQuality> {
+        let stats = self
+            .ctx
+            .quality(&self.name)
+            .map_err(|e| -> Box<EvalAltResult> { e.into() })?;
+        Ok(CallQuality {
+            agent: self.name.clone(),
+            stats,
+        })
+    }
     /// The current call's remote party (the caller for an incoming call). Always
     /// returns a handle; its `.uri`/`.number`/`.name` fields are `()` when there's
     /// no call, and each field auto-labels itself (`caller.peer.number` →
@@ -232,6 +242,35 @@ impl Peer {
     /// Printable form (`print(caller.peer)`): the URI, or empty when no call.
     pub(super) fn display(&mut self) -> String {
         self.uri.clone().unwrap_or_default()
+    }
+}
+
+/// RTP media quality of the active call (or the last call's snapshot). Each
+/// field is `()` until the first RTCP report, and auto-labels itself
+/// (`caller.quality.mos` → "Caller quality MOS").
+#[derive(Clone)]
+pub(super) struct CallQuality {
+    agent: String,
+    stats: Option<ringo_core::event::MediaStats>,
+}
+
+impl CallQuality {
+    pub(super) fn mos(&mut self) -> Dynamic {
+        mark_pending_label(format!("{} quality MOS", self.agent));
+        self.stats.map_or(Dynamic::UNIT, |s| s.mos.into())
+    }
+    pub(super) fn rtt(&mut self) -> Dynamic {
+        mark_pending_label(format!("{} quality RTT (ms)", self.agent));
+        self.stats.map_or(Dynamic::UNIT, |s| s.rtt_ms.into())
+    }
+    pub(super) fn jitter(&mut self) -> Dynamic {
+        mark_pending_label(format!("{} quality jitter (ms)", self.agent));
+        self.stats.map_or(Dynamic::UNIT, |s| s.jitter_ms.into())
+    }
+    pub(super) fn packet_loss(&mut self) -> Dynamic {
+        mark_pending_label(format!("{} quality packet loss (%)", self.agent));
+        self.stats
+            .map_or(Dynamic::UNIT, |s| s.packet_loss_pct.into())
     }
 }
 

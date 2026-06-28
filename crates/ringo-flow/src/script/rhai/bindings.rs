@@ -4,7 +4,9 @@
 
 use super::convert;
 use super::host::{Registry, SkipMarker};
-use super::types::{Agent, Assertion, HttpMock, HttpResponse, MockRequest, PathPattern, Peer};
+use super::types::{
+    Agent, Assertion, CallQuality, HttpMock, HttpResponse, MockRequest, PathPattern, Peer,
+};
 use crate::engine::audio::AudioSpec;
 use crate::engine::ctx::{CallState, Ctx};
 use crate::engine::mock_server::{self, PathMatcher, Responder};
@@ -101,6 +103,53 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         "/// Value of a header on a received INVITE (string), or `()` if absent.\n\
          /// # Returns: string?",
         Agent::header
+    );
+    reg!(
+        engine,
+        "get$quality",
+        ["agent: Agent", "CallQuality"],
+        "/// RTP media quality of the active call (or the last call's snapshot); read\n\
+         /// `quality.mos` / `.rtt` / `.jitter` / `.packet_loss` (each `()` until the\n\
+         /// first RTCP report, ~5s into a call).\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// await_until(|| assert(caller.quality.mos).is_present(), \"10s\");\n\
+         /// assert(caller.quality.mos).at_least(4.0);\n\
+         /// ```",
+        Agent::quality
+    );
+    engine.register_type_with_name::<CallQuality>("CallQuality");
+    reg!(
+        engine,
+        "get$mos",
+        ["quality: CallQuality", "?"],
+        "/// Estimated MOS (1.0–4.5), or `()` until the first RTCP report.\n\
+         /// # Returns: float?",
+        CallQuality::mos
+    );
+    reg!(
+        engine,
+        "get$rtt",
+        ["quality: CallQuality", "?"],
+        "/// Round-trip time in milliseconds, or `()` if not available yet.\n\
+         /// # Returns: float?",
+        CallQuality::rtt
+    );
+    reg!(
+        engine,
+        "get$jitter",
+        ["quality: CallQuality", "?"],
+        "/// Receive-side jitter in milliseconds, or `()` if not available yet.\n\
+         /// # Returns: float?",
+        CallQuality::jitter
+    );
+    reg!(
+        engine,
+        "get$packet_loss",
+        ["quality: CallQuality", "?"],
+        "/// Receive-side packet loss in percent, or `()` if not available yet.\n\
+         /// # Returns: float?",
+        CallQuality::packet_loss
     );
     reg!(
         engine,
