@@ -16,7 +16,7 @@ mod metrics;
 mod prometheus;
 mod runner;
 
-pub use config::Config;
+pub use config::{Config, Overrides};
 
 use anyhow::{Context, Result};
 use api::{AppState, RunRequest};
@@ -26,11 +26,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-/// Run the monitor server: parse the config, start the worker + cron schedulers,
-/// and serve HTTP until killed. Its tokio runtime is built by the caller in
-/// `main`.
-pub async fn serve(config_path: &std::path::Path) -> Result<()> {
-    let config = Config::load(config_path)?;
+/// Run the monitor server: parse the config, apply CLI/env overrides, start the
+/// worker + cron schedulers, and serve HTTP until killed. Its tokio runtime is
+/// built by the caller in `main`.
+pub async fn serve(config_path: &std::path::Path, overrides: Overrides) -> Result<()> {
+    let mut config = Config::load(config_path)?;
+    config.apply_overrides(&overrides)?;
     let binary = match &config.binary {
         Some(b) => b.clone(),
         None => std::env::current_exe().context("locate the running ringo-flow binary")?,

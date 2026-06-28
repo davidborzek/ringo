@@ -107,6 +107,34 @@ impl Config {
         Ok(cfg)
     }
 
+    /// Apply CLI/env overrides on top of the parsed config (precedence:
+    /// override > config file). `--port` is applied after `--listen`, so it wins
+    /// over the listen/config host's port. Validates the overridden values.
+    pub fn apply_overrides(&mut self, ov: &Overrides) -> Result<()> {
+        if let Some(listen) = &ov.listen {
+            self.listen = listen.clone();
+        }
+        if let Some(port) = ov.port {
+            self.listen = replace_port(&self.listen, port);
+        }
+        if let Some(timeout) = &ov.timeout {
+            // Validate eagerly so a bad override fails at startup.
+            crate::engine::duration::parse_duration(timeout)
+                .map_err(|e| anyhow::anyhow!("invalid --timeout `{timeout}`: {e}"))?;
+            self.timeout = timeout.clone();
+        }
+        if let Some(enabled) = ov.metrics_enabled {
+            self.metrics.enabled = enabled;
+        }
+        if let Some(token) = &ov.metrics_token {
+            self.metrics.bearer_token = Some(token.clone());
+        }
+        if let Some(binary) = &ov.binary {
+            self.binary = Some(binary.clone());
+        }
+        Ok(())
+    }
+
     /// The global default per-run timeout, parsed.
     pub fn default_timeout(&self) -> Result<Duration> {
         crate::engine::duration::parse_duration(&self.timeout)
@@ -145,12 +173,39 @@ impl Config {
     }
 }
 
+/// CLI/env overrides for the basics, applied on top of the config file. Each
+/// `None` leaves the config value untouched.
+#[derive(Default)]
+pub struct Overrides {
+    /// Full listen address (`host:port`).
+    pub listen: Option<String>,
+    /// Listen port only (keeps the host); wins over `listen`/config host.
+    pub port: Option<u16>,
+    /// Default per-run timeout.
+    pub timeout: Option<String>,
+    /// Enable/disable the `/metrics` endpoint.
+    pub metrics_enabled: Option<bool>,
+    /// `/metrics` bearer token (from env — kept out of the process args).
+    pub metrics_token: Option<String>,
+    /// The ringo-flow binary spawned per run.
+    pub binary: Option<PathBuf>,
+}
+
 /// Resolve `p` against `base` unless it is already absolute.
 fn resolve(base: &Path, p: &Path) -> PathBuf {
     if p.is_absolute() {
         p.to_path_buf()
     } else {
         base.join(p)
+    }
+}
+
+/// Replace the port in a `host:port` listen address, preserving the host
+/// (including bracketed IPv6 like `[::1]:9090`).
+fn replace_port(listen: &str, port: u16) -> String {
+    match listen.rsplit_once(':') {
+        Some((host, _)) => format!("{host}:{port}"),
+        None => format!("{listen}:{port}"),
     }
 }
 
@@ -216,6 +271,42 @@ mod tests {
 
         let err = Config::load(&dir.join("m.toml")).unwrap_err().to_string();
         assert!(err.contains("path not found"), "{err}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn replace_port_keeps_host() {
+        assert_eq!(replace_port("0.0.0.0:9090", 8080), "0.0.0.0:8080");
+        assert_eq!(replace_port("[::1]:9090", 8080), "[::1]:8080");
+    }
+
+    #[test]
+    fn overrides_take_precedence_port_wins_over_listen() {
+        let dir = temp_dir("ov");
+        std::fs::write(dir.join("a.rhai"), "").unwrap();
+        std::fs::write(
+            dir.join("m.toml"),
+            "listen = \"127.0.0.1:9090\"\ntimeout = \"300s\"\n\
+             [[monitor]]\nname = \"x\"\npath = \"a.rhai\"\n",
+        )
+        .unwrap();
+        let mut cfg = Config::load(&dir.join("m.toml")).unwrap();
+
+        let ov = Overrides {
+            listen: Some("0.0.0.0:1111".into()),
+            port: Some(8080),
+            timeout: Some("60s".into()),
+            metrics_enabled: Some(false),
+            metrics_token: Some("tok".into()),
+            binary: None,
+        };
+        cfg.apply_overrides(&ov).unwrap();
+        // --port wins over the --listen host's port.
+        assert_eq!(cfg.listen, "0.0.0.0:8080");
+        assert_eq!(cfg.timeout, "60s");
+        assert!(!cfg.metrics.enabled);
+        assert_eq!(cfg.metrics.bearer_token.as_deref(), Some("tok"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -15,7 +15,7 @@ path = "src/main.rs"
 [dependencies]
 ringo-core.workspace = true
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
 regex = "1"
 serde = { version = "1", features = ["derive"] }

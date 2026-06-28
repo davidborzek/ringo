@@ -143,6 +143,23 @@ enum Commands {
         /// Path to the `monitor.toml` config
         #[arg(value_hint = ValueHint::FilePath)]
         config: PathBuf,
+        /// Override the listen address (host:port)
+        #[arg(long, env = "RINGO_FLOW_SERVE_LISTEN")]
+        listen: Option<String>,
+        /// Override just the listen port (keeps the host); wins over --listen
+        #[arg(long, env = "RINGO_FLOW_SERVE_PORT")]
+        port: Option<u16>,
+        /// Override the default per-run timeout (e.g. `120s`)
+        #[arg(long, env = "RINGO_FLOW_SERVE_TIMEOUT")]
+        timeout: Option<String>,
+        /// Enable (`true`) or disable (`false`) the `/metrics` endpoint
+        #[arg(long, env = "RINGO_FLOW_SERVE_METRICS")]
+        metrics: Option<bool>,
+        /// Override the ringo-flow binary spawned per run
+        #[arg(long, env = "RINGO_FLOW_SERVE_BINARY", value_hint = ValueHint::FilePath)]
+        binary: Option<PathBuf>,
+        // The /metrics bearer token is read only from RINGO_FLOW_SERVE_METRICS_TOKEN
+        // (a secret — kept out of the CLI args / process list).
     },
 }
 
@@ -226,11 +243,29 @@ fn main() -> Result<()> {
         Commands::Definitions { out } => script::write_definitions(&out),
         Commands::Docs { out } => script::write_book_api(&out),
         #[cfg(feature = "server")]
-        Commands::Serve { config } => {
+        Commands::Serve {
+            config,
+            listen,
+            port,
+            timeout,
+            metrics,
+            binary,
+        } => {
+            let overrides = serve::Overrides {
+                listen,
+                port,
+                timeout,
+                metrics_enabled: metrics,
+                // Secret: env only, never a CLI flag.
+                metrics_token: std::env::var("RINGO_FLOW_SERVE_METRICS_TOKEN")
+                    .ok()
+                    .filter(|s| !s.is_empty()),
+                binary,
+            };
             // The monitor is async (HTTP + schedulers); the other subcommands are
             // sync, so build a runtime just for this one.
             let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(serve::serve(&config))
+            rt.block_on(serve::serve(&config, overrides))
         }
     }
 }

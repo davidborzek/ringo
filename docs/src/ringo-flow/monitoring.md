@@ -47,6 +47,25 @@ tags = ["smoke"]               # optional --tag filters
 A monitor with no `schedule` is only reachable via `POST /run/<name>` — handy
 for ad-hoc checks or driving runs from an external scheduler.
 
+### Overriding the basics (flags / env)
+
+The deployment basics can be overridden without editing the config — useful in
+containers. Precedence is **flag > env > config file**:
+
+| Flag | Env | Overrides |
+|------|-----|-----------|
+| `--listen <host:port>` | `RINGO_FLOW_SERVE_LISTEN` | full listen address |
+| `--port <port>` | `RINGO_FLOW_SERVE_PORT` | listen port only (keeps host; wins over `--listen`) |
+| `--timeout <dur>` | `RINGO_FLOW_SERVE_TIMEOUT` | default per-run timeout |
+| `--metrics <true\|false>` | `RINGO_FLOW_SERVE_METRICS` | `/metrics` on/off |
+| `--binary <path>` | `RINGO_FLOW_SERVE_BINARY` | the spawned ringo-flow binary |
+| — | `RINGO_FLOW_SERVE_METRICS_TOKEN` | `/metrics` bearer token (env only — kept out of the process args) |
+
+```sh
+RINGO_FLOW_SERVE_PORT=8080 RINGO_FLOW_SERVE_METRICS_TOKEN=s3cret \
+  ringo-flow serve monitor.toml
+```
+
 ## How it runs
 
 Each run is a fresh `ringo-flow run --json --metrics` **subprocess**. That's
