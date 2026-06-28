@@ -97,6 +97,11 @@ enum Commands {
         /// Emit machine-readable NDJSON events instead of the human log
         #[arg(long)]
         json: bool,
+        /// Print per-agent media-quality metrics (MOS/jitter/loss) at each
+        /// scenario's end: a compact human line on its own, or `metric` NDJSON
+        /// events when combined with `--json` (what `serve` reads).
+        #[arg(long)]
+        metrics: bool,
         /// More detail (shows observed state on every assertion)
         #[arg(short, long, action = clap::ArgAction::Count)]
         verbose: u8,
@@ -165,6 +170,7 @@ fn main() -> Result<()> {
             sip_trace,
             save_audio,
             json,
+            metrics,
             verbose,
             quiet,
             no_color,
@@ -196,6 +202,7 @@ fn main() -> Result<()> {
                 verbose: verbose > 0,
                 save_audio,
                 insecure_http,
+                metrics,
             };
             let filters = engine::Filters {
                 name: scenario,

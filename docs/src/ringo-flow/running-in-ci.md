@@ -16,6 +16,24 @@ Other handy flags: `-q` (only failures + result), `-v` (show every assertion),
 `--log` (write the SIP signaling to stderr, or `--log <file>`), `--save-audio`
 (dump sent/received WAVs), `--no-color`.
 
+## Metrics
+
+Add `--metrics` to emit a per-agent media-quality summary at each scenario's
+end. On its own it prints a compact human line; combined with `--json` it adds a
+`metric` event to the NDJSON stream, ready to scrape:
+
+```sh
+ringo-flow run scenarios/ --json --metrics
+```
+
+```json
+{"event":"metric","scenario":"call quality","agent":"caller","registered":true,"mos":4.24,"jitter_ms":2.1,"packet_loss_pct":0.0,"rtt_ms":18.0,"rx_lost":0,"ts":"…"}
+```
+
+The quality fields ([MOS, jitter, loss, RTT](call-quality.md)) are present only
+when the agent had a measurable call; `registered` is always emitted. Without
+`--metrics` the stream is unchanged (no extra stat reads).
+
 ## Credentials and environment
 
 Scenarios read secrets via [`env(...)`](api/environment.md#env). Provide them as

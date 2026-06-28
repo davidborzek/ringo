@@ -58,6 +58,25 @@ pub enum Event<'a> {
         path: &'a str,
         error: &'a str,
     },
+    /// Per-agent media-quality metrics, emitted at a scenario's end when
+    /// `--metrics` is set. Machine consumers (`serve`) feed these into
+    /// Prometheus; the quality fields are absent when the agent had no
+    /// measurable call.
+    Metric {
+        scenario: &'a str,
+        agent: &'a str,
+        registered: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mos: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        jitter_ms: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        packet_loss_pct: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rtt_ms: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rx_lost: Option<i64>,
+    },
     Assertion {
         /// Optional `.describe(...)` label, prefixed to the log line; `None` if unset.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -176,6 +195,27 @@ impl Reporter for Human {
                 None,
                 &format!("{} mock {method} {path} responder: {error}", fail_mark()),
             ),
+            Event::Metric {
+                agent,
+                registered,
+                mos,
+                jitter_ms,
+                packet_loss_pct,
+                ..
+            } if normal => {
+                let quality = match mos {
+                    Some(m) => format!(
+                        "MOS {m:.2}, jitter {:.1}ms, loss {:.1}%",
+                        jitter_ms.unwrap_or(0.0),
+                        packet_loss_pct.unwrap_or(0.0)
+                    ),
+                    None => "no call".to_string(),
+                };
+                out(
+                    Some(agent),
+                    &format!("metrics: registered={registered}, {quality}"),
+                )
+            }
             Event::Assertion {
                 label,
                 expect,
@@ -418,6 +458,43 @@ mod tests {
         assert!(json.contains(r#""ok":false"#), "{json}");
         assert!(json.contains(r#""actual":"idle""#), "{json}");
         assert!(json.contains(r#""label":"caller registered""#), "{json}");
+    }
+
+    #[test]
+    fn metric_omits_absent_quality_fields() {
+        // No call → only scenario/agent/registered, quality fields skipped.
+        let json = serde_json::to_string(&Event::Metric {
+            scenario: "smoke",
+            agent: "caller",
+            registered: true,
+            mos: None,
+            jitter_ms: None,
+            packet_loss_pct: None,
+            rtt_ms: None,
+            rx_lost: None,
+        })
+        .unwrap();
+        assert!(json.contains(r#""event":"metric""#), "{json}");
+        assert!(json.contains(r#""registered":true"#), "{json}");
+        assert!(!json.contains("mos"), "{json}");
+        assert!(!json.contains("jitter_ms"), "{json}");
+    }
+
+    #[test]
+    fn metric_serializes_quality_when_present() {
+        let json = serde_json::to_string(&Event::Metric {
+            scenario: "call quality",
+            agent: "callee",
+            registered: true,
+            mos: Some(4.3),
+            jitter_ms: Some(2.5),
+            packet_loss_pct: Some(0.0),
+            rtt_ms: Some(18.0),
+            rx_lost: Some(0),
+        })
+        .unwrap();
+        assert!(json.contains(r#""mos":4.3"#), "{json}");
+        assert!(json.contains(r#""rx_lost":0"#), "{json}");
     }
 
     #[test]
