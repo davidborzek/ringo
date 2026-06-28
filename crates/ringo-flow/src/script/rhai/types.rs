@@ -60,6 +60,9 @@ impl Agent {
             stats,
         })
     }
+    pub(super) fn received_dtmf(&mut self) -> Verb<String> {
+        self.ctx.received_dtmf(&self.name).map_err(|e| e.into())
+    }
     /// The current call's remote party (the caller for an incoming call). Always
     /// returns a handle; its `.uri`/`.number`/`.name` fields are `()` when there's
     /// no call, and each field auto-labels itself (`caller.peer.number` →

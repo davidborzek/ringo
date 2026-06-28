@@ -246,6 +246,11 @@ impl Ctx {
     pub fn quality(&self, name: &str) -> Result<Option<MediaStats>, String> {
         self.with_session(name, |s| s.media_stats())
     }
+    /// DTMF digits received on `name`'s active/last call, in order (e.g. `"1234#"`).
+    pub fn received_dtmf(&self, name: &str) -> Result<String, String> {
+        mark_pending_label(format!("{name} received DTMF"));
+        self.with_session(name, |s| s.received_dtmf())
+    }
     /// A one-shot snapshot of the agent's observable state (for `info()`/`to_json()`).
     /// Reads the session once and marks no pending label (so it can't mis-label a
     /// following assertion).

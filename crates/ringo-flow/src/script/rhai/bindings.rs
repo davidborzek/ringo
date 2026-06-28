@@ -106,6 +106,19 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
     );
     reg!(
         engine,
+        "get$received_dtmf",
+        ["agent: Agent", "string"],
+        "/// DTMF digits received on the active/last call, in order (e.g. `\"1234#\"`);\n\
+         /// empty until any arrive — poll with `await_until`.\n\
+         /// # Example\n\
+         /// ```rhai\n\
+         /// caller.dtmf(\"1234#\");\n\
+         /// await_until(|| assert(callee.received_dtmf).equals(\"1234#\"), \"5s\");\n\
+         /// ```",
+        Agent::received_dtmf
+    );
+    reg!(
+        engine,
         "get$quality",
         ["agent: Agent", "CallQuality"],
         "/// RTP media quality of the active call (or the last call's snapshot); read\n\

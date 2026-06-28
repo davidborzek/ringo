@@ -29,6 +29,12 @@ pub trait Phone: Send {
         None
     }
 
+    /// DTMF digits received on the active/last call so far, in order (e.g.
+    /// `"1234#"`). Default: empty (mocks).
+    fn received_dtmf(&self) -> String {
+        String::new()
+    }
+
     /// Arm a custom SIP response for the next inbound INVITE(s): answer with
     /// `scode`/`reason` and the extra `headers` (each a full header line like
     /// `Contact: <sip:…>`, no trailing CRLF) instead of accepting the call.

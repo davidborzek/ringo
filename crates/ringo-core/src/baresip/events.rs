@@ -65,6 +65,32 @@ pub(crate) fn disarm_invite_response(ua: usize) {
         .remove(&ua);
 }
 
+/// DTMF digits received per UA, accumulated in arrival order from
+/// `BEVENT_CALL_DTMF_START` (baresip wires the per-call handler itself).
+static RECEIVED_DTMF: OnceLock<Mutex<std::collections::HashMap<usize, String>>> = OnceLock::new();
+
+fn received_dtmf_store() -> &'static Mutex<std::collections::HashMap<usize, String>> {
+    RECEIVED_DTMF.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// All DTMF digits received on `ua` so far, in order (e.g. `"1234#"`).
+pub(crate) fn received_dtmf(ua: usize) -> String {
+    received_dtmf_store()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&ua)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Drop a UA's received-DTMF buffer (on session teardown).
+pub(crate) fn clear_dtmf(ua: usize) {
+    received_dtmf_store()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&ua);
+}
+
 /// Answer an inbound INVITE `msg` directly with `scode`/`reason` + extra
 /// `headers`, the way baresip rejects pre-call INVITEs (`sip_treplyf`,
 /// fire-and-forget — `stp`/`mbp` NULL, no transaction to free). Must run on the
@@ -272,6 +298,22 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
                 reason,
                 error,
             }
+        }
+        x if x == bevent_ev::BEVENT_CALL_DTMF_START as i32 => {
+            // Inbound DTMF digit (baresip wires the per-call handler; the digit
+            // is the event text). Accumulate per UA so a scenario can assert on
+            // what was received. DTMF_END carries no digit — ignore it.
+            let ua = unsafe { bevent_get_ua(event) };
+            let digit = bevent_text(event);
+            if !ua.is_null() && !digit.is_empty() {
+                received_dtmf_store()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .entry(ua as usize)
+                    .or_default()
+                    .push_str(&digit);
+            }
+            return;
         }
         x if x == bevent_ev::BEVENT_MWI_NOTIFY as i32 => {
             let text = bevent_text(event);
