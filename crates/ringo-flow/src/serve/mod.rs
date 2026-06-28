@@ -12,11 +12,15 @@
 
 mod api;
 mod config;
+mod logging;
 mod metrics;
 mod prometheus;
 mod runner;
 
 pub use config::{Config, Overrides};
+pub use logging::init as init_logging;
+
+use tracing::{error, info, warn};
 
 use anyhow::{Context, Result};
 use api::{AppState, RunRequest};
@@ -61,16 +65,14 @@ pub async fn serve(config_path: &std::path::Path, overrides: Overrides) -> Resul
             }
         }
     }
-    log(&format!(
-        "serving {} monitor(s), {} on http://{listen} (metrics: {})",
-        config.monitors.len(),
-        if config.scheduler {
-            format!("{scheduled} scheduled,")
-        } else {
-            "schedulers off,".to_string()
-        },
-        if config.metrics.enabled { "on" } else { "off" }
-    ));
+    info!(
+        monitors = config.monitors.len(),
+        scheduled,
+        schedulers = config.scheduler,
+        metrics = config.metrics.enabled,
+        listen = %listen,
+        "ringo-flow serve started"
+    );
 
     let state = AppState {
         config: Arc::clone(&config),
@@ -102,27 +104,27 @@ async fn worker(
             continue;
         };
         let timeout = m.timeout(default_timeout);
-        log(&format!("▶ running `{}`", m.name));
+        info!(monitor = %m.name, "running monitor");
         let outcome = runner::run(&binary, m, timeout).await;
         let now_unix = chrono::Utc::now().timestamp();
         store
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .record(&m.name, &outcome, now_unix);
-        let summary = api::summarize(&m.name, &outcome);
-        log(&format!(
-            "{} `{}` in {}ms{}",
-            if summary.passed { "✓" } else { "✗" },
-            summary.monitor,
-            summary.duration_ms,
-            summary
-                .error
-                .as_deref()
-                .map(|e| format!(" — {e}"))
-                .unwrap_or_default()
-        ));
+        let duration_ms = outcome.duration.as_millis() as u64;
+        let scenarios = outcome.scenarios.len();
+        if outcome.passed {
+            info!(monitor = %m.name, duration_ms, scenarios, "monitor run passed");
+        } else {
+            warn!(
+                monitor = %m.name,
+                duration_ms,
+                error = outcome.error.as_deref().unwrap_or(""),
+                "monitor run failed"
+            );
+        }
         if let Some(respond) = req.respond {
-            let _ = respond.send(summary);
+            let _ = respond.send(api::summarize(&m.name, &outcome));
         }
     }
 }
@@ -133,7 +135,7 @@ async fn scheduler(name: String, expr: String, queue: mpsc::Sender<RunRequest>) 
         Ok(c) => c,
         // Validated at startup, so this shouldn't happen; bail out of the task.
         Err(e) => {
-            log(&format!("scheduler `{name}`: bad cron `{expr}`: {e}"));
+            error!(monitor = %name, cron = %expr, error = %e, "invalid cron, scheduler stopped");
             return;
         }
     };
@@ -142,7 +144,7 @@ async fn scheduler(name: String, expr: String, queue: mpsc::Sender<RunRequest>) 
         let next = match cron.find_next_occurrence(&now, false) {
             Ok(n) => n,
             Err(e) => {
-                log(&format!("scheduler `{name}`: no next occurrence: {e}"));
+                warn!(monitor = %name, error = %e, "no next cron occurrence, scheduler stopped");
                 return;
             }
         };
@@ -159,9 +161,4 @@ async fn scheduler(name: String, expr: String, queue: mpsc::Sender<RunRequest>) 
             return; // server shutting down
         }
     }
-}
-
-/// A timestamped server log line to stderr.
-fn log(msg: &str) {
-    eprintln!("{} {msg}", chrono::Local::now().format("%H:%M:%S%.3f"));
 }

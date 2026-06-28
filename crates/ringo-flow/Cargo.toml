@@ -29,8 +29,10 @@ rhai = { version = "1", features = ["sync", "metadata", "internals"] }
 # `serve` mode only (the `server` feature):
 toml = { version = "1", optional = true }
 croner = { version = "3", optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter", "json"] }
 
 [features]
 default = ["server"]
 # The `serve` subcommand: scheduled scenario runs + Prometheus metrics.
-server = ["dep:toml", "dep:croner"]
+server = ["dep:toml", "dep:croner", "dep:tracing", "dep:tracing-subscriber"]

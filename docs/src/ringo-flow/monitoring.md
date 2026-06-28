@@ -59,6 +59,8 @@ containers. Precedence is **flag > env > config file**:
 | `--timeout <dur>` | `RINGO_FLOW_SERVE_TIMEOUT` | default per-run timeout |
 | `--metrics <true\|false>` | `RINGO_FLOW_SERVE_METRICS` | `/metrics` on/off |
 | `--binary <path>` | `RINGO_FLOW_SERVE_BINARY` | the spawned ringo-flow binary |
+| `--log-level <lvl>` | `RINGO_FLOW_SERVE_LOG_LEVEL` | log level (`trace`/`debug`/`info`/`warn`/`error`; default `info`). `RUST_LOG` overrides it. |
+| `--log-format <fmt>` | `RINGO_FLOW_SERVE_LOG_FORMAT` | `text` (human, default) or `json` |
 | — | `RINGO_FLOW_SERVE_METRICS_TOKEN` | `/metrics` bearer token (env only — kept out of the process args) |
 
 ```sh
@@ -150,6 +152,19 @@ network). The `[metrics]` table changes that:
 - `enabled = false` — don't expose `/metrics` at all (returns 404).
 - `bearer_token = "…"` — require `Authorization: Bearer …`; requests without it
   get 401.
+
+## Logging
+
+The server logs to stderr with a configurable level (`--log-level`, default
+`info`) in either human-readable text or JSON (`--log-format json`) — handy for
+shipping logs to a collector:
+
+```sh
+ringo-flow serve monitor.toml --log-level debug --log-format json
+```
+```json
+{"timestamp":"2026-06-28T12:47:13.948Z","level":"INFO","fields":{"message":"monitor run passed","monitor":"smoke","duration_ms":4120,"scenarios":2},"target":"ringo_flow::serve"}
+```
 
 ## Building without the server
 

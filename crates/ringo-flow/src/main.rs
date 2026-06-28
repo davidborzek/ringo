@@ -162,6 +162,12 @@ enum Commands {
         /// Override the ringo-flow binary spawned per run
         #[arg(long, env = "RINGO_FLOW_SERVE_BINARY", value_hint = ValueHint::FilePath)]
         binary: Option<PathBuf>,
+        /// Log level: trace/debug/info/warn/error (or a RUST_LOG-style directive)
+        #[arg(long, env = "RINGO_FLOW_SERVE_LOG_LEVEL", default_value = "info")]
+        log_level: String,
+        /// Log format: `text` (human) or `json`
+        #[arg(long, env = "RINGO_FLOW_SERVE_LOG_FORMAT", default_value = "text")]
+        log_format: String,
         // The /metrics bearer token is read only from RINGO_FLOW_SERVE_METRICS_TOKEN
         // (a secret — kept out of the CLI args / process list).
     },
@@ -255,7 +261,10 @@ fn main() -> Result<()> {
             scheduler,
             metrics,
             binary,
+            log_level,
+            log_format,
         } => {
+            serve::init_logging(&log_level, &log_format)?;
             let overrides = serve::Overrides {
                 listen,
                 port,
