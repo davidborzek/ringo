@@ -139,6 +139,7 @@ where
 
     let ctx = Arc::new(Ctx::new(rt.handle().clone(), reporter, default_timeout));
     ctx.set_save_audio(output.save_audio);
+    ctx.set_metrics(output.metrics);
     if output.insecure_http {
         ctx.set_http_insecure(true);
         eprintln!(
@@ -278,6 +279,7 @@ where
                     ctx.emit(&Event::FileStarted { path: &label });
                 }
                 dump_artifacts(ctx, save_audio);
+                emit_metrics(ctx, &label);
                 ctx.reset_sessions();
                 let ok = r.is_ok();
                 ctx.emit(&Event::Finished {
@@ -389,6 +391,7 @@ fn run_suite<H: ScriptHost>(
         ctx.emit(&Event::ScenarioStarted { name: &info.name });
         let result = host.run_scenario(&info.name);
         dump_artifacts(ctx, save_audio); // before reset drops this scenario's sessions
+        emit_metrics(ctx, &info.name); // read media stats while sessions still exist
         ctx.reset_sessions(); // isolation: fresh agents for the next scenario
         match result {
             ScenarioResult::Passed => {
@@ -414,6 +417,34 @@ fn run_suite<H: ScriptHost>(
         }
     }
     (total, passed, skipped)
+}
+
+/// Emit a per-agent [`Event::Metric`] for the scenario that just ran (`--metrics`).
+/// Called while the scenario's sessions still exist (before `reset_sessions`), so
+/// the call's media stats are still readable; a no-op unless `--metrics` is set.
+/// Agents are emitted name-sorted for stable output.
+fn emit_metrics(ctx: &Arc<Ctx>, scenario: &str) {
+    if !ctx.metrics() {
+        return;
+    }
+    let sessions = ctx.sessions.lock().unwrap_or_else(|e| e.into_inner());
+    let mut names: Vec<&String> = sessions.keys().collect();
+    names.sort();
+    for name in names {
+        let session = &sessions[name];
+        let stats = session.media_stats();
+        let registered = session.state().borrow().registered;
+        ctx.emit(&Event::Metric {
+            scenario,
+            agent: name,
+            registered,
+            mos: stats.map(|s| s.mos),
+            jitter_ms: stats.map(|s| s.jitter_ms),
+            packet_loss_pct: stats.map(|s| s.packet_loss_pct),
+            rtt_ms: stats.map(|s| s.rtt_ms),
+            rx_lost: stats.map(|s| i64::from(s.rx_lost)),
+        });
+    }
 }
 
 /// Save `--save-audio` recordings for the currently-live sessions. Called while

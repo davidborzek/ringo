@@ -54,3 +54,10 @@ scenario("call quality", |ctx| {
 
 > The values are raw floats (e.g. `MOS 4.236…`). To shorten a log line, round in
 > Rhai: `let mos = (caller.quality.mos * 100.0).round() / 100.0;`.
+
+## Exporting metrics
+
+To record these values without writing assertions — e.g. for trend monitoring —
+run with [`--metrics`](running-in-ci.md#metrics). ringo-flow then emits a per-agent
+`metric` event (MOS, jitter, loss, RTT + `registered`) at each scenario's end,
+which a machine consumer can scrape from the `--json` stream.

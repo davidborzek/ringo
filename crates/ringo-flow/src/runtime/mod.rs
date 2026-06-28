@@ -50,4 +50,6 @@ pub struct Output {
     pub save_audio: bool,
     /// Disable TLS certificate verification for `http(...)` (DANGER).
     pub insecure_http: bool,
+    /// Emit per-agent media-quality metrics at each scenario's end (`--metrics`).
+    pub metrics: bool,
 }

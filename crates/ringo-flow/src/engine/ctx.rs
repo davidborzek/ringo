@@ -103,6 +103,8 @@ pub struct Ctx {
     http_insecure: AtomicBool,
     /// Capture full-call sent/received audio in-process for `--save-audio`.
     save_audio: AtomicBool,
+    /// Emit per-agent media-quality metrics at each scenario's end (`--metrics`).
+    metrics: AtomicBool,
 }
 
 impl Ctx {
@@ -115,12 +117,22 @@ impl Ctx {
             default_timeout_ms: AtomicU64::new(default_timeout.as_millis() as u64),
             http_insecure: AtomicBool::new(false),
             save_audio: AtomicBool::new(false),
+            metrics: AtomicBool::new(false),
         }
     }
 
     /// Enable full-call in-process audio capture (for `--save-audio`).
     pub fn set_save_audio(&self, on: bool) {
         self.save_audio.store(on, Ordering::Relaxed);
+    }
+
+    /// Enable per-agent media-quality metric emission (for `--metrics`).
+    pub fn set_metrics(&self, on: bool) {
+        self.metrics.store(on, Ordering::Relaxed);
+    }
+    /// Whether per-agent metrics should be emitted at each scenario's end.
+    pub fn metrics(&self) -> bool {
+        self.metrics.load(Ordering::Relaxed)
     }
 
     /// Disable TLS certificate verification for `http(...)`. DANGER — only for
