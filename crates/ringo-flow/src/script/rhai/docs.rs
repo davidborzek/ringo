@@ -50,6 +50,7 @@ pub fn write_definitions(out: &Path) -> Result<()> {
 const RECEIVERS: &[&str] = &[
     "Agent",
     "Peer",
+    "CallQuality",
     "Assertion",
     "HttpResponse",
     "HttpMock",
@@ -213,6 +214,7 @@ fn recv_var(ty: &str) -> &'static str {
     match ty {
         "Agent" => "agent",
         "Peer" => "peer",
+        "CallQuality" => "quality",
         "Assertion" => "assertion",
         "HttpResponse" => "resp",
         "HttpMock" => "mock",
@@ -237,6 +239,7 @@ fn section(receiver: Option<&str>, name: &str) -> (u8, &'static str) {
         // `Peer` via `agent.peer`, `MockRequest` via `mock.last_request()`,
         // `AudioSpec` via the `agent.send_audio` argument.
         Some("Peer") => (3, "Peer"),
+        Some("CallQuality") => (3, "CallQuality"),
         _ if matches!(base, "tone" | "file" | "silent") => (4, "AudioSpec"),
         Some("Assertion") => (5, "Assertions and matchers"),
         Some("HttpResponse") => (6, "HTTP"),

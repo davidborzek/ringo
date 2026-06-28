@@ -705,22 +705,16 @@ fn get body(request: MockRequest) -> string;
 /// The HTTP response body as a string.
 fn get body(response: HttpResponse) -> string;
 
-/// Receive-side jitter in milliseconds (RTCP), or `()` if not available yet.
+/// Receive-side jitter in milliseconds, or `()` if not available yet.
 /// # Returns: float?
-fn get jitter(agent: Agent) -> ?;
+fn get jitter(quality: CallQuality) -> ?;
 
 /// The request method (upper-case).
 fn get method(request: MockRequest) -> string;
 
-/// Estimated MOS (1.0–4.5) of the active call, or the last call's value;
-/// `()` until the first RTCP report (~5s into a call).
-/// # Example
-/// ```rhai
-/// await_until(|| assert(caller.mos).is_present(), "10s");
-/// assert(caller.mos).at_least(4.0);
-/// ```
+/// Estimated MOS (1.0–4.5), or `()` until the first RTCP report.
 /// # Returns: float?
-fn get mos(agent: Agent) -> ?;
+fn get mos(quality: CallQuality) -> ?;
 
 /// The remote party's display name, or `()` if absent.
 /// # Returns: string?
@@ -730,9 +724,9 @@ fn get name(peer: Peer) -> ?;
 /// # Returns: string?
 fn get number(peer: Peer) -> ?;
 
-/// Receive-side packet loss in percent (RTCP), or `()` if not available yet.
+/// Receive-side packet loss in percent, or `()` if not available yet.
 /// # Returns: float?
-fn get packet_loss(agent: Agent) -> ?;
+fn get packet_loss(quality: CallQuality) -> ?;
 
 /// The request path.
 fn get path(request: MockRequest) -> string;
@@ -744,6 +738,16 @@ fn get peer(agent: Agent) -> Peer;
 /// The port the server is listening on.
 fn get port(mock: HttpMock) -> int;
 
+/// RTP media quality of the active call (or the last call's snapshot); read
+/// `quality.mos` / `.rtt` / `.jitter` / `.packet_loss` (each `()` until the
+/// first RTCP report, ~5s into a call).
+/// # Example
+/// ```rhai
+/// await_until(|| assert(caller.quality.mos).is_present(), "10s");
+/// assert(caller.quality.mos).at_least(4.0);
+/// ```
+fn get quality(agent: Agent) -> CallQuality;
+
 /// The last closed call's reason (string), or `()` if none yet.
 /// # Returns: string?
 fn get reason(agent: Agent) -> ?;
@@ -751,9 +755,9 @@ fn get reason(agent: Agent) -> ?;
 /// Whether the agent's account is currently registered.
 fn get registered(agent: Agent) -> bool;
 
-/// Round-trip time in milliseconds (RTCP), or `()` if not available yet.
+/// Round-trip time in milliseconds, or `()` if not available yet.
 /// # Returns: float?
-fn get rtt(agent: Agent) -> ?;
+fn get rtt(quality: CallQuality) -> ?;
 
 /// The agent's current call phase: `Idle`, `Ringing` or `Established`.
 fn get state(agent: Agent) -> CallState;

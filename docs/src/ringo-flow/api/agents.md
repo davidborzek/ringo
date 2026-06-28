@@ -365,38 +365,6 @@ caller.verify_audio_connection(callee);
 
 ## Fields
 
-<a id="jitter"></a>
-
-### agent.jitter
-
-**Receiver** [`Agent`](agents.md) · **Returns** `float?`
-
-Receive-side jitter in milliseconds (RTCP), or `()` if not available yet.
-
-<a id="mos"></a>
-
-### agent.mos
-
-**Receiver** [`Agent`](agents.md) · **Returns** `float?`
-
-Estimated MOS (1.0–4.5) of the active call, or the last call's value;
-`()` until the first RTCP report (~5s into a call).
-
-**Example**
-
-```rust
-await_until(|| assert(caller.mos).is_present(), "10s");
-assert(caller.mos).at_least(4.0);
-```
-
-<a id="packet_loss"></a>
-
-### agent.packet_loss
-
-**Receiver** [`Agent`](agents.md) · **Returns** `float?`
-
-Receive-side packet loss in percent (RTCP), or `()` if not available yet.
-
 <a id="peer"></a>
 
 ### agent.peer
@@ -405,6 +373,23 @@ Receive-side packet loss in percent (RTCP), or `()` if not available yet.
 
 The current call's remote party (the caller for an incoming call); read
 `peer.uri` / `peer.number` / `peer.name` (each `()` if there's no call).
+
+<a id="quality"></a>
+
+### agent.quality
+
+**Receiver** [`Agent`](agents.md) · **Returns** `CallQuality`
+
+RTP media quality of the active call (or the last call's snapshot); read
+`quality.mos` / `.rtt` / `.jitter` / `.packet_loss` (each `()` until the
+first RTCP report, ~5s into a call).
+
+**Example**
+
+```rust
+await_until(|| assert(caller.quality.mos).is_present(), "10s");
+assert(caller.quality.mos).at_least(4.0);
+```
 
 <a id="reason"></a>
 
@@ -421,14 +406,6 @@ The last closed call's reason (string), or `()` if none yet.
 **Receiver** [`Agent`](agents.md) · **Returns** `bool`
 
 Whether the agent's account is currently registered.
-
-<a id="rtt"></a>
-
-### agent.rtt
-
-**Receiver** [`Agent`](agents.md) · **Returns** `float?`
-
-Round-trip time in milliseconds (RTCP), or `()` if not available yet.
 
 <a id="state"></a>
 

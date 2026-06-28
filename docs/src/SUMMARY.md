@@ -28,6 +28,7 @@
   - [Flow and timing](ringo-flow/api/flow-and-timing.md)
   - [Agents](ringo-flow/api/agents.md)
     - [Peer](ringo-flow/api/peer.md)
+    - [CallQuality](ringo-flow/api/callquality.md)
     - [Call state](ringo-flow/api/call-state.md)
     - [AudioSpec](ringo-flow/api/audiospec.md)
   - [Assertions and matchers](ringo-flow/api/assertions-and-matchers.md)
