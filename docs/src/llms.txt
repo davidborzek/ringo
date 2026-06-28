@@ -24,6 +24,7 @@
 - [Debugging](https://davidborzek.github.io/ringo/ringo-flow/debugging.html)
 - [HTTP & webhooks](https://davidborzek.github.io/ringo/ringo-flow/http-and-webhooks.html)
 - [Running in CI](https://davidborzek.github.io/ringo/ringo-flow/running-in-ci.html)
+- [Monitoring](https://davidborzek.github.io/ringo/ringo-flow/monitoring.html)
 - [API reference](https://davidborzek.github.io/ringo/ringo-flow/api/index.html)
 - [Scenario structure](https://davidborzek.github.io/ringo/ringo-flow/api/scenario-structure.html)
 - [Flow and timing](https://davidborzek.github.io/ringo/ringo-flow/api/flow-and-timing.html)

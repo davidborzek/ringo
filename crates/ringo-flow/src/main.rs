@@ -1,6 +1,8 @@
 mod engine;
 mod runtime;
 mod script;
+#[cfg(feature = "server")]
+mod serve;
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
@@ -135,6 +137,40 @@ enum Commands {
         #[arg(default_value = "docs/src/ringo-flow/api", value_hint = ValueHint::DirPath)]
         out: PathBuf,
     },
+    /// Run as a monitor: scheduled scenario runs + Prometheus metrics over HTTP
+    #[cfg(feature = "server")]
+    Serve {
+        /// Path to the `monitor.toml` config
+        #[arg(value_hint = ValueHint::FilePath)]
+        config: PathBuf,
+        /// Override the listen address (host:port)
+        #[arg(long, env = "RINGO_FLOW_SERVE_LISTEN")]
+        listen: Option<String>,
+        /// Override just the listen port (keeps the host); wins over --listen
+        #[arg(long, env = "RINGO_FLOW_SERVE_PORT")]
+        port: Option<u16>,
+        /// Override the default per-run timeout (e.g. `120s`)
+        #[arg(long, env = "RINGO_FLOW_SERVE_TIMEOUT")]
+        timeout: Option<String>,
+        /// Run the cron schedulers (default `true`); `false` serves the HTTP API
+        /// without firing any schedules
+        #[arg(long, env = "RINGO_FLOW_SERVE_SCHEDULER")]
+        scheduler: Option<bool>,
+        /// Enable (`true`) or disable (`false`) the `/metrics` endpoint
+        #[arg(long, env = "RINGO_FLOW_SERVE_METRICS")]
+        metrics: Option<bool>,
+        /// Override the ringo-flow binary spawned per run
+        #[arg(long, env = "RINGO_FLOW_SERVE_BINARY", value_hint = ValueHint::FilePath)]
+        binary: Option<PathBuf>,
+        /// Log level: trace/debug/info/warn/error (or a RUST_LOG-style directive)
+        #[arg(long, env = "RINGO_FLOW_SERVE_LOG_LEVEL", default_value = "info")]
+        log_level: String,
+        /// Log format: `text` (human) or `json`
+        #[arg(long, env = "RINGO_FLOW_SERVE_LOG_FORMAT", default_value = "text")]
+        log_format: String,
+        // The /metrics bearer token is read only from RINGO_FLOW_SERVE_METRICS_TOKEN
+        // (a secret — kept out of the CLI args / process list).
+    },
 }
 
 /// Parse repeated `--set key=value` flags into a map.
@@ -216,5 +252,35 @@ fn main() -> Result<()> {
         Commands::Check { file } => script::check(&file),
         Commands::Definitions { out } => script::write_definitions(&out),
         Commands::Docs { out } => script::write_book_api(&out),
+        #[cfg(feature = "server")]
+        Commands::Serve {
+            config,
+            listen,
+            port,
+            timeout,
+            scheduler,
+            metrics,
+            binary,
+            log_level,
+            log_format,
+        } => {
+            serve::init_logging(&log_level, &log_format)?;
+            let overrides = serve::Overrides {
+                listen,
+                port,
+                timeout,
+                scheduler,
+                metrics_enabled: metrics,
+                // Secret: env only, never a CLI flag.
+                metrics_token: std::env::var("RINGO_FLOW_SERVE_METRICS_TOKEN")
+                    .ok()
+                    .filter(|s| !s.is_empty()),
+                binary,
+            };
+            // The monitor is async (HTTP + schedulers); the other subcommands are
+            // sync, so build a runtime just for this one.
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(serve::serve(&config, overrides))
+        }
     }
 }

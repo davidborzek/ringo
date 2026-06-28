@@ -23,6 +23,7 @@
 - [Debugging](ringo-flow/debugging.md)
 - [HTTP & webhooks](ringo-flow/http-and-webhooks.md)
 - [Running in CI](ringo-flow/running-in-ci.md)
+- [Monitoring](ringo-flow/monitoring.md)
 - [API reference](ringo-flow/api/index.md)
   - [Scenario structure](ringo-flow/api/scenario-structure.md)
   - [Flow and timing](ringo-flow/api/flow-and-timing.md)
