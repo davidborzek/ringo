@@ -1,6 +1,8 @@
 mod engine;
 mod runtime;
 mod script;
+#[cfg(feature = "server")]
+mod serve;
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser, Subcommand, ValueHint};
@@ -135,6 +137,13 @@ enum Commands {
         #[arg(default_value = "docs/src/ringo-flow/api", value_hint = ValueHint::DirPath)]
         out: PathBuf,
     },
+    /// Run as a monitor: scheduled scenario runs + Prometheus metrics over HTTP
+    #[cfg(feature = "server")]
+    Serve {
+        /// Path to the `monitor.toml` config
+        #[arg(value_hint = ValueHint::FilePath)]
+        config: PathBuf,
+    },
 }
 
 /// Parse repeated `--set key=value` flags into a map.
@@ -216,5 +225,12 @@ fn main() -> Result<()> {
         Commands::Check { file } => script::check(&file),
         Commands::Definitions { out } => script::write_definitions(&out),
         Commands::Docs { out } => script::write_book_api(&out),
+        #[cfg(feature = "server")]
+        Commands::Serve { config } => {
+            // The monitor is async (HTTP + schedulers); the other subcommands are
+            // sync, so build a runtime just for this one.
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(serve::serve(&config))
+        }
     }
 }

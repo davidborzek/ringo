@@ -1,0 +1,21 @@
+# Example `ringo-flow serve` config — a synthetic telephony monitor.
+# Run with: ringo-flow serve monitor.toml
+# See docs/src/ringo-flow/monitoring.md for the full reference.
+
+# HTTP listen address (default 127.0.0.1:9090).
+listen = "0.0.0.0:9090"
+# Default per-run timeout, overridable per scenario.
+timeout = "120s"
+
+[[monitor]]
+name = "smoke"                  # unique — the metric label and /run/<name>
+path = "examples/two-party.rhai"
+schedule = "*/5 * * * *"        # every 5 minutes (cron; omit for on-demand only)
+env_file = ["ci.env"]           # dotenv with SIP_DOMAIN / *_USER / *_PASS
+
+[[monitor]]
+name = "transfer"
+path = "examples/three-party-transfer.rhai"
+schedule = "0 * * * *"          # hourly
+timeout = "180s"
+env_file = ["ci.env"]
