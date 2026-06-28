@@ -752,6 +752,15 @@ fn get quality(agent: Agent) -> CallQuality;
 /// # Returns: string?
 fn get reason(agent: Agent) -> ?;
 
+/// DTMF digits received on the active/last call, in order (e.g. `"1234#"`);
+/// empty until any arrive — poll with `await_until`.
+/// # Example
+/// ```rhai
+/// caller.dtmf("1234#");
+/// await_until(|| assert(callee.received_dtmf).equals("1234#"), "5s");
+/// ```
+fn get received_dtmf(agent: Agent) -> string;
+
 /// Whether the agent's account is currently registered.
 fn get registered(agent: Agent) -> bool;
 

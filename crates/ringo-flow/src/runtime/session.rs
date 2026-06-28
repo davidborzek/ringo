@@ -128,6 +128,11 @@ impl AgentSession {
         self.phone.media_stats()
     }
 
+    /// DTMF digits received on the active/last call so far, in order.
+    pub fn received_dtmf(&self) -> String {
+        self.phone.received_dtmf()
+    }
+
     // ── Commands ────────────────────────────────────────────────────────────
 
     pub fn register(&self) {

@@ -399,6 +399,22 @@ assert(caller.quality.mos).at_least(4.0);
 
 The last closed call's reason (string), or `()` if none yet.
 
+<a id="received_dtmf"></a>
+
+### agent.received_dtmf
+
+**Receiver** [`Agent`](agents.md) · **Returns** `string`
+
+DTMF digits received on the active/last call, in order (e.g. `"1234#"`);
+empty until any arrive — poll with `await_until`.
+
+**Example**
+
+```rust
+caller.dtmf("1234#");
+await_until(|| assert(callee.received_dtmf).equals("1234#"), "5s");
+```
+
 <a id="registered"></a>
 
 ### agent.registered
