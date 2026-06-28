@@ -22,6 +22,10 @@ pub struct Config {
     /// Default per-run timeout (e.g. `"300s"`), overridable per monitor.
     #[serde(default = "default_timeout")]
     pub timeout: String,
+    /// Whether to run the cron schedulers (default `true`). `false` serves the
+    /// HTTP API without firing any schedules.
+    #[serde(default = "default_true")]
+    pub scheduler: bool,
     /// Prometheus `/metrics` endpoint settings (`[metrics]` table).
     #[serde(default)]
     pub metrics: MetricsConfig,
@@ -123,6 +127,9 @@ impl Config {
                 .map_err(|e| anyhow::anyhow!("invalid --timeout `{timeout}`: {e}"))?;
             self.timeout = timeout.clone();
         }
+        if let Some(scheduler) = ov.scheduler {
+            self.scheduler = scheduler;
+        }
         if let Some(enabled) = ov.metrics_enabled {
             self.metrics.enabled = enabled;
         }
@@ -183,6 +190,8 @@ pub struct Overrides {
     pub port: Option<u16>,
     /// Default per-run timeout.
     pub timeout: Option<String>,
+    /// Whether this instance runs the cron schedulers.
+    pub scheduler: Option<bool>,
     /// Enable/disable the `/metrics` endpoint.
     pub metrics_enabled: Option<bool>,
     /// `/metrics` bearer token (from env — kept out of the process args).
@@ -297,6 +306,7 @@ mod tests {
             listen: Some("0.0.0.0:1111".into()),
             port: Some(8080),
             timeout: Some("60s".into()),
+            scheduler: Some(false),
             metrics_enabled: Some(false),
             metrics_token: Some("tok".into()),
             binary: None,
@@ -305,6 +315,7 @@ mod tests {
         // --port wins over the --listen host's port.
         assert_eq!(cfg.listen, "0.0.0.0:8080");
         assert_eq!(cfg.timeout, "60s");
+        assert!(!cfg.scheduler);
         assert!(!cfg.metrics.enabled);
         assert_eq!(cfg.metrics.bearer_token.as_deref(), Some("tok"));
 

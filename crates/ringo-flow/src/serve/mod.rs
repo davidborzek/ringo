@@ -51,17 +51,24 @@ pub async fn serve(config_path: &std::path::Path, overrides: Overrides) -> Resul
         Arc::clone(&store),
     ));
 
-    // One scheduler task per scheduled monitor.
+    // One scheduler task per scheduled monitor, unless schedulers are disabled.
     let mut scheduled = 0;
-    for m in &config.monitors {
-        if let Some(expr) = &m.schedule {
-            scheduled += 1;
-            tokio::spawn(scheduler(m.name.clone(), expr.clone(), queue_tx.clone()));
+    if config.scheduler {
+        for m in &config.monitors {
+            if let Some(expr) = &m.schedule {
+                scheduled += 1;
+                tokio::spawn(scheduler(m.name.clone(), expr.clone(), queue_tx.clone()));
+            }
         }
     }
     log(&format!(
-        "serving {} monitor(s), {scheduled} scheduled, on http://{listen} (metrics: {})",
+        "serving {} monitor(s), {} on http://{listen} (metrics: {})",
         config.monitors.len(),
+        if config.scheduler {
+            format!("{scheduled} scheduled,")
+        } else {
+            "schedulers off,".to_string()
+        },
         if config.metrics.enabled { "on" } else { "off" }
     ));
 

@@ -152,6 +152,10 @@ enum Commands {
         /// Override the default per-run timeout (e.g. `120s`)
         #[arg(long, env = "RINGO_FLOW_SERVE_TIMEOUT")]
         timeout: Option<String>,
+        /// Run the cron schedulers (default `true`); `false` serves the HTTP API
+        /// without firing any schedules
+        #[arg(long, env = "RINGO_FLOW_SERVE_SCHEDULER")]
+        scheduler: Option<bool>,
         /// Enable (`true`) or disable (`false`) the `/metrics` endpoint
         #[arg(long, env = "RINGO_FLOW_SERVE_METRICS")]
         metrics: Option<bool>,
@@ -248,6 +252,7 @@ fn main() -> Result<()> {
             listen,
             port,
             timeout,
+            scheduler,
             metrics,
             binary,
         } => {
@@ -255,6 +260,7 @@ fn main() -> Result<()> {
                 listen,
                 port,
                 timeout,
+                scheduler,
                 metrics_enabled: metrics,
                 // Secret: env only, never a CLI flag.
                 metrics_token: std::env::var("RINGO_FLOW_SERVE_METRICS_TOKEN")
