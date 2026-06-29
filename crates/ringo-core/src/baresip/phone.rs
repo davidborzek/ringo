@@ -88,11 +88,15 @@ impl Phone for BaresipPhone {
             if !calls.is_null() {
                 let mut le = (*calls).head;
                 while !le.is_null() {
+                    // ua_hangup destroys the call and frees its list entry `le`,
+                    // so capture `next` BEFORE hanging up — otherwise `(*le).next`
+                    // dereferences freed memory (use-after-free).
+                    let next = (*le).next;
                     let call = (*le).data as *mut Call;
                     if !call.is_null() {
                         ua_hangup(ua as *mut Ua, call, 0, std::ptr::null());
                     }
-                    le = (*le).next;
+                    le = next;
                 }
             }
         });

@@ -3,7 +3,6 @@
 //! Rhai host in [`crate::script`] drives these; this module has no scenario
 //! language of its own.
 
-pub(crate) mod audio;
 pub(crate) mod report;
 pub(crate) mod session;
 pub(crate) mod state;

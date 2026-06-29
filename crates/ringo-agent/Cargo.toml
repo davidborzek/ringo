@@ -1,0 +1,23 @@
+[package]
+name = "ringo-agent"
+description = "Run a baresip UA as its own process, driven over an NDJSON stdio protocol"
+version = "0.11.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "ringo_agent"
+path = "src/lib.rs"
+
+[dependencies]
+ringo-core.workspace = true
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

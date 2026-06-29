@@ -419,6 +419,9 @@ pub(super) fn account_from_map(name: &str, map: &Map) -> Result<Account, Box<Eva
             .and_then(|d| d.as_bool().ok())
             .unwrap_or(false),
         dtmf_mode: get("dtmf_mode"),
+        // In-process agents keep baresip's default routing; the process-per-agent
+        // backend sets catchall itself (one UA per process).
+        catchall: false,
     })
 }
 

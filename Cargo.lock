@@ -1652,6 +1652,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ringo-agent"
+version = "0.11.0"
+dependencies = [
+ "anyhow",
+ "libc",
+ "ringo-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "ringo-core"
 version = "0.11.0"
 dependencies = [
@@ -1661,6 +1673,7 @@ dependencies = [
  "libc",
  "openssl-sys",
  "pkg-config",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -1678,6 +1691,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rhai",
+ "ringo-agent",
  "ringo-core",
  "serde",
  "serde_json",
