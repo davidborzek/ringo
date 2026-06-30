@@ -20,7 +20,15 @@ automated call testing, both sharing one engine.
 |-------|------------|------|
 | [`ringo-phone`](crates/ringo-phone) | The **`ringo` softphone** — a ratatui TUI managing multiple SIP profiles, with calls, contacts, transfers, remote control and headless automation | [Guide](https://davidborzek.github.io/ringo/ringo-phone/introduction.html) |
 | [`ringo-flow`](crates/ringo-flow) | A **telephony scenario test runner** — bring up SIP agents from a [Rhai](https://rhai.rs) script, drive them, and assert call behaviour (incl. audio) | [Guide](https://davidborzek.github.io/ringo/ringo-flow/introduction.html) · [API](https://davidborzek.github.io/ringo/ringo-flow/api/scenario-structure.html) |
-| [`ringo-core`](crates/ringo-core) | The **shared engine** — an FFI backend statically linking baresip/libre, the call-event model (internal, no stable API) | — |
+
+## Internal crates
+
+Support crates with no stable public API — pin an exact version if you depend on them directly.
+
+| Crate | What it is |
+|-------|------------|
+| [`ringo-agent`](crates/ringo-agent) | The **per-agent process backend** — runs a SIP user agent as its own process over a framed stdio protocol (live audio in/out); backs `ringo-flow` |
+| [`ringo-core`](crates/ringo-core) | The **shared engine** — an FFI backend statically linking baresip/libre, plus the call-event model |
 
 ## Requirements
 
@@ -49,6 +57,9 @@ cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace
 ```
+
+See [BUILD.md](BUILD.md) for the full build setup — git submodules, system
+dependencies, and the vendored/static linking of libre, libbaresip and OpenSSL.
 
 Contributions are welcome. Please open an issue before submitting large changes
 so we can discuss the approach first.

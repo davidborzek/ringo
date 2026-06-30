@@ -1,5 +1,8 @@
 # ringo-agent
 
+[![crates.io](https://img.shields.io/crates/v/ringo-agent)](https://crates.io/crates/ringo-agent)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
+
 Runs a SIP user agent as its own process, driven over a framed stdio protocol
 (length-prefixed JSON control frames interleaved with raw PCM audio). Part of the
 [ringo](https://github.com/davidborzek/ringo) tools, built on `ringo-core`.
