@@ -261,7 +261,7 @@ pub(super) const AGENT_CONFIG: &[ConfigField] = &[
         key: "headers",
         ty: "map",
         required: false,
-        desc: "extra SIP headers on the INVITE, e.g. `#{ \"X-Foo\": \"bar\" }`",
+        desc: "extra SIP headers on the INVITE, e.g. `#{ \"X-Foo\": \"bar\" }`; a value may be an array for a repeated header, e.g. `#{ \"X-Foo\": [\"a\", \"b\"] }`",
     },
     ConfigField {
         key: "deflect_to",
@@ -425,9 +425,12 @@ pub(super) fn account_from_map(name: &str, map: &Map) -> Result<Account, Box<Eva
     })
 }
 
-/// `headers: #{ "X-Foo": "bar" }` → ordered (key, value) pairs. Header names are
-/// validated as SIP tokens so they can't malform the `uaaddheader` command (no
-/// CRLF, space, `:` etc.).
+/// `headers: #{ "X-Foo": "bar" }` → ordered (key, value) pairs. A value may also
+/// be an array of strings (`#{ "X-Foo": ["a", "b"] }`), which emits one header
+/// line per element — SIP allows a field to appear repeatedly (e.g.
+/// `History-Info`), mirroring ringo-phone's multi-value custom headers. Header
+/// names are validated as SIP tokens so they can't malform the `uaaddheader`
+/// command (no CRLF, space, `:` etc.).
 pub(super) fn headers_from_map(map: &Map) -> Result<Vec<(String, String)>, Box<EvalAltResult>> {
     let Some(h) = map.get("headers").and_then(|d| d.clone().try_cast::<Map>()) else {
         return Ok(Vec::new());
@@ -437,7 +440,14 @@ pub(super) fn headers_from_map(map: &Map) -> Result<Vec<(String, String)>, Box<E
         if !is_header_token(k) {
             return Err(format!("`{k}` is not a valid SIP header name").into());
         }
-        if let Ok(val) = v.clone().into_string() {
+        if let Some(arr) = v.clone().try_cast::<Array>() {
+            for item in arr {
+                let val = item.into_string().map_err(|_| -> Box<EvalAltResult> {
+                    format!("header `{k}`: array values must be strings").into()
+                })?;
+                out.push((k.to_string(), val));
+            }
+        } else if let Ok(val) = v.clone().into_string() {
             out.push((k.to_string(), val));
         }
     }
@@ -633,6 +643,45 @@ mod tests {
 
         let mut bad_hdrs = Map::new();
         bad_hdrs.insert("X-Bad\r\nInjected".into(), Dynamic::from("v"));
+        let mut bad = Map::new();
+        bad.insert("headers".into(), Dynamic::from(bad_hdrs));
+        assert!(headers_from_map(&bad).is_err());
+    }
+
+    #[test]
+    fn headers_array_value_emits_repeated_header() {
+        let mut hdrs = Map::new();
+        hdrs.insert(
+            "History-Info".into(),
+            Dynamic::from_array(vec![
+                Dynamic::from("<sip:1@x.com>;index=1"),
+                Dynamic::from("<sip:2@x.com>;index=2"),
+            ]),
+        );
+        hdrs.insert("X-Single".into(), Dynamic::from("one"));
+        let mut m = Map::new();
+        m.insert("headers".into(), Dynamic::from(hdrs));
+        assert_eq!(
+            headers_from_map(&m).unwrap(),
+            vec![
+                (
+                    "History-Info".to_string(),
+                    "<sip:1@x.com>;index=1".to_string()
+                ),
+                (
+                    "History-Info".to_string(),
+                    "<sip:2@x.com>;index=2".to_string()
+                ),
+                ("X-Single".to_string(), "one".to_string()),
+            ]
+        );
+
+        // Non-string array elements are rejected.
+        let mut bad_hdrs = Map::new();
+        bad_hdrs.insert(
+            "X-Foo".into(),
+            Dynamic::from_array(vec![Dynamic::from(1_i64)]),
+        );
         let mut bad = Map::new();
         bad.insert("headers".into(), Dynamic::from(bad_hdrs));
         assert!(headers_from_map(&bad).is_err());

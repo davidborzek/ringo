@@ -26,7 +26,7 @@ Connect a headless baresip agent and return a handle.
 | `regint` | int | re-registration interval (seconds); `0` disables |
 | `mwi` | bool | subscribe to message-waiting indication |
 | `dtmf_mode` | string | `"info"` for reliable headless DTMF (SIP INFO) |
-| `headers` | map | extra SIP headers on the INVITE, e.g. `#{ "X-Foo": "bar" }` |
+| `headers` | map | extra SIP headers on the INVITE, e.g. `#{ "X-Foo": "bar" }`; a value may be an array for a repeated header, e.g. `#{ "X-Foo": ["a", "b"] }` |
 | `deflect_to` | string | deflect inbound calls with a 302 to this URI/number (toggle at runtime with `deflect()`/`stop_deflect()`) |
 
 **Example**
