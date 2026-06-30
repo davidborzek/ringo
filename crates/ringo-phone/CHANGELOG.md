@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.11.0...ringo-phone-v0.11.1) - 2026-06-30
+
+### Features
+
+- *(ringo-phone)* enable catchall UA by default ([#49](https://github.com/davidborzek/ringo/pull/49))
+- *(ringo-flow)* run every agent in its own process ([#48](https://github.com/davidborzek/ringo/pull/48))
+
 ## [0.11.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.10.1...ringo-phone-v0.11.0) - 2026-06-27
 
 ### Documentation
