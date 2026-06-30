@@ -1,6 +1,6 @@
 /// A SIP account to register, independent of any ringo profile/config. Callers
 /// (the softphone or the scenario runner) build this from their own source.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Account {
     pub username: String,
     pub domain: String,
@@ -18,11 +18,20 @@ pub struct Account {
     /// may be idle (e.g. headless with no clocked source). `None` keeps the
     /// backend's default.
     pub dtmf_mode: Option<String>,
+    /// Mark this account as a baresip `catchall` UA: incoming INVITEs whose
+    /// request-URI user matches no registered contact-user fall back to this UA
+    /// instead of being rejected with `404 (UA not found)`. Needed when a
+    /// provider delivers calls addressed to identities other than the
+    /// registration username (the request-URI user is the called number/identity,
+    /// not the account login), which baresip's contact-user match would reject.
+    /// Only safe with a single registered UA per process — with several, baresip
+    /// routes the fallback to just one of them.
+    pub catchall: bool,
 }
 
 /// Overrides for auto-detected backend settings. Any `None`/empty field
 /// is auto-detected at spawn time.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct BackendOptions {
     pub audio_driver: Option<String>,
     pub audio_player_device: Option<String>,

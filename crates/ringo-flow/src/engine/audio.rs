@@ -6,8 +6,8 @@
 
 use super::ctx::Ctx;
 use super::duration::parse_duration;
-use crate::runtime::audio::{self, ToneAnalysis};
 use crate::runtime::report::Event;
+use ringo_agent::audio::{self, ToneAnalysis};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,7 +34,11 @@ impl AudioSpec {
         match self {
             AudioSpec::Tone(f) => (format!("ausine,{f}"), format!("tone {f} Hz")),
             AudioSpec::File(p) => (format!("aufile,{p}"), format!("file {p}")),
-            AudioSpec::Silent => ("aubridge,default".to_string(), "silence".to_string()),
+            // Clocked silence (a 0 Hz sine), NOT an idle source: it keeps the RTP
+            // TX clock running so out-of-band DTMF (RTP telephone-events) still
+            // transmits while "silent". An idle source (aubridge) stops the TX
+            // clock — fine for audio, but DTMF after going silent is then dropped.
+            AudioSpec::Silent => ("ausine,0".to_string(), "silence".to_string()),
         }
     }
 }
@@ -58,12 +62,9 @@ fn detect(
     let mut last = ToneAnalysis::default();
     for _ in 0..VERIFY_AUDIO_ATTEMPTS {
         std::thread::sleep(window);
-        // The backend captures received audio in-process (per-UA, no shared
-        // recording-dir race, no sndfile/disk round-trip).
-        let Some((samples, srate)) = ctx.received_audio(name)? else {
-            continue;
-        };
-        last = audio::analyze_tone_samples(&samples, srate, freq, window);
+        // The agent's worker captures received audio in-process and runs the
+        // Goertzel analysis on its own buffer; only the result crosses the pipe.
+        last = ctx.analyze_tone(name, freq, window)?;
         if last.score >= audio::TONE_THRESHOLD {
             return Ok((true, fmt_analysis(&last)));
         }

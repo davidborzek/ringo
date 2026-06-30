@@ -6,7 +6,6 @@
 
 use super::ctx::Ctx;
 use crate::runtime::Output;
-use crate::runtime::audio;
 use crate::runtime::report::{Event, Human, Json, Level, Reporter};
 use crate::runtime::session::AgentSession;
 use anyhow::{Result, anyhow};
@@ -471,46 +470,46 @@ fn teardown(ctx: &Arc<Ctx>, rt: &tokio::runtime::Runtime) {
     for s in &sessions {
         s.hangup_all();
     }
-    // Wait for all calls to hang up (BYE flush) before dropping sessions.
+    // Wait for every worker's calls to hang up (BYE flush) before dropping the
+    // sessions (which then shut the workers down). `call_count` is a per-worker
+    // query, so sum across all of them.
     rt.block_on(async {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
         loop {
-            if ringo_core::call_count() == 0 {
+            let active: u32 = sessions.iter().map(|s| s.call_count()).sum();
+            if active == 0 || tokio::time::Instant::now() >= deadline {
                 break;
             }
-            if tokio::time::Instant::now() >= deadline {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     });
-    drop(sessions);
+    // Signal all workers to deregister + exit before reaping, so their
+    // de-REGISTERs run concurrently rather than one-at-a-time on each drop.
+    for s in &sessions {
+        s.request_shutdown();
+    }
+    // Reap in parallel: dropping each session blocks up to SHUTDOWN_GRACE on its
+    // worker, so a sequential drop would serialize (N × grace) if one hangs.
+    std::thread::scope(|scope| {
+        for s in sessions {
+            scope.spawn(move || drop(s));
+        }
+    });
 }
 
-/// Write each agent's in-process captured audio (sent + received) to the cwd as
-/// WAV, named with a shared run timestamp (`--save-audio`). The backend captures
-/// the audio in memory (no sndfile), so we serialise it ourselves.
+/// Write each agent's captured audio (sent + received) to the cwd as WAV, named
+/// with a shared run timestamp (`--save-audio`). Each worker captures the audio
+/// in memory and writes its own files (no sndfile), so we just hand it the
+/// name prefix and report the paths it wrote.
 fn save_recordings(sessions: &HashMap<String, AgentSession>) {
     let run_ts = chrono::Local::now().format("%Y%m%d-%H%M%S");
     let mut names: Vec<&String> = sessions.keys().collect();
     names.sort();
     for name in names {
         let session = &sessions[name];
-        for (tag, audio) in [
-            ("sent", session.sent_audio()),
-            ("recv", session.received_audio()),
-        ] {
-            let Some((samples, srate)) = audio else {
-                continue;
-            };
-            if samples.is_empty() {
-                continue;
-            }
-            let dst = std::path::PathBuf::from(format!("ringo-audio-{run_ts}-{name}-{tag}.wav"));
-            match audio::write_wav(&dst, &samples, srate) {
-                Ok(()) => eprintln!("saved recording: {} ({name} {tag})", dst.display()),
-                Err(e) => eprintln!("(could not save {}: {e})", dst.display()),
-            }
+        let prefix = format!("ringo-audio-{run_ts}-{name}");
+        for path in session.save_audio(&prefix) {
+            eprintln!("saved recording: {path}");
         }
     }
 }

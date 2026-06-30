@@ -171,6 +171,21 @@ enum Commands {
         // The /metrics bearer token is read only from RINGO_FLOW_SERVE_METRICS_TOKEN
         // (a secret — kept out of the CLI args / process list).
     },
+    /// Internal: run a single agent as a worker process driven over stdio
+    /// (spawned by `run`). The agent config arrives as the first stdin line, so
+    /// this takes no arguments. Not for direct use.
+    #[command(hide = true)]
+    Agent,
+}
+
+/// Encode a `--log`/`--sip-trace` value for the worker env: `None` = off (no
+/// var), `Some(None)` = stderr (`-`), `Some(Some(path))` = that file.
+fn log_env(opt: &Option<Option<PathBuf>>) -> Option<String> {
+    match opt {
+        None => None,
+        Some(None) => Some("-".to_string()),
+        Some(Some(path)) => Some(path.to_string_lossy().into_owned()),
+    }
 }
 
 /// Parse repeated `--set key=value` flags into a map.
@@ -212,17 +227,22 @@ fn main() -> Result<()> {
             no_color,
             insecure_http,
         } => {
-            // Backend log destination (process-global): off unless --log is given.
-            match &log {
-                None => {}
-                Some(None) => ringo_core::log::init_stderr(),
-                Some(Some(path)) => ringo_core::log::init_file(path),
+            // Logging is produced by the per-agent worker processes (baresip runs
+            // there, not in this parent). They inherit the destination via env and
+            // configure their own sinks; see the ringo-agent worker. Off unless
+            // `--log`/`--sip-trace` is given. The parent's own diagnostics
+            // (e.g. ProcessClient warnings) go to stderr only when `--log` is on.
+            if matches!(log, Some(None)) {
+                ringo_core::log::init_stderr();
             }
-            // SIP trace — its own sink, independent of --log.
-            match &sip_trace {
-                None => {}
-                Some(None) => ringo_core::sip_trace_stderr(),
-                Some(Some(path)) => ringo_core::sip_trace_file(path),
+            // SAFETY: set once at startup, before any threads/agents are spawned.
+            unsafe {
+                if let Some(v) = log_env(&log) {
+                    std::env::set_var("RINGO_AGENT_LOG", v);
+                }
+                if let Some(v) = log_env(&sip_trace) {
+                    std::env::set_var("RINGO_AGENT_SIPTRACE", v);
+                }
             }
             // Color off if `--no-color`/`--no-ansi` or the `NO_COLOR` env var is set
             // (https://no-color.org); the reporter additionally requires a TTY.
@@ -282,5 +302,6 @@ fn main() -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(serve::serve(&config, overrides))
         }
+        Commands::Agent => ringo_agent::worker::run(),
     }
 }

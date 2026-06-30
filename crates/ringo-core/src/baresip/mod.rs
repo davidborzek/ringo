@@ -244,8 +244,17 @@ impl Backend for BaresipBackend {
             } else {
                 String::new()
             };
+            // catchall: route incoming INVITEs that match no contact-user to this
+            // UA instead of replying 404 (needed when the provider addresses calls
+            // to identities other than the registration username). It's an account
+            // address parameter (`;catchall`).
+            let catchall_param = if account.catchall {
+                ";catchall=yes"
+            } else {
+                ""
+            };
             let aor = match CString::new(format!(
-                "{}<sip:{}@{}>{}{}",
+                "{}<sip:{}@{}>{}{}{}",
                 account
                     .display_name
                     .as_deref()
@@ -261,6 +270,7 @@ impl Backend for BaresipBackend {
                     .map(|s| format!(";transport={s}"))
                     .unwrap_or_default(),
                 audio_params,
+                catchall_param,
             )) {
                 Ok(s) => s,
                 Err(_) => bail!("account fields contain an interior NUL byte"),

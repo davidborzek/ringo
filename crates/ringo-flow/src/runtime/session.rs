@@ -1,16 +1,16 @@
-//! A live agent session: one headless backend instance plus its event stream.
-//! Incoming events are folded into an [`AgentState`] (published over a `watch`
-//! channel) that the runner asserts against.
+//! A live agent session: one `ringo-flow agent` worker process plus its event
+//! stream. Incoming events are folded into an [`AgentState`] (published over a
+//! `watch` channel) that the runner asserts against. Every agent runs in its own
+//! process (see the `ringo-agent` crate); the parent holds only a [`ProcessClient`].
 
 use super::state::{AgentState, reduce};
 use anyhow::{Context, Result};
+use ringo_agent::audio::ToneAnalysis;
+use ringo_agent::{AgentConfig, ProcessClient};
 use ringo_core::account::{Account, BackendOptions};
-use ringo_core::backend::Backend;
-use ringo_core::backend::BaresipBackend;
 use ringo_core::event::AppEvent;
 use ringo_core::event::InviteHeaders;
 use ringo_core::event::MediaStats;
-use ringo_core::phone::Phone;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -21,22 +21,17 @@ const TRACE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 pub struct AgentSession {
     pub aor: String,
     pub regint: u32,
-    /// Backend audio key for this agent (the account username) — identifies its
-    /// in-process received-audio buffer.
-    audio_key: String,
-    phone: Box<dyn Phone>,
+    client: ProcessClient,
     state_rx: watch::Receiver<AgentState>,
-    _handle: Box<dyn Send>,
 }
 
 impl AgentSession {
-    /// Spawn a backend for an account, connect, and fold events into shared
-    /// state. `name` labels the instance/logs.
+    /// Spawn a worker process for an account, connect, and fold events into
+    /// shared state. `name` labels the instance/logs.
     pub async fn connect(name: &str, account: Account, options: &BackendOptions) -> Result<Self> {
-        let rt = tokio::runtime::Handle::current();
-        let session = BaresipBackend
-            .spawn_session(&rt, name, &account, options)
-            .with_context(|| format!("spawn backend for `{name}`"))?;
+        let config = agent_config(name, &account, options);
+        let (client, events) =
+            ProcessClient::spawn(config).with_context(|| format!("spawn agent `{name}`"))?;
 
         let (state_tx, state_rx) = watch::channel(AgentState::default());
         let state_tx = Arc::new(state_tx);
@@ -44,9 +39,8 @@ impl AgentSession {
         // Bridge the sync mpsc events into an async channel so the reader task
         // can consume them without blocking the tokio runtime.
         let (async_event_tx, mut async_event_rx) = tokio::sync::mpsc::channel::<AppEvent>(64);
-        let events_rx = session.events;
         tokio::task::spawn_blocking(move || {
-            while let Ok(event) = events_rx.recv() {
+            while let Ok(event) = events.recv() {
                 if async_event_tx.blocking_send(event).is_err() {
                     break;
                 }
@@ -62,35 +56,29 @@ impl AgentSession {
         });
 
         // Trace poll: inbound INVITE headers → state (the events don't carry
-        // them). Stops once the session's receivers are gone.
-        if let Some(header_poll) = session.header_poll {
-            let trace_tx = Arc::clone(&state_tx);
-            tokio::spawn(async move {
-                let poll = Arc::new(header_poll);
-                let mut ticker = tokio::time::interval(TRACE_POLL_INTERVAL);
-                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                loop {
-                    ticker.tick().await;
-                    if trace_tx.is_closed() {
-                        break;
-                    }
-                    let poll = Arc::clone(&poll);
-                    match tokio::task::spawn_blocking(move || poll()).await {
-                        Ok(Some(invites)) => merge_received_headers(&trace_tx, invites),
-                        Ok(None) => {}
-                        Err(_) => break,
-                    }
+        // them). The worker pushes them; we drain the client's buffer here.
+        let headers = client.headers_handle();
+        let trace_tx = Arc::clone(&state_tx);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(TRACE_POLL_INTERVAL);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticker.tick().await;
+                if trace_tx.is_closed() {
+                    break;
                 }
-            });
-        }
+                let new = headers.lock().unwrap_or_else(|e| e.into_inner()).take();
+                if let Some(invites) = new {
+                    merge_received_headers(&trace_tx, invites);
+                }
+            }
+        });
 
         Ok(Self {
             aor: format!("sip:{}@{}", account.username, account.domain),
             regint: account.regint.unwrap_or(3600),
-            audio_key: account.username.clone(),
-            phone: session.phone,
+            client,
             state_rx,
-            _handle: session.handle,
         })
     }
 
@@ -107,84 +95,107 @@ impl AgentSession {
 
     /// Switch the agent's audio source on its active call.
     pub fn set_audio_source(&self, spec: &str) {
-        self.phone.set_audio_source(spec);
+        self.client.set_audio_source(spec);
     }
 
-    /// Recently received (decoded) mono audio + sample rate, captured in-process
-    /// by the backend. Used by `verify-audio` instead of reading WAV recordings.
-    pub fn received_audio(&self) -> Option<(Vec<i16>, u32)> {
-        ringo_core::received_audio(&self.audio_key)
+    /// Goertzel analysis of the last `window` of received audio, computed in the
+    /// worker on its in-process captured buffer (used by `verify-audio`).
+    pub fn analyze_tone(&self, freq: u32, window: Duration) -> ToneAnalysis {
+        self.client.analyze_tone(freq, window)
     }
 
-    /// Recently sent (rendered) mono audio + sample rate, captured in-process.
-    /// Populated only with `--save-audio` (full capture); used to save the sent
-    /// recording.
-    pub fn sent_audio(&self) -> Option<(Vec<i16>, u32)> {
-        ringo_core::sent_audio(&self.audio_key)
+    /// Ask the worker to write its captured sent/received audio as WAVs named
+    /// `<prefix>-sent.wav` / `<prefix>-recv.wav`; returns the paths written.
+    pub fn save_audio(&self, prefix: &str) -> Vec<String> {
+        self.client.save_audio(prefix)
+    }
+
+    /// Number of active calls in the worker (used by teardown's BYE-flush wait).
+    pub fn call_count(&self) -> u32 {
+        self.client.call_count()
+    }
+
+    /// Signal the worker to deregister and exit (non-blocking). Call on all
+    /// agents before dropping them so the de-REGISTERs run concurrently.
+    pub fn request_shutdown(&self) {
+        self.client.request_shutdown();
     }
 
     /// RTP media stats (jitter/loss/RTT + MOS) for the active or last call.
     pub fn media_stats(&self) -> Option<MediaStats> {
-        self.phone.media_stats()
+        self.client.media_stats()
     }
 
     /// DTMF digits received on the active/last call so far, in order.
     pub fn received_dtmf(&self) -> String {
-        self.phone.received_dtmf()
+        self.client.received_dtmf()
     }
 
     // ── Commands ────────────────────────────────────────────────────────────
 
     pub fn register(&self) {
-        self.phone.register(&self.aor, self.regint);
+        self.client.register(&self.aor, self.regint);
     }
     pub fn dial(&self, target: &str) {
-        self.phone.dial(target);
+        self.client.dial(target);
     }
     pub fn accept(&self) {
-        self.phone.accept();
+        self.client.accept();
     }
     pub fn hold(&self) {
-        self.phone.hold();
+        self.client.hold();
     }
     pub fn resume(&self) {
-        self.phone.resume();
+        self.client.resume();
     }
     pub fn mute(&self) {
-        self.phone.mute();
+        self.client.mute();
     }
     pub fn send_dtmf(&self, digit: char) {
-        self.phone.send_dtmf(digit);
+        self.client.send_dtmf(digit);
     }
     pub fn add_header(&self, key: &str, value: &str) {
-        self.phone.add_header(key, value);
+        self.client.add_header(key, value);
     }
     pub fn hangup(&self) {
-        self.phone.hangup();
+        self.client.hangup();
     }
     pub fn hangup_all(&self) {
-        self.phone.hangup_all();
+        self.client.hangup_all();
     }
     pub fn transfer(&self, uri: &str) {
-        self.phone.transfer(uri);
+        self.client.transfer(uri);
     }
     pub fn attended_transfer_start(&self, uri: &str) {
-        self.phone.attended_transfer_start(uri);
+        self.client.attended_transfer_start(uri);
     }
     pub fn attended_transfer_exec(&self) {
-        self.phone.attended_transfer_exec();
+        self.client.attended_transfer_exec();
     }
     pub fn attended_transfer_abort(&self) {
-        self.phone.attended_transfer_abort();
+        self.client.attended_transfer_abort();
     }
     pub fn deflect_incoming(&self, contact: &str, diversion: Option<&str>) {
-        self.phone.deflect_incoming(contact, diversion);
+        self.client.deflect_incoming(contact, diversion);
     }
     pub fn arm_invite_response(&self, scode: u16, reason: &str, headers: Vec<String>) {
-        self.phone.arm_invite_response(scode, reason, headers);
+        self.client.arm_invite_response(scode, reason, headers);
     }
     pub fn disarm_invite_response(&self) {
-        self.phone.disarm_invite_response();
+        self.client.disarm_invite_response();
+    }
+}
+
+/// Build the worker handshake config from an account + backend options. Process
+/// agents always register as `catchall` — there is exactly one UA per worker
+/// process, so the catch-all fallback is unambiguous (see the worker).
+fn agent_config(name: &str, account: &Account, options: &BackendOptions) -> AgentConfig {
+    let mut account = account.clone();
+    account.catchall = true;
+    AgentConfig {
+        name: name.to_string(),
+        account,
+        options: options.clone(),
     }
 }
 

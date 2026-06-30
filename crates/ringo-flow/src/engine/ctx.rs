@@ -476,9 +476,15 @@ impl Ctx {
     pub fn set_audio_source(&self, name: &str, spec: &str) -> Result<(), String> {
         self.with_session(name, |s| s.set_audio_source(spec))
     }
-    /// This agent's in-process captured received audio (samples + sample rate).
-    pub fn received_audio(&self, name: &str) -> Result<Option<(Vec<i16>, u32)>, String> {
-        self.with_session(name, |s| s.received_audio())
+    /// Goertzel analysis of the last `window` of this agent's received audio,
+    /// computed in the agent's worker process.
+    pub fn analyze_tone(
+        &self,
+        name: &str,
+        freq: u32,
+        window: std::time::Duration,
+    ) -> Result<ringo_agent::audio::ToneAnalysis, String> {
+        self.with_session(name, |s| s.analyze_tone(freq, window))
     }
     pub fn emit_action(&self, name: &str, kind: &'static str, detail: Option<&str>) {
         self.act(name, kind, detail);
@@ -560,22 +566,16 @@ impl Ctx {
                 let _ = task.await;
             }
         });
-        drop(sessions);
-        // ua_unregister sends REGISTER expires=0 asynchronously on the RE
-        // thread. Poll ua_isregistered() (without holding the RE lock) until
-        // it returns false or timeout — ensures the PBX has processed the
-        // deregister before the next scenario registers a new UA.
-        self.rt.block_on(async {
-            let deadline = tokio::time::Instant::now() + Duration::from_millis(3000);
-            loop {
-                if !ringo_core::is_registered() {
-                    break;
-                }
-                if tokio::time::Instant::now() >= deadline {
-                    eprintln!("reset_sessions: unregister timed out (3s)");
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
+        // Signal every worker to deregister + exit BEFORE reaping any, so their
+        // de-REGISTERs run concurrently — otherwise dropping the sessions blocks
+        // one-worker-at-a-time and the per-scenario reset takes N × the wait.
+        for s in &sessions {
+            s.request_shutdown();
+        }
+        // Reap in parallel so a single slow/stuck worker can't serialize the rest.
+        std::thread::scope(|scope| {
+            for s in sessions {
+                scope.spawn(move || drop(s));
             }
         });
         drop(servers);
