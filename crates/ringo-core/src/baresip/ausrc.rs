@@ -34,6 +34,9 @@ enum GenSpec {
     Tone(u32),
     /// Mono S16 samples at the given sample rate, looped.
     File(Arc<Vec<i16>>, u32),
+    /// Live-streamed mono S16 at the given sample rate: each frame is pulled from
+    /// the UA's [`STREAM_IN`] queue (fed via [`push_audio`]); underrun → silence.
+    Stream(u32),
 }
 
 /// A registry entry: the desired spec plus a version that bumps on every change,
@@ -54,6 +57,52 @@ fn registry() -> &'static Mutex<HashMap<String, Entry>> {
 /// Registered `struct ausrc *` (kept alive for the process lifetime).
 static AUSRC: OnceLock<usize> = OnceLock::new();
 
+/// A mono PCM (s16) audio frame plus its sample rate — the unit fed into a call
+/// via [`push_audio`] and handed out of one via [`subscribe_received_audio`].
+#[derive(Debug, Clone)]
+pub struct AudioFrame {
+    /// Mono 16-bit PCM samples.
+    pub samples: Vec<i16>,
+    /// Sample rate in Hz.
+    pub rate: u32,
+}
+
+/// A single UA's streamed-in PCM queue. Each UA gets its OWN lock so the
+/// real-time render thread only ever contends with that UA's own [`push_audio`]
+/// — never with other UAs' render/feed (which a single global lock would force).
+type StreamQueue = Arc<Mutex<VecDeque<i16>>>;
+
+/// Per-UA stream-in queues, keyed by username. The outer lock is held only for
+/// the O(1) lookup/clone of the per-UA [`StreamQueue`]; all rendering/feeding
+/// happens under the inner per-UA lock, off the global path.
+static STREAM_IN: OnceLock<Mutex<HashMap<String, StreamQueue>>> = OnceLock::new();
+
+fn stream_in() -> &'static Mutex<HashMap<String, StreamQueue>> {
+    STREAM_IN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The per-UA stream-in queue for `key`, if streaming was started for it.
+fn stream_queue(key: &str) -> Option<StreamQueue> {
+    stream_in()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(key)
+        .map(Arc::clone)
+}
+
+/// Per-UA live subscriber for received (decoded) audio frames. One per key; a
+/// new subscription replaces the old.
+static RX_TAPS: OnceLock<Mutex<HashMap<String, std::sync::mpsc::Sender<AudioFrame>>>> =
+    OnceLock::new();
+
+fn rx_taps() -> &'static Mutex<HashMap<String, std::sync::mpsc::Sender<AudioFrame>>> {
+    RX_TAPS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Cap on buffered streamed-in audio (samples ≈ 1 s at 48 kHz). Past this the
+/// oldest samples are dropped, bounding added latency / memory under overrun.
+const STREAM_IN_CAP_SAMPLES: usize = 48_000;
+
 /// Translate a baresip-style source spec into a [`GenSpec`] and store it for
 /// `key`, bumping the version so the render thread reloads it. Accepts the same
 /// specs the engine already produces: `ausine,<freq>`, `aufile,<path>`, and
@@ -69,6 +118,50 @@ pub(super) fn set_generator(key: &str, spec: &str) {
             spec: parsed,
         },
     );
+}
+
+/// Switch the UA's audio source to live-streamed mono s16 PCM at `rate` Hz, fed
+/// via [`push_audio`]. Until samples arrive (or on underrun) the source renders
+/// silence; queued audio is emitted in real time by the render thread.
+pub(super) fn start_audio_stream(key: &str, rate: u32) {
+    stream_in()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(key.to_string())
+        .or_default();
+    let mut map = registry().lock().unwrap_or_else(|e| e.into_inner());
+    let version = map.get(key).map(|e| e.version + 1).unwrap_or(0);
+    map.insert(
+        key.to_string(),
+        Entry {
+            version,
+            spec: GenSpec::Stream(rate.max(1)),
+        },
+    );
+}
+
+/// Append mono s16 `samples` (at the rate given to [`start_audio_stream`]) to the
+/// UA's stream-in queue. No-op if the queue was never started.
+pub(super) fn push_audio(key: &str, samples: &[i16]) {
+    let Some(q) = stream_queue(key) else {
+        return;
+    };
+    let mut q = q.lock().unwrap_or_else(|e| e.into_inner());
+    q.extend(samples.iter().copied());
+    while q.len() > STREAM_IN_CAP_SAMPLES {
+        q.pop_front();
+    }
+}
+
+/// Subscribe to the UA's received (decoded) audio: returns a receiver of mono
+/// s16 [`AudioFrame`]s as they arrive. Replaces any previous subscription.
+pub(super) fn subscribe_received_audio(key: &str) -> std::sync::mpsc::Receiver<AudioFrame> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    rx_taps()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(key.to_string(), tx);
+    rx
 }
 
 /// Pre-seed a UA's source with silence (called at session setup) so the source
@@ -96,6 +189,14 @@ pub(super) fn remove_generator(key: &str) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(key);
+    stream_in()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(key);
+    rx_taps()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(key);
 }
 
 fn spec_name(spec: &GenSpec) -> String {
@@ -103,6 +204,7 @@ fn spec_name(spec: &GenSpec) -> String {
         GenSpec::Silence => "silence".into(),
         GenSpec::Tone(f) => format!("tone({f}Hz)"),
         GenSpec::File(s, sr) => format!("file({} samples @{sr}Hz)", s.len()),
+        GenSpec::Stream(sr) => format!("stream(@{sr}Hz)"),
     }
 }
 
@@ -297,6 +399,32 @@ unsafe extern "C" fn alloc_handler(
     0
 }
 
+/// Fill `mono` from the front of the stream-in queue `q`, nearest-sample
+/// resampling input→output by `step` (= in_rate / out_rate). The input read is
+/// consumed (dropped from the queue front); `pos` carries the fractional read
+/// position across calls. Underrun (empty/short queue) renders silence, and an
+/// emptied queue resets `pos` so newly-fed audio starts cleanly.
+fn render_stream(q: Option<&mut VecDeque<i16>>, pos: &mut f64, step: f64, mono: &mut [i16]) {
+    let Some(q) = q else {
+        mono.iter_mut().for_each(|s| *s = 0);
+        return;
+    };
+    for s in mono.iter_mut() {
+        *s = q.get(*pos as usize).copied().unwrap_or(0);
+        *pos += step;
+    }
+    // Consume the read input by popping from the front (O(consumed), no memmove
+    // of the tail — this runs under the per-UA lock on the real-time thread).
+    let consumed = (*pos as usize).min(q.len());
+    for _ in 0..consumed {
+        q.pop_front();
+    }
+    *pos -= consumed as f64;
+    if q.is_empty() {
+        *pos = 0.0; // underran: restart cleanly when audio resumes
+    }
+}
+
 /// The render thread: every `ptime` ms, generate one frame from the current
 /// registry spec for `key` and hand it to baresip via `rh`.
 fn render_loop(
@@ -321,6 +449,7 @@ fn render_loop(
     let mut cur_spec = GenSpec::Silence;
     let mut phase = 0.0f64; // tone phase accumulator
     let mut file_pos = 0.0f64; // fractional read position into the file
+    let mut stream_pos = 0.0f64; // fractional read position into the stream-in queue
 
     let mut start = Instant::now();
     let mut frame_idx: u64 = 0;
@@ -354,6 +483,7 @@ fn render_loop(
                     cur_spec = spec.clone();
                     phase = 0.0;
                     file_pos = 0.0;
+                    stream_pos = 0.0;
                     crate::rlog!(
                         Info,
                         "ringo ausrc: key={key} spec={} (v{version})",
@@ -397,6 +527,18 @@ fn render_loop(
                     let i = file_pos as usize;
                     *s = samples.get(i).copied().unwrap_or(0);
                     file_pos += step;
+                }
+            }
+            GenSpec::Stream(stream_srate) => {
+                let step = (*stream_srate as f64 / srate as f64).max(f64::MIN_POSITIVE);
+                // Resolve the per-UA queue (brief global lock for the O(1) clone),
+                // then render under that UA's own lock — no cross-UA contention.
+                match stream_queue(&key) {
+                    Some(q) => {
+                        let mut q = q.lock().unwrap_or_else(|e| e.into_inner());
+                        render_stream(Some(&mut q), &mut stream_pos, step, &mut mono);
+                    }
+                    None => render_stream(None, &mut stream_pos, step, &mut mono),
                 }
             }
         }
@@ -576,7 +718,7 @@ fn capture_mono(buffers: &Mutex<HashMap<String, AudioBuf>>, key: &str, samples: 
 /// Append the channel-0 mono samples from an interleaved player frame to the
 /// UA's received buffer. `wh` always fills the full `sampc` (aurecv_read pads an
 /// underrun with silence), so the whole `sampv` is valid decoded audio.
-fn capture_rx(key: &str, sampv: &[u8], is_float: bool, ch: usize) {
+fn capture_rx(key: &str, sampv: &[u8], is_float: bool, ch: usize, srate: u32) {
     let ch = ch.max(1);
     let mono: Vec<i16> = if is_float {
         let f =
@@ -590,6 +732,18 @@ fn capture_rx(key: &str, sampv: &[u8], is_float: bool, ch: usize) {
         s.chunks_exact(ch).map(|fr| fr[0]).collect()
     };
     capture_mono(rx_buffers(), key, &mono);
+    // Live tap: hand the frame to a subscriber (e.g. streaming RX out for STT).
+    // Drop the subscription if the receiver is gone.
+    let mut taps = rx_taps().lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(tx) = taps.get(key) {
+        let frame = AudioFrame {
+            samples: mono,
+            rate: srate,
+        };
+        if tx.send(frame).is_err() {
+            taps.remove(key);
+        }
+    }
 }
 
 unsafe extern "C" fn play_destructor(arg: *mut c_void) {
@@ -739,7 +893,7 @@ fn play_loop(
             // aubuf_read_auframe), then we capture it for in-process verify.
             unsafe { wh(&mut af, cb.arg as *mut c_void) };
             if !key.is_empty() {
-                capture_rx(&key, &sampv, is_float, ch as usize);
+                capture_rx(&key, &sampv, is_float, ch as usize, srate);
             }
         }
 
@@ -782,4 +936,71 @@ pub(super) fn register_module() -> Result<(), String> {
     }
     let _ = AUPLAY.set(pp as usize);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_stream_same_rate_drains_in_order() {
+        let mut q: VecDeque<i16> = (1..=6).collect();
+        let mut pos = 0.0;
+        let mut out = [0i16; 4];
+        render_stream(Some(&mut q), &mut pos, 1.0, &mut out);
+        assert_eq!(out, [1, 2, 3, 4]);
+        assert_eq!(q.iter().copied().collect::<Vec<_>>(), vec![5, 6]); // 4 consumed
+        // Next frame continues where we left off.
+        let mut out2 = [0i16; 2];
+        render_stream(Some(&mut q), &mut pos, 1.0, &mut out2);
+        assert_eq!(out2, [5, 6]);
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn render_stream_underrun_is_silence() {
+        let mut q: VecDeque<i16> = VecDeque::from(vec![7, 8]);
+        let mut pos = 0.0;
+        let mut out = [0i16; 4];
+        render_stream(Some(&mut q), &mut pos, 1.0, &mut out);
+        assert_eq!(out, [7, 8, 0, 0]); // ran out → silence
+        assert!(q.is_empty());
+        assert_eq!(pos, 0.0); // reset on underrun
+        // No subscription / no queue → all silence.
+        let mut out2 = [9i16; 3];
+        render_stream(None, &mut pos, 1.0, &mut out2);
+        assert_eq!(out2, [0, 0, 0]);
+    }
+
+    #[test]
+    fn render_stream_downsamples_2to1() {
+        // step = in/out = 2.0 → take every other input sample.
+        let mut q: VecDeque<i16> = (0..8).collect();
+        let mut pos = 0.0;
+        let mut out = [0i16; 4];
+        render_stream(Some(&mut q), &mut pos, 2.0, &mut out);
+        assert_eq!(out, [0, 2, 4, 6]);
+        assert!(q.is_empty()); // consumed all 8
+    }
+
+    #[test]
+    fn push_audio_is_noop_before_start_then_caps() {
+        let key = "ringo-test-stream-cap"; // unique key, isolated from other tests
+        // Before start_audio_stream: no queue exists, push is a no-op.
+        push_audio(key, &[1, 2, 3]);
+        assert!(stream_queue(key).is_none());
+
+        // After start: samples are buffered, bounded by STREAM_IN_CAP_SAMPLES.
+        start_audio_stream(key, 8000);
+        push_audio(key, &vec![7i16; STREAM_IN_CAP_SAMPLES + 100]);
+        let q = stream_queue(key).expect("queue exists after start");
+        assert_eq!(
+            q.lock().unwrap_or_else(|e| e.into_inner()).len(),
+            STREAM_IN_CAP_SAMPLES
+        );
+
+        // Teardown drops the per-UA queue.
+        remove_generator(key);
+        assert!(stream_queue(key).is_none());
+    }
 }
