@@ -1,27 +1,36 @@
 //! The agent worker: one process, one registered UA (with `catchall`), driven
-//! over stdio with the `proto` NDJSON protocol. Because each worker is its own
+//! over stdio with the `proto` framed protocol. Because each worker is its own
 //! process it binds its own SIP socket, so the provider routes incoming calls to
 //! *this* registration by contact address — which in-process multi-UA cannot do
 //! (one shared socket, and the request-URI user need not identify the UA, so
 //! there's no way to demux).
 //!
-//! Channels: stdin carries the [`AgentConfig`] handshake (first line) then
-//! command/query messages; stdout carries event/reply/header messages (a single
-//! writer thread serialises them, so lines never interleave); stderr carries
-//! logs / SIP traces.
+//! Channels: stdin carries the [`crate::AgentConfig`] handshake (first frame) then
+//! command/query control frames + inbound audio frames; stdout carries
+//! event/reply/header control frames + received-audio frames (a single writer
+//! thread serialises them, so frames never interleave); stderr carries logs /
+//! SIP traces.
 
 use crate::audio;
 use crate::proto::{
-    AgentConfig, Command, FromWorker, Headers, Query, QueryEnvelope, Ready, Reply, ReplyResult,
-    ToWorker, WireEvent, WireMediaStats, WireToneAnalysis,
+    self, Command, FromWorker, Headers, Query, QueryEnvelope, Ready, Reply, ReplyResult,
+    RxAudioStarted, ToWorker, WireEvent, WireMediaStats,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use ringo_core::backend::{Backend, BaresipBackend};
 use ringo_core::phone::Phone;
-use std::io::{BufRead, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{RecvTimeoutError, SyncSender};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+/// An item queued for the single stdout writer: a JSON control message or a raw
+/// audio frame (mono s16 PCM, the agent's received audio).
+enum Out {
+    Control(FromWorker),
+    Audio(Vec<i16>),
+}
 
 /// How often to forward newly-seen inbound INVITE headers to the parent.
 const HEADER_POLL_INTERVAL: Duration = Duration::from_millis(150);
@@ -42,19 +51,30 @@ const UNREGISTER_TIMEOUT: Duration = Duration::from_millis(600);
 /// closes (EOF) or a `Shutdown` command arrives.
 pub fn run() -> Result<()> {
     let stdin = std::io::stdin();
-    let mut lines = stdin.lock().lines();
+    let mut stdin = stdin.lock();
 
-    // Handshake: the first line is the agent config.
-    let config: AgentConfig = {
-        let first = lines
-            .next()
-            .context("worker stdin closed before config handshake")?
-            .context("read config handshake")?;
-        serde_json::from_str(&first).context("parse config handshake")?
+    // Handshake: the first frame is a control frame carrying a versioned envelope
+    // (protocol version + agent config).
+    let handshake: proto::Handshake = match proto::read_frame(&mut stdin) {
+        Ok(Some((proto::FRAME_CONTROL, payload))) => {
+            serde_json::from_slice(&payload).context("parse config handshake")?
+        }
+        Ok(Some(_)) => bail!("worker: first frame was not the config handshake"),
+        Ok(None) => bail!("worker stdin closed before config handshake"),
+        Err(e) => return Err(e).context("read config handshake"),
     };
+    if handshake.proto_version != proto::PROTO_VERSION {
+        bail!(
+            "worker: protocol version mismatch (parent {}, worker {}); rebuild so \
+             both sides share one binary",
+            handshake.proto_version,
+            proto::PROTO_VERSION
+        );
+    }
+    let config = handshake.config;
 
     // Logs / SIP traces go to the destination the parent chose (inherited via
-    // env); stdout stays reserved for the protocol. Off by default.
+    // env); the framed stream stays reserved for the protocol. Off by default.
     init_logging(&config.name);
 
     let account = config.account;
@@ -75,30 +95,37 @@ pub fn run() -> Result<()> {
     let header_poll = session.header_poll;
     let handle = session.handle;
 
-    // Single stdout writer: every outbound message funnels through here so lines
-    // never interleave. Bounded so a briefly-slow parent can't grow worker memory
-    // unboundedly; a full queue blocks the sender (backpressure) — events are
-    // never dropped because the parent's state machine depends on them. Ends when
-    // all `tx` clones drop.
-    let (tx, rx) = std::sync::mpsc::sync_channel::<FromWorker>(WRITER_CHANNEL_BOUND);
+    // Single stdout writer: every outbound frame (control or audio) funnels
+    // through here so frames never interleave. Bounded so a briefly-slow parent
+    // can't grow worker memory unboundedly; a full queue blocks the sender
+    // (backpressure) — control is never dropped (the parent's state machine
+    // depends on it). Ends when all `tx` clones drop.
+    let (tx, rx) = std::sync::mpsc::sync_channel::<Out>(WRITER_CHANNEL_BOUND);
     let writer = std::thread::spawn(move || {
         let stdout = std::io::stdout();
         while let Ok(msg) = rx.recv() {
-            match serde_json::to_string(&msg) {
-                Ok(line) => {
-                    let mut out = stdout.lock();
-                    if writeln!(out, "{line}").is_err() || out.flush().is_err() {
-                        break;
+            let mut out = stdout.lock();
+            let res = match msg {
+                Out::Control(c) => match serde_json::to_vec(&c) {
+                    Ok(bytes) => proto::write_frame(&mut out, proto::FRAME_CONTROL, &bytes),
+                    Err(e) => {
+                        ringo_core::rlog!(Warn, "serialize outbound: {e}");
+                        continue;
                     }
+                },
+                Out::Audio(samples) => {
+                    proto::write_frame(&mut out, proto::FRAME_AUDIO, &proto::pcm_to_bytes(&samples))
                 }
-                Err(e) => ringo_core::rlog!(Warn, "serialize outbound: {e}"),
+            };
+            if res.is_err() {
+                break;
             }
         }
     });
 
     // Readiness handshake: the backend is up — tell the parent BEFORE anything
     // else, so `ProcessClient::spawn` returns success only once we're live.
-    let _ = tx.send(FromWorker::Ready(Ready { ready: true }));
+    let _ = tx.send(Out::Control(FromWorker::Ready(Ready { ready: true })));
 
     // Event bridge: backend events → stdout. Ends when the backend drops its
     // event sender (the session handle is dropped on teardown).
@@ -106,7 +133,7 @@ pub fn run() -> Result<()> {
     let event_bridge = std::thread::spawn(move || {
         while let Ok(event) = events.recv() {
             if ev_tx
-                .send(FromWorker::Event(WireEvent::from(&event)))
+                .send(Out::Control(FromWorker::Event(WireEvent::from(&event))))
                 .is_err()
             {
                 break;
@@ -129,7 +156,7 @@ pub fn run() -> Result<()> {
                 if let Some(headers) = poll() {
                     if !headers.is_empty()
                         && hdr_tx
-                            .send(FromWorker::Headers(Headers { headers }))
+                            .send(Out::Control(FromWorker::Headers(Headers { headers })))
                             .is_err()
                     {
                         break;
@@ -139,49 +166,69 @@ pub fn run() -> Result<()> {
         })
     });
 
-    // Command/query loop on the remaining stdin lines.
-    for line in lines {
-        // A stdin read error (e.g. non-UTF8) ends the session cleanly rather
-        // than aborting `run()` — fall through to graceful teardown.
-        let line = match line {
-            Ok(l) => l,
+    // RX-audio forwarder: started on the first `StartRxAudio`.
+    let rx_stop = Arc::new(AtomicBool::new(false));
+    let mut rx_forwarder: Option<JoinHandle<()>> = None;
+
+    // Command/query/audio loop on the remaining stdin frames.
+    loop {
+        let frame = match proto::read_frame(&mut stdin) {
+            Ok(Some(f)) => f,
+            Ok(None) => break, // clean EOF
             Err(e) => {
                 ringo_core::rlog!(Warn, "worker stdin read error: {e}");
                 break;
             }
         };
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<ToWorker>(line) {
-            Ok(ToWorker::Cmd(Command::Shutdown)) => break,
-            Ok(ToWorker::Cmd(cmd)) => dispatch(phone.as_ref(), cmd),
-            Ok(ToWorker::Query(QueryEnvelope { id, query })) => {
-                let result = answer(phone.as_ref(), &username, query);
-                if tx
-                    .send(FromWorker::Reply(Reply { reply: id, result }))
-                    .is_err()
-                {
-                    break;
+        match frame {
+            // Inbound audio: play streamed PCM into the call (TTS).
+            (proto::FRAME_AUDIO, payload) => {
+                ringo_core::push_audio(&username, &proto::bytes_to_pcm(&payload));
+            }
+            (proto::FRAME_CONTROL, payload) => match serde_json::from_slice::<ToWorker>(&payload) {
+                Ok(ToWorker::Cmd(Command::Shutdown)) => break,
+                Ok(ToWorker::Cmd(Command::StartTxAudio { rate })) => {
+                    ringo_core::start_audio_stream(&username, rate);
                 }
-            }
-            // Redact the raw line (it may carry credentials/PII) — log only the
-            // parse error and the line length.
-            Err(e) => {
-                ringo_core::rlog!(
+                Ok(ToWorker::Cmd(Command::StartRxAudio)) => {
+                    if rx_forwarder.is_none() {
+                        rx_forwarder = Some(spawn_rx_forwarder(
+                            &username,
+                            tx.clone(),
+                            Arc::clone(&rx_stop),
+                        ));
+                    }
+                }
+                Ok(ToWorker::Cmd(cmd)) => dispatch(phone.as_ref(), cmd),
+                Ok(ToWorker::Query(QueryEnvelope { id, query })) => {
+                    let result = answer(phone.as_ref(), &username, query);
+                    if tx
+                        .send(Out::Control(FromWorker::Reply(Reply { reply: id, result })))
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                // Redact the payload (it may carry credentials/PII) — log only
+                // the parse error and the length.
+                Err(e) => ringo_core::rlog!(
                     Warn,
-                    "ignoring malformed message ({} bytes): {e}",
-                    line.len()
-                )
-            }
+                    "ignoring malformed control frame ({} bytes): {e}",
+                    payload.len()
+                ),
+            },
+            (_kind, _) => {} // unknown frame kind: ignore
         }
     }
 
-    // Teardown: stop the header poll, drop the UA (which also drops the event
-    // sender → ends the bridge), stop the RE thread, then join the writer.
+    // Teardown: stop the poll/forwarder threads, drop the UA (which also drops
+    // the event sender → ends the bridge), stop the RE thread, then join writer.
     stop.store(true, Ordering::Relaxed);
+    rx_stop.store(true, Ordering::Relaxed);
     if let Some(h) = header_thread {
+        let _ = h.join();
+    }
+    if let Some(h) = rx_forwarder {
         let _ = h.join();
     }
     drop(phone);
@@ -205,6 +252,43 @@ pub fn run() -> Result<()> {
     drop(tx);
     let _ = writer.join();
     Ok(())
+}
+
+/// Forward the agent's received audio to the parent: announce the sample rate
+/// (`RxAudioStarted`) before the first frame AND again whenever it changes (a
+/// codec renegotiation can switch e.g. 8k↔16k mid-call), then send each decoded
+/// frame as a raw audio frame. Raw frames carry no rate, so the parent tags them
+/// with the last announced rate — re-announcing keeps that tag correct. Stops on
+/// `stop` (or when the subscription/writer goes away).
+fn spawn_rx_forwarder(
+    username: &str,
+    tx: SyncSender<Out>,
+    stop: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    let rx = ringo_core::subscribe_received_audio(username);
+    std::thread::spawn(move || {
+        let mut announced_rate: Option<u32> = None;
+        while !stop.load(Ordering::Relaxed) {
+            match rx.recv_timeout(Duration::from_millis(200)) {
+                Ok(frame) => {
+                    if announced_rate != Some(frame.rate) {
+                        announced_rate = Some(frame.rate);
+                        let started = FromWorker::RxAudioStarted(RxAudioStarted {
+                            rx_audio_rate: frame.rate,
+                        });
+                        if tx.send(Out::Control(started)).is_err() {
+                            break;
+                        }
+                    }
+                    if tx.send(Out::Audio(frame.samples)).is_err() {
+                        break;
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => continue, // re-check stop
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    })
 }
 
 /// Configure this worker's log + SIP-trace sinks from the parent's choice,
@@ -277,35 +361,19 @@ fn dispatch(phone: &dyn Phone, cmd: Command) {
             headers,
         } => phone.arm_invite_response(scode, &reason, headers),
         Command::DisarmInviteResponse => phone.disarm_invite_response(),
-        Command::Shutdown => {} // handled by the caller
+        // Audio-stream control + shutdown are handled in the run loop, before
+        // dispatch (they need the username / writer, not just the phone).
+        Command::StartTxAudio { .. } | Command::StartRxAudio | Command::Shutdown => {}
     }
 }
 
-/// Answer one query. Audio analysis / WAV writing run here (on the worker's own
-/// in-process captured buffers) so only small results cross the pipe.
+/// Answer one query. WAV writing runs here (on the worker's own in-process
+/// captured buffer) so only the resulting paths cross the pipe; tone analysis
+/// now happens on the parent over the streamed RX audio.
 fn answer(phone: &dyn Phone, username: &str, query: Query) -> ReplyResult {
     match query {
         Query::MediaStats => ReplyResult::MediaStats(phone.media_stats().map(WireMediaStats::from)),
         Query::ReceivedDtmf => ReplyResult::Dtmf(phone.received_dtmf()),
-        Query::AnalyzeTone { freq, window_ms } => {
-            let analysis = match ringo_core::received_audio(username) {
-                Some((samples, srate)) => {
-                    let a = audio::analyze_tone_samples(
-                        &samples,
-                        srate,
-                        freq,
-                        Duration::from_millis(window_ms),
-                    );
-                    WireToneAnalysis {
-                        score: a.score,
-                        rms: a.rms,
-                        samples: a.samples,
-                    }
-                }
-                None => WireToneAnalysis::default(),
-            };
-            ReplyResult::Tone(analysis)
-        }
         Query::SaveAudio { prefix } => {
             let mut written = Vec::new();
             for (tag, captured) in [

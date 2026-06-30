@@ -476,8 +476,13 @@ impl Ctx {
     pub fn set_audio_source(&self, name: &str, spec: &str) -> Result<(), String> {
         self.with_session(name, |s| s.set_audio_source(spec))
     }
+    /// Start streaming the agent's received audio now, so the buffer is warm
+    /// before the first `verify-audio` window.
+    pub fn prime_received_audio(&self, name: &str) -> Result<(), String> {
+        self.with_session(name, |s| s.prime_received_audio())
+    }
     /// Goertzel analysis of the last `window` of this agent's received audio,
-    /// computed in the agent's worker process.
+    /// streamed from the worker and analysed here on the parent.
     pub fn analyze_tone(
         &self,
         name: &str,

@@ -1,21 +1,24 @@
 //! Parent side: [`ProcessClient`] spawns an agent worker (re-execing the host
 //! binary's `agent` subcommand), performs the [`AgentConfig`] handshake, and
-//! exposes the agent's full API over the [`crate::proto`] NDJSON protocol —
+//! exposes the agent's full API over the [`crate::proto`] framed protocol —
 //! fire-and-forget commands, id-correlated queries (blocking on the matching
-//! reply), an [`AppEvent`] stream, and a buffer of pushed inbound INVITE headers.
+//! reply), an [`AppEvent`] stream, a buffer of pushed inbound INVITE headers,
+//! and live audio in/out (TTS into the call / received audio for STT).
 //!
 //! The consumer drives every agent through this, so there is no in-process
-//! baresip UA in the parent. Audio analysis and WAV writing happen in the
-//! worker; only small results cross the pipe.
+//! baresip UA in the parent. WAV writing happens in the worker (only the paths
+//! cross the pipe); received audio for tone analysis is streamed to the parent.
 
-use crate::audio::ToneAnalysis;
-use crate::proto::{AgentConfig, Command, FromWorker, Query, QueryEnvelope, ReplyResult, ToWorker};
+use crate::proto::{
+    self, AgentConfig, Command, FromWorker, Query, QueryEnvelope, ReplyResult, ToWorker,
+};
 use anyhow::{Context, Result};
+use ringo_core::AudioFrame;
 use ringo_core::event::{AppEvent, InviteHeaders, MediaStats};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::BufReader;
 use std::process::{Child, ChildStdin, Command as OsCommand, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -50,6 +53,9 @@ pub struct ProcessClient {
     /// Set by the reader thread when the worker's stdout closes (exit/crash), so
     /// queries short-circuit instead of waiting out `QUERY_TIMEOUT`.
     dead: Arc<AtomicBool>,
+    /// Consumer's sink for received audio frames, installed by `start_rx_audio`.
+    /// (The RX sample rate lives in the reader thread, which tags each frame.)
+    rx_audio: Arc<Mutex<Option<Sender<AudioFrame>>>>,
 }
 
 impl ProcessClient {
@@ -89,37 +95,65 @@ impl ProcessClient {
         let mut stdin = child.stdin.take().context("worker stdin missing")?;
         let stdout = child.stdout.take().context("worker stdout missing")?;
 
-        // Handshake: the config is the first line on stdin (keeps credentials
-        // out of argv/environ).
-        let cfg_line = serde_json::to_string(&config).context("serialize agent config")?;
-        writeln!(stdin, "{cfg_line}").context("write config handshake")?;
-        stdin.flush().context("flush config handshake")?;
+        // Handshake: a versioned envelope carrying the config is the first
+        // control frame on stdin (keeps credentials out of argv/environ).
+        let handshake = proto::Handshake {
+            proto_version: proto::PROTO_VERSION,
+            config,
+        };
+        let cfg_bytes = serde_json::to_vec(&handshake).context("serialize handshake")?;
+        proto::write_frame(&mut stdin, proto::FRAME_CONTROL, &cfg_bytes)
+            .context("write config handshake")?;
 
-        let reader = BufReader::new(stdout);
         let (ev_tx, ev_rx) = channel::<AppEvent>();
         let pending: Arc<Mutex<HashMap<u64, Sender<ReplyResult>>>> = Arc::default();
         let headers: Arc<Mutex<Option<InviteHeaders>>> = Arc::default();
         let dead = Arc::new(AtomicBool::new(false));
+        let rx_audio: Arc<Mutex<Option<Sender<AudioFrame>>>> = Arc::default();
+        let rx_audio_rate = Arc::new(AtomicU32::new(0));
         // The reader signals readiness here once the worker emits its `Ready`
         // ACK; spawn() waits on it with a bound, so a worker stuck before `Ready`
         // (or one that exited → reader EOF → `ready_tx` dropped) fails the spawn
         // instead of hanging it forever.
         let (ready_tx, ready_rx) = channel::<()>();
 
-        // Reader: demux worker stdout into readiness, events, query replies and
-        // header pushes.
+        // Reader: demux worker stdout frames — control (readiness/events/replies/
+        // header pushes/rx-audio start) and raw received-audio frames.
         let r_pending = Arc::clone(&pending);
         let r_headers = Arc::clone(&headers);
         let r_dead = Arc::clone(&dead);
-        let label = config.name.clone();
+        let r_rx_audio = Arc::clone(&rx_audio);
+        let r_rx_rate = Arc::clone(&rx_audio_rate);
+        let label = handshake.config.name.clone();
+        let mut reader = BufReader::new(stdout);
         std::thread::spawn(move || {
-            for line in reader.lines() {
-                let Ok(line) = line else { break };
-                let line = line.trim();
-                if line.is_empty() {
+            loop {
+                let (kind, payload) = match proto::read_frame(&mut reader) {
+                    Ok(Some(f)) => f,
+                    Ok(None) => break, // clean EOF
+                    Err(e) => {
+                        ringo_core::rlog!(Warn, "agent `{label}`: read error: {e}");
+                        break;
+                    }
+                };
+                if kind == proto::FRAME_AUDIO {
+                    // Received audio → consumer sink, tagged with the announced rate.
+                    let sink = r_rx_audio.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(tx) = sink.as_ref() {
+                        let frame = AudioFrame {
+                            samples: proto::bytes_to_pcm(&payload),
+                            rate: r_rx_rate.load(Ordering::Relaxed),
+                        };
+                        let _ = tx.send(frame);
+                    }
                     continue;
                 }
-                match serde_json::from_str::<FromWorker>(line) {
+                if kind != proto::FRAME_CONTROL {
+                    // Unknown frame kind: ignore (forward-compatible), matching the
+                    // worker's stdin loop. The version handshake makes this unlikely.
+                    continue;
+                }
+                match serde_json::from_slice::<FromWorker>(&payload) {
                     Ok(FromWorker::Ready(_)) => {
                         let _ = ready_tx.send(());
                     }
@@ -147,14 +181,15 @@ impl ProcessClient {
                             None => *buf = Some(h.headers),
                         }
                     }
-                    // Redact the raw line (it may carry PII): log only the length.
-                    Err(e) => {
-                        ringo_core::rlog!(
-                            Warn,
-                            "agent `{label}`: bad message ({} bytes): {e}",
-                            line.len()
-                        )
+                    Ok(FromWorker::RxAudioStarted(s)) => {
+                        r_rx_rate.store(s.rx_audio_rate, Ordering::Relaxed);
                     }
+                    // Redact the payload (it may carry PII): log only the length.
+                    Err(e) => ringo_core::rlog!(
+                        Warn,
+                        "agent `{label}`: bad control frame ({} bytes): {e}",
+                        payload.len()
+                    ),
                 }
             }
             // Worker stdout closed (exit/crash): mark dead and release every
@@ -175,7 +210,7 @@ impl ProcessClient {
                 let _ = child.wait();
                 anyhow::bail!(
                     "agent `{}` not ready within {:?} (bad config / failed backend / exited)",
-                    config.name,
+                    handshake.config.name,
                     READY_TIMEOUT
                 );
             }
@@ -183,7 +218,7 @@ impl ProcessClient {
 
         Ok((
             Self {
-                name: config.name,
+                name: handshake.config.name,
                 stdin: Mutex::new(stdin),
                 pending,
                 next_id: AtomicU64::new(0),
@@ -191,6 +226,7 @@ impl ProcessClient {
                 child: Mutex::new(Some(child)),
                 shutdown_sent: AtomicBool::new(false),
                 dead,
+                rx_audio,
             },
             ev_rx,
         ))
@@ -202,15 +238,15 @@ impl ProcessClient {
     }
 
     fn send(&self, msg: ToWorker) {
-        let line = match serde_json::to_string(&msg) {
-            Ok(l) => l,
+        let bytes = match serde_json::to_vec(&msg) {
+            Ok(b) => b,
             Err(e) => {
                 ringo_core::rlog!(Warn, "agent `{}`: serialize message: {e}", self.name);
                 return;
             }
         };
         let mut w = self.stdin.lock().unwrap_or_else(|e| e.into_inner());
-        if writeln!(w, "{line}").is_err() || w.flush().is_err() {
+        if proto::write_frame(&mut *w, proto::FRAME_CONTROL, &bytes).is_err() {
             ringo_core::rlog!(Warn, "agent `{}`: worker stdin closed", self.name);
         }
     }
@@ -386,20 +422,6 @@ impl ProcessClient {
             _ => String::new(),
         }
     }
-    /// Goertzel analysis of the last `window` of received audio (run in the worker).
-    pub fn analyze_tone(&self, freq: u32, window: Duration) -> ToneAnalysis {
-        match self.query(Query::AnalyzeTone {
-            freq,
-            window_ms: window.as_millis() as u64,
-        }) {
-            Some(ReplyResult::Tone(t)) => ToneAnalysis {
-                score: t.score,
-                rms: t.rms,
-                samples: t.samples,
-            },
-            _ => ToneAnalysis::default(),
-        }
-    }
     /// Ask the worker to write its captured audio to `<prefix>-sent.wav` /
     /// `<prefix>-recv.wav`; returns the paths written.
     pub fn save_audio(&self, prefix: &str) -> Vec<String> {
@@ -416,6 +438,42 @@ impl ProcessClient {
             Some(ReplyResult::CallCount(n)) => n,
             _ => 0,
         }
+    }
+
+    // ── live audio ───────────────────────────────────────────────────────────
+    // TX (audio into the call) has no in-tree consumer yet: it's the building
+    // block for a live producer such as a TTS-driven MCP tool (`ringo-mcp`). RX
+    // (audio out of the call) is consumed by ringo-flow's tone verification.
+    /// Switch the agent's audio source to live-streamed mono s16 PCM at `rate` Hz;
+    /// feed it with [`Self::push_tx_audio`] (e.g. TTS output). Call this and feed
+    /// `push_tx_audio` from the *same* thread: the worker requires the
+    /// `StartTxAudio` control frame to arrive before any audio frame (it drops
+    /// audio that arrives first), and the stdin lock is not FIFO across threads.
+    pub fn start_tx_audio(&self, rate: u32) {
+        self.cmd(Command::StartTxAudio { rate });
+    }
+
+    /// Stream mono s16 PCM into the call as a raw audio frame (after
+    /// [`Self::start_tx_audio`], from the same thread).
+    pub fn push_tx_audio(&self, samples: &[i16]) {
+        let mut w = self.stdin.lock().unwrap_or_else(|e| e.into_inner());
+        if proto::write_frame(&mut *w, proto::FRAME_AUDIO, &proto::pcm_to_bytes(samples)).is_err() {
+            ringo_core::rlog!(
+                Warn,
+                "agent `{}`: worker stdin closed (tx audio)",
+                self.name
+            );
+        }
+    }
+
+    /// Start streaming the agent's received audio; returns a receiver of mono
+    /// [`AudioFrame`]s (e.g. to feed STT or a parent-side tone analysis). One
+    /// subscription per client.
+    pub fn start_rx_audio(&self) -> Receiver<AudioFrame> {
+        let (tx, rx) = channel();
+        *self.rx_audio.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
+        self.cmd(Command::StartRxAudio);
+        rx
     }
 }
 

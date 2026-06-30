@@ -1653,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-agent"
-version = "0.11.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "libc",

@@ -100,6 +100,31 @@ pub fn sent_audio(key: &str) -> Option<(Vec<i16>, u32)> {
     ausrc::sent_window(key)
 }
 
+/// A mono PCM audio frame plus its sample rate — the unit streamed into a call
+/// via [`push_audio`] / out of one via [`subscribe_received_audio`].
+pub use self::ausrc::AudioFrame;
+
+/// Switch the agent's audio source to live-streamed mono s16 PCM at `rate` Hz
+/// (`key` = the audio key / account username). Samples fed via [`push_audio`] are
+/// played in real time; before any arrive (or on underrun) the source is silent.
+/// This is the inbound half for live audio (e.g. TTS into the call).
+pub fn start_audio_stream(key: &str, rate: u32) {
+    ausrc::start_audio_stream(key, rate);
+}
+
+/// Append mono s16 `samples` to the agent's stream-in queue (see
+/// [`start_audio_stream`]). No-op until a stream has been started for `key`.
+pub fn push_audio(key: &str, samples: &[i16]) {
+    ausrc::push_audio(key, samples);
+}
+
+/// Subscribe to the agent's received (decoded) audio as live mono [`AudioFrame`]s
+/// — the outbound half for live audio (e.g. feeding STT). Replaces any previous
+/// subscription for `key`.
+pub fn subscribe_received_audio(key: &str) -> std::sync::mpsc::Receiver<AudioFrame> {
+    ausrc::subscribe_received_audio(key)
+}
+
 /// Returns the total number of active calls across all UAs. Used by
 /// ringo-flow to wait for BYE flush before dropping sessions.
 pub fn call_count() -> u32 {

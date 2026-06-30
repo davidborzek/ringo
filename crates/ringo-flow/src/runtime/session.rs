@@ -5,24 +5,40 @@
 
 use super::state::{AgentState, reduce};
 use anyhow::{Context, Result};
-use ringo_agent::audio::ToneAnalysis;
+use ringo_agent::audio::{self, ToneAnalysis};
 use ringo_agent::{AgentConfig, ProcessClient};
 use ringo_core::account::{Account, BackendOptions};
 use ringo_core::event::AppEvent;
 use ringo_core::event::InviteHeaders;
 use ringo_core::event::MediaStats;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::watch;
 
 /// How often the reader task polls for inbound INVITE headers.
 const TRACE_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
+/// Cap on the parent-side received-audio ring buffer (~30 s at 48 kHz). The tone
+/// analysis only looks at the last `window`, so we keep a bounded recent tail and
+/// drop the oldest samples — long scenarios can't grow the buffer unboundedly.
+const RX_BUFFER_CAP_SAMPLES: usize = 48_000 * 30;
+
+/// Parent-side accumulator for an agent's streamed received audio. Filled by a
+/// drain thread reading the `start_rx_audio` channel; read by `analyze_tone`.
+#[derive(Default)]
+struct RxBuffer {
+    samples: Vec<i16>,
+    rate: u32,
+}
+
 pub struct AgentSession {
     pub aor: String,
     pub regint: u32,
     client: ProcessClient,
     state_rx: watch::Receiver<AgentState>,
+    /// Received-audio ring buffer; `None` until the first `analyze_tone` starts
+    /// the RX stream (lazy — only agents we actually verify pay the cost).
+    rx_audio: Mutex<Option<Arc<Mutex<RxBuffer>>>>,
 }
 
 impl AgentSession {
@@ -79,6 +95,7 @@ impl AgentSession {
             regint: account.regint.unwrap_or(3600),
             client,
             state_rx,
+            rx_audio: Mutex::new(None),
         })
     }
 
@@ -98,10 +115,63 @@ impl AgentSession {
         self.client.set_audio_source(spec);
     }
 
-    /// Goertzel analysis of the last `window` of received audio, computed in the
-    /// worker on its in-process captured buffer (used by `verify-audio`).
+    /// Goertzel analysis of the last `window` of received audio (used by
+    /// `verify-audio`). The worker streams raw received PCM over the agent proto;
+    /// the analysis runs here, on the parent, over the streamed tail. The RX
+    /// stream is started lazily on the first call (so unverified agents don't pay
+    /// for it) — that's fine because `verify-audio` sleeps `window` right after,
+    /// leaving time for the stream to spin up and fill.
     pub fn analyze_tone(&self, freq: u32, window: Duration) -> ToneAnalysis {
-        self.client.analyze_tone(freq, window)
+        let buf = self.rx_audio_buffer();
+        let g = buf.lock().unwrap_or_else(|e| e.into_inner());
+        if g.rate == 0 {
+            // No audio frames yet (stream just started / media not flowing).
+            return ToneAnalysis::default();
+        }
+        audio::analyze_tone_samples(&g.samples, g.rate, freq, window)
+    }
+
+    /// Start the RX audio stream now (idempotent) so the buffer is already
+    /// filling before `verify-audio` sleeps its first window — otherwise the
+    /// first analysis runs against an empty buffer and wastes a whole window.
+    ///
+    /// Also clears any buffered history so each verify analyses only audio
+    /// captured from here on: the stream lives for the agent's whole lifetime,
+    /// so without this a tone from a previous call/leg could still sit in the
+    /// window tail and produce a false positive (the old worker-side buffer was
+    /// reset per call). Safe because `verify-audio` sleeps a full window after
+    /// priming, refilling the tail before it analyses.
+    pub fn prime_received_audio(&self) {
+        let buf = self.rx_audio_buffer();
+        let mut g = buf.lock().unwrap_or_else(|e| e.into_inner());
+        g.samples.clear();
+    }
+
+    /// The agent's received-audio buffer, starting the RX stream + drain thread on
+    /// first use. Subsequent calls reuse the same buffer.
+    fn rx_audio_buffer(&self) -> Arc<Mutex<RxBuffer>> {
+        let mut slot = self.rx_audio.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(buf) = slot.as_ref() {
+            return Arc::clone(buf);
+        }
+        let buf = Arc::new(Mutex::new(RxBuffer::default()));
+        let rx = self.client.start_rx_audio();
+        let drain = Arc::clone(&buf);
+        // Detached: the channel closes when the worker/client drops the RX sender
+        // (teardown), which ends the iterator and the thread.
+        std::thread::spawn(move || {
+            for frame in rx {
+                let mut g = drain.lock().unwrap_or_else(|e| e.into_inner());
+                g.rate = frame.rate;
+                g.samples.extend_from_slice(&frame.samples);
+                if g.samples.len() > RX_BUFFER_CAP_SAMPLES {
+                    let excess = g.samples.len() - RX_BUFFER_CAP_SAMPLES;
+                    g.samples.drain(0..excess);
+                }
+            }
+        });
+        *slot = Some(Arc::clone(&buf));
+        buf
     }
 
     /// Ask the worker to write its captured sent/received audio as WAVs named
