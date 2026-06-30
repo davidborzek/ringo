@@ -59,11 +59,14 @@ fn detect(
     freq: u32,
     window: Duration,
 ) -> Result<(bool, String), String> {
+    // Warm the RX stream before the first sleep so the opening window already
+    // captures audio (the stream is lazy, started on first touch).
+    ctx.prime_received_audio(name)?;
     let mut last = ToneAnalysis::default();
     for _ in 0..VERIFY_AUDIO_ATTEMPTS {
         std::thread::sleep(window);
-        // The agent's worker captures received audio in-process and runs the
-        // Goertzel analysis on its own buffer; only the result crosses the pipe.
+        // The worker streams its received audio over the agent proto; the Goertzel
+        // analysis runs here, on the parent, over the streamed tail.
         last = ctx.analyze_tone(name, freq, window)?;
         if last.score >= audio::TONE_THRESHOLD {
             return Ok((true, fmt_analysis(&last)));
