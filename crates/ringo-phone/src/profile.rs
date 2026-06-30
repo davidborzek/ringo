@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{collections::HashMap, fmt, fs, path::PathBuf};
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Profile {
     pub display_name: Option<String>,
     pub username: String,
@@ -21,12 +21,40 @@ pub struct Profile {
     pub notify: bool,
     #[serde(default = "default_true")]
     pub mwi: bool,
+    /// Register as a baresip `catchall` UA so incoming INVITEs to identities
+    /// other than the registration username are accepted instead of rejected
+    /// with `404 (UA not found)`. On by default; ringo-phone runs a single UA.
+    #[serde(default = "default_true")]
+    pub catchall: bool,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }
 
 fn default_true() -> bool {
     true
+}
+
+impl Default for Profile {
+    fn default() -> Self {
+        Self {
+            display_name: None,
+            username: String::new(),
+            auth_user: None,
+            password: String::new(),
+            domain: String::new(),
+            transport: None,
+            outbound: None,
+            stun_server: None,
+            media_enc: None,
+            regint: None,
+            notes: None,
+            custom_headers: Vec::new(),
+            notify: false,
+            mwi: false,
+            catchall: true,
+            metadata: HashMap::new(),
+        }
+    }
 }
 
 /// Accepts both the legacy table form (`[custom_headers] X-Foo = "bar"`)
@@ -283,6 +311,18 @@ mod tests {
     fn missing_field_defaults_to_empty() {
         let p = parse("");
         assert!(p.custom_headers.is_empty());
+    }
+
+    #[test]
+    fn catchall_defaults_to_true() {
+        // Existing profiles on disk have no `catchall` key — they must load as on.
+        assert!(parse("").catchall);
+        assert!(Profile::default().catchall);
+    }
+
+    #[test]
+    fn catchall_can_be_disabled() {
+        assert!(!parse("catchall = false").catchall);
     }
 
     #[test]

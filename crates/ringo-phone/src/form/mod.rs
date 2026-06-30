@@ -134,6 +134,7 @@ impl FormState {
             notes: opt(get_text(self.field(Notes))),
             notify: get_toggle(self.field(Notify)),
             mwi: get_toggle(self.field(Mwi)),
+            catchall: prev_profile.catchall,
             regint: prev_profile.regint,
             custom_headers: self.custom_headers.clone(),
             metadata: prev_profile.metadata.clone(),
