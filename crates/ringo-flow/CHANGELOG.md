@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.11.0...ringo-flow-v0.11.1) - 2026-06-30
+
+### Bug Fixes
+
+- *(docker)* aarch64 outline-atomics link + Docker build CI gate ([#41](https://github.com/davidborzek/ringo/pull/41))
+
+### Features
+
+- live audio streaming in and out of a call ([#51](https://github.com/davidborzek/ringo/pull/51))
+- *(ringo-flow)* allow multi-value SIP headers on the INVITE ([#50](https://github.com/davidborzek/ringo/pull/50))
+- *(ringo-flow)* run every agent in its own process ([#48](https://github.com/davidborzek/ringo/pull/48))
+- *(ringo-flow)* add `serve` monitor mode ([#47](https://github.com/davidborzek/ringo/pull/47))
+- *(ringo-flow)* add --metrics for per-agent media quality ([#46](https://github.com/davidborzek/ringo/pull/46))
+- *(ringo-flow)* assert on received DTMF ([#45](https://github.com/davidborzek/ringo/pull/45))
+- *(ringo-flow)* RTP media stats + MOS assertions ([#43](https://github.com/davidborzek/ringo/pull/43))
+
 ## [0.11.0](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.10.1...ringo-flow-v0.11.0) - 2026-06-27
 
 ### Documentation

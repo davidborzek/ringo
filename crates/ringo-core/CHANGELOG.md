@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.11.0...ringo-core-v0.12.0) - 2026-06-30
+
+### Features
+
+- live audio streaming in and out of a call ([#51](https://github.com/davidborzek/ringo/pull/51))
+- *(ringo-flow)* run every agent in its own process ([#48](https://github.com/davidborzek/ringo/pull/48))
+- *(ringo-flow)* assert on received DTMF ([#45](https://github.com/davidborzek/ringo/pull/45))
+- *(ringo-flow)* RTP media stats + MOS assertions ([#43](https://github.com/davidborzek/ringo/pull/43))
+
 ## [0.11.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.10.1...ringo-core-v0.11.0) - 2026-06-27
 
 ### Bug Fixes
