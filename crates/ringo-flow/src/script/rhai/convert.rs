@@ -269,6 +269,12 @@ pub(super) const AGENT_CONFIG: &[ConfigField] = &[
         required: false,
         desc: "deflect inbound calls with a 302 to this URI/number (toggle at runtime with `deflect()`/`stop_deflect()`)",
     },
+    ConfigField {
+        key: "metadata",
+        ty: "map",
+        required: false,
+        desc: "free-form data carried on the agent and read back as `agent.metadata` (e.g. `#{ role: \"caller\" }`); not used for SIP",
+    },
 ];
 
 /// The `http(method, url, #{…})` options-map schema (single source for the docs
@@ -454,6 +460,18 @@ pub(super) fn headers_from_map(map: &Map) -> Result<Vec<(String, String)>, Box<E
     Ok(out)
 }
 
+/// The optional `metadata` config map — free-form data carried on the agent handle and
+/// exposed as `agent.metadata`. Absent → empty map; present but not a map → error.
+pub(super) fn metadata_from_map(map: &Map) -> Result<Map, Box<EvalAltResult>> {
+    match map.get("metadata") {
+        None => Ok(Map::new()),
+        Some(d) => d
+            .clone()
+            .try_cast::<Map>()
+            .ok_or_else(|| "agent config `metadata` must be a map".to_string().into()),
+    }
+}
+
 /// `#{ "Contact": "<sip:…>" }` → full header lines (`Contact: <sip:…>`) for a
 /// custom INVITE response. Names are validated as SIP tokens; values are
 /// rejected on CR/LF so they can't inject extra headers into the reply.
@@ -576,7 +594,8 @@ pub(super) fn body_to_string(d: &Dynamic) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        account_from_map, body_to_string, headers_from_map, json_to_dynamic, scenario_info_from_map,
+        account_from_map, body_to_string, headers_from_map, json_to_dynamic, metadata_from_map,
+        scenario_info_from_map,
     };
     use rhai::{Dynamic, Map};
 
@@ -616,6 +635,31 @@ mod tests {
         let mut bad = Map::new();
         bad.insert("username".into(), Dynamic::from("alice"));
         assert!(account_from_map("A", &bad).is_err());
+    }
+
+    #[test]
+    fn metadata_is_optional_free_form_and_a_known_key() {
+        // Absent -> empty map.
+        assert!(metadata_from_map(&Map::new()).unwrap().is_empty());
+
+        // Present -> carried as-is, and a known config key (not rejected by validation).
+        let mut m = Map::new();
+        m.insert("username".into(), Dynamic::from("alice"));
+        m.insert("domain".into(), Dynamic::from("example.com"));
+        let mut meta = Map::new();
+        meta.insert("role".into(), Dynamic::from("caller"));
+        m.insert("metadata".into(), Dynamic::from_map(meta));
+        account_from_map("A", &m).unwrap();
+        let got = metadata_from_map(&m).unwrap();
+        assert_eq!(
+            got.get("role").unwrap().clone().into_string(),
+            Ok("caller".to_string())
+        );
+
+        // Present but not a map -> error.
+        let mut bad = Map::new();
+        bad.insert("metadata".into(), Dynamic::from("nope"));
+        assert!(metadata_from_map(&bad).is_err());
     }
 
     #[test]

@@ -28,6 +28,7 @@ Connect a headless baresip agent and return a handle.
 | `dtmf_mode` | string | `"info"` for reliable headless DTMF (SIP INFO) |
 | `headers` | map | extra SIP headers on the INVITE, e.g. `#{ "X-Foo": "bar" }`; a value may be an array for a repeated header, e.g. `#{ "X-Foo": ["a", "b"] }` |
 | `deflect_to` | string | deflect inbound calls with a 302 to this URI/number (toggle at runtime with `deflect()`/`stop_deflect()`) |
+| `metadata` | map | free-form data carried on the agent and read back as `agent.metadata` (e.g. `#{ role: "caller" }`); not used for SIP |
 
 **Example**
 
@@ -364,6 +365,15 @@ caller.verify_audio_connection(callee);
 ```
 
 ## Fields
+
+<a id="metadata"></a>
+
+### agent.metadata
+
+**Receiver** [`Agent`](agents.md) · **Returns** `map`
+
+Free-form metadata attached at `agent(...)` via the `metadata` config field,
+e.g. `caller.metadata.role`. Empty map if none was given.
 
 <a id="peer"></a>
 

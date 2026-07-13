@@ -106,6 +106,14 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
     );
     reg!(
         engine,
+        "get$metadata",
+        ["agent: Agent", "map"],
+        "/// Free-form metadata attached at `agent(...)` via the `metadata` config field,\n\
+         /// e.g. `caller.metadata.role`. Empty map if none was given.",
+        Agent::metadata
+    );
+    reg!(
+        engine,
         "get$received_dtmf",
         ["agent: Agent", "string"],
         "/// DTMF digits received on the active/last call, in order (e.g. `\"1234#\"`);\n\
@@ -443,6 +451,7 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
         move |name: &str, config: Map| -> Result<Agent, Box<EvalAltResult>> {
             let account = convert::account_from_map(name, &config)?;
             let headers = convert::headers_from_map(&config)?;
+            let metadata = convert::metadata_from_map(&config)?;
             let deflect_to = config
                 .get("deflect_to")
                 .and_then(|d| d.clone().into_string().ok());
@@ -456,6 +465,7 @@ fn register_agent(engine: &mut Engine, ctx: &Arc<Ctx>) {
             Ok(Agent {
                 name: name.to_string(),
                 ctx: c.clone(),
+                metadata,
             })
         }
     );
