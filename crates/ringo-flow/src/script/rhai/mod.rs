@@ -261,7 +261,11 @@ fn collect_dir(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) -> std::io::Res
 /// only show at run time, so this is a syntax gate, not full validation.
 pub fn check(path: &Path) -> Result<()> {
     let src = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    Engine::new()
+    let mut engine = Engine::new();
+    // Match the run engine's expression-depth limits (see `bindings::build_engine`) so
+    // `check` doesn't reject scenarios that would compile and run fine.
+    engine.set_max_expr_depths(64, 64);
+    engine
         .compile(&src)
         .map_err(|e| anyhow!("in {}: {e}", path.display()))?;
     println!("{}: syntax ok", path.display());
