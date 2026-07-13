@@ -568,6 +568,7 @@ fn accept(agent: Agent) -> ();
 /// | `dtmf_mode` | string | `"info"` for reliable headless DTMF (SIP INFO) |
 /// | `headers` | map | extra SIP headers on the INVITE, e.g. `#{ "X-Foo": "bar" }`; a value may be an array for a repeated header, e.g. `#{ "X-Foo": ["a", "b"] }` |
 /// | `deflect_to` | string | deflect inbound calls with a 302 to this URI/number (toggle at runtime with `deflect()`/`stop_deflect()`) |
+/// | `metadata` | map | free-form data carried on the agent and read back as `agent.metadata` (e.g. `#{ role: "caller" }`); not used for SIP |
 ///
 /// # Example
 /// ```rhai
@@ -708,6 +709,10 @@ fn get body(response: HttpResponse) -> string;
 /// Receive-side jitter in milliseconds, or `()` if not available yet.
 /// # Returns: float?
 fn get jitter(quality: CallQuality) -> ?;
+
+/// Free-form metadata attached at `agent(...)` via the `metadata` config field,
+/// e.g. `caller.metadata.role`. Empty map if none was given.
+fn get metadata(agent: Agent) -> map;
 
 /// The request method (upper-case).
 fn get method(request: MockRequest) -> string;

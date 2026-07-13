@@ -8,14 +8,16 @@ use crate::engine::ctx::{CallState, Ctx, mark_pending_label};
 use crate::engine::http::{HttpResponse as EngineHttp, json_path_value};
 use crate::engine::mock_server::{MockRequest as EngineMockRequest, MockServerInner, PathMatcher};
 use crate::engine::sip_user_part;
-use rhai::{Dynamic, EvalAltResult};
+use rhai::{Dynamic, EvalAltResult, Map};
 use std::sync::Arc;
 
-/// A cheap handle to an agent: its name plus the shared context.
+/// A cheap handle to an agent: its name, the shared context, plus free-form
+/// test-author metadata attached at `agent(...)` (read back as `agent.metadata`).
 #[derive(Clone)]
 pub(super) struct Agent {
     pub(super) name: String,
     pub(super) ctx: Arc<Ctx>,
+    pub(super) metadata: Map,
 }
 
 /// Result of a verb/getter: referencing an unconnected agent fails the scenario
@@ -88,6 +90,11 @@ impl Agent {
             .headers(&self.name)
             .map(convert::headers_to_map)
             .map_err(|e| e.into())
+    }
+    /// Free-form metadata attached at `agent(...)` via the `metadata` config field
+    /// (e.g. `caller.metadata.role`). Empty map if none was given.
+    pub(super) fn metadata(&mut self) -> Map {
+        self.metadata.clone()
     }
     /// A map of the agent's current observable state (name, aor, registered,
     /// state, reason, status_code, peer, calls).
