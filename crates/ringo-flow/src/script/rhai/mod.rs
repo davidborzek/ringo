@@ -39,6 +39,62 @@ use std::time::Duration;
 /// nor a per-call argument sets one.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Resolves `import` paths relative to the **importing file's** directory. Rhai's stock
+/// `FileModuleResolver`, once given a base path, resolves every import relative to that
+/// single base instead — so a lib file could not `import` a sibling lib portably. Each
+/// loaded module gets its absolute path as source, so its own (nested) imports anchor to
+/// its directory rather than chaining relative strings.
+#[derive(Debug, Clone, Default)]
+struct RelativeFileResolver;
+
+impl rhai::ModuleResolver for RelativeFileResolver {
+    fn resolve(
+        &self,
+        engine: &Engine,
+        source: Option<&str>,
+        path: &str,
+        pos: rhai::Position,
+    ) -> Result<rhai::Shared<rhai::Module>, Box<rhai::EvalAltResult>> {
+        let mut file_path = if Path::new(path).is_absolute() {
+            PathBuf::from(path)
+        } else {
+            let dir = source
+                .and_then(|s| Path::new(s).parent().map(Path::to_path_buf))
+                .unwrap_or_else(|| PathBuf::from("."));
+            dir.join(path)
+        };
+        file_path.set_extension("rhai");
+        // Absolute path so this module's own imports resolve relative to its directory.
+        let file_path = std::fs::canonicalize(&file_path).unwrap_or(file_path);
+
+        let mut ast = engine.compile_file(file_path.clone()).map_err(|err| {
+            if matches!(&*err, rhai::EvalAltResult::ErrorSystem(_, e) if e.is::<std::io::Error>()) {
+                Box::new(rhai::EvalAltResult::ErrorModuleNotFound(
+                    path.to_string(),
+                    pos,
+                ))
+            } else {
+                Box::new(rhai::EvalAltResult::ErrorInModule(
+                    path.to_string(),
+                    err,
+                    pos,
+                ))
+            }
+        })?;
+        ast.set_source(file_path.to_string_lossy().to_string());
+
+        rhai::Module::eval_ast_as_new(rhai::Scope::new(), &ast, engine)
+            .map(Into::into)
+            .map_err(|err| {
+                Box::new(rhai::EvalAltResult::ErrorInModule(
+                    path.to_string(),
+                    err,
+                    pos,
+                ))
+            })
+    }
+}
+
 /// Run scenario files. Each `path` is a `.rhai` file or a directory (expanded to
 /// its `*.rhai` files, recursively). Each file is its own program — own engine,
 /// own `setup`/`teardown`, own scenarios — run in sequence with sessions reset
@@ -81,7 +137,8 @@ pub fn run(
                 // Mutable so `load_env(...)` can add more at run time; `env(...)`
                 // reads it under the lock.
                 let env = Arc::new(std::sync::Mutex::new(env));
-                // `import` and `load_env` resolve relative to the scenario's dir.
+                // `load_env` resolves relative to the scenario's dir (`import` is handled
+                // by RelativeFileResolver below, relative to each importing file).
                 let base = path
                     .parent()
                     .filter(|p| !p.as_os_str().is_empty())
@@ -89,13 +146,16 @@ pub fn run(
                 let source = std::fs::read_to_string(&path)
                     .with_context(|| format!("read {}", path.display()))?;
                 let registry = Arc::new(host::Registry::default());
-                let mut engine = bindings::build_engine(ctx, registry.clone(), env, base.clone());
-                engine.set_module_resolver(
-                    rhai::module_resolvers::FileModuleResolver::new_with_path(base),
-                );
-                let ast = engine
+                let mut engine = bindings::build_engine(ctx, registry.clone(), env, base);
+                // Resolve `import` relative to the importing file (so a lib can import a
+                // sibling lib), not relative to a single base dir.
+                engine.set_module_resolver(RelativeFileResolver);
+                let mut ast = engine
                     .compile(&source)
                     .map_err(|e| anyhow!("in {}: {e}", path.display()))?;
+                // Anchor the entry script's own imports at its file's directory.
+                let abs = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                ast.set_source(abs.to_string_lossy().to_string());
                 let engine = Arc::new(engine);
                 let ast = Arc::new(ast);
                 registry.set_exec(Arc::downgrade(&engine), ast.clone());
@@ -232,5 +292,37 @@ mod tests {
         assert_eq!(env["RF_PASS"], "s e cret"); // export + double quotes stripped
         assert_eq!(env["RF_DOM"], "example.com"); // single quotes stripped
         assert_eq!(env["KEEP"], "yes"); // pre-existing keys kept
+    }
+
+    #[test]
+    fn imports_resolve_relative_to_the_importing_file() {
+        use super::RelativeFileResolver;
+        use rhai::Engine;
+
+        // Entry lives in `dir`, libs in `dir/sub`. `sub/a` imports its sibling `b` and
+        // calls into it: this only works if imports resolve relative to the importing
+        // file (a.rhai), not to the entry's dir (which has no `b.rhai`), and if a module
+        // function can call a module the module itself imported.
+        let dir = std::env::temp_dir().join(format!("ringo_flow_resolver_{}", std::process::id()));
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("b.rhai"), "fn v() { 42 }").unwrap();
+        std::fs::write(
+            sub.join("a.rhai"),
+            "import \"b\" as b;\nfn compute() { b::v() + 1 }",
+        )
+        .unwrap();
+
+        let mut engine = Engine::new();
+        engine.set_module_resolver(RelativeFileResolver);
+        let mut ast = engine
+            .compile("import \"sub/a\" as a; a::compute()")
+            .unwrap();
+        // The entry script's own imports anchor at its file's directory.
+        ast.set_source(dir.join("entry.rhai").to_string_lossy().to_string());
+        let result: i64 = engine.eval_ast(&ast).unwrap();
+
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(result, 43);
     }
 }
