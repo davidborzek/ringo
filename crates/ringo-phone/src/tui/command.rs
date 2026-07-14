@@ -3,8 +3,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use super::app::App;
 
 pub const COMMANDS: &[&str] = &[
-    "accept", "contacts", "dial", "dtmf", "edit", "events", "hangup", "help", "history", "hold",
-    "log", "mute", "quit", "resume", "switch", "transfer", "xfer",
+    "accept", "contacts", "dial", "dtmf", "edit", "hangup", "help", "history", "hold", "log",
+    "mute", "quit", "resume", "switch", "transfer", "xfer",
 ];
 
 impl App {
@@ -26,43 +26,38 @@ impl App {
                 self.phone.hangup_all();
                 self.quit = true;
             }
-            "events" | "e" => {
+            "log" | "l" => {
                 self.log.show = !self.log.show;
                 if self.log.show {
-                    self.log.show_baresip = false;
-                    self.call_history.show = false;
-                }
-                self.log.scroll = 0;
-            }
-            "log" | "l" => {
-                self.log.show_baresip = !self.log.show_baresip;
-                if self.log.show_baresip {
-                    self.log.show = false;
-                    self.call_history.show = false;
-                    self.refresh_baresip_log();
+                    self.close_overlays();
+                    self.log.show = true;
+                    self.refresh_log();
                 }
                 self.log.scroll = 0;
             }
             "history" | "c" => {
-                self.call_history.show = !self.call_history.show;
-                if self.call_history.show {
-                    self.log.show = false;
-                    self.log.show_baresip = false;
-                    self.contacts_state.show = false;
+                let open = !self.call_history.show;
+                self.close_overlays();
+                self.call_history.show = open;
+                if open {
                     self.refresh_call_history();
                 }
                 self.log.scroll = 0;
             }
             "contacts" | "f" => {
-                self.contacts_state.show = !self.contacts_state.show;
-                if self.contacts_state.show {
+                let open = !self.contacts_state.show;
+                self.close_overlays();
+                self.contacts_state.show = open;
+                if open {
                     self.contacts_state.selected = 0;
                     self.contacts_state.search_query.clear();
                     self.contacts_state.search_mode = false;
-                    self.log.show = false;
-                    self.log.show_baresip = false;
-                    self.call_history.show = false;
                 }
+            }
+            "help" | "?" => {
+                let open = !self.help_show;
+                self.close_overlays();
+                self.help_show = open;
             }
             "edit" => {
                 if !self.has_any_call() {
@@ -76,13 +71,6 @@ impl App {
                 self.phone.hangup_all();
                 self.switch_to = true;
                 self.quit = true;
-            }
-            "help" | "?" => {
-                self.push_log("Commands: dial <n>, hangup, accept, hold, resume, mute, dtmf <digits>, transfer <uri>, events, log, history, contacts, edit, switch, quit");
-                self.log.show = true;
-                self.log.show_baresip = false;
-                self.call_history.show = false;
-                self.log.scroll = 0;
             }
             // Call-control commands are shared with remote control via `dispatch`.
             _ => {

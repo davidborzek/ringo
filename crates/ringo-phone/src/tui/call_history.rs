@@ -4,7 +4,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
 };
 
 use super::app::{Call, CallDirection, CallHistoryEntry};
@@ -72,6 +72,7 @@ impl super::app::App {
         self.call_history.search_query.clear();
         self.call_history.search_mode = false;
         self.call_history.selected = 0;
+        self.call_history.delete_confirm = None;
     }
 
     pub(super) fn clear_call_history(&mut self) {
@@ -85,6 +86,47 @@ impl super::app::App {
     }
 
     pub(super) fn handle_call_history_key(&mut self, key: crossterm::event::KeyEvent) {
+        use super::app::HistoryDelete;
+
+        // Delete confirmation captures all input until y (confirm) or anything
+        // else (cancel).
+        if let Some(kind) = self.call_history.delete_confirm {
+            let mut do_delete = false;
+            let mut close = false;
+            match key.code {
+                KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                    self.confirm_yes = !self.confirm_yes;
+                }
+                KeyCode::Char('y') | KeyCode::Char('Y') => do_delete = true,
+                KeyCode::Enter if self.confirm_yes => do_delete = true,
+                KeyCode::Enter | KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    close = true;
+                }
+                _ => {}
+            }
+            if do_delete {
+                match kind {
+                    HistoryDelete::One => {
+                        let indices = self.call_history.filtered_indices(&self.contacts);
+                        if let Some(&real_idx) = indices.get(self.call_history.selected) {
+                            self.call_history.entries.remove(real_idx);
+                            self.rewrite_call_history_file();
+                            let new_len = self.call_history.filtered_indices(&self.contacts).len();
+                            if self.call_history.selected >= new_len && new_len > 0 {
+                                self.call_history.selected = new_len - 1;
+                            }
+                        }
+                    }
+                    HistoryDelete::All => self.clear_call_history(),
+                }
+            }
+            if do_delete || close {
+                self.call_history.delete_confirm = None;
+                self.confirm_yes = false;
+            }
+            return;
+        }
+
         // Search mode: capture typing
         if self.call_history.search_mode {
             match key.code {
@@ -124,11 +166,6 @@ impl super::app::App {
                     self.call_history.show = false;
                 }
             }
-            KeyCode::Char('c') if key.modifiers == KeyModifiers::NONE => {
-                self.call_history.search_query.clear();
-                self.call_history.search_mode = false;
-                self.call_history.show = false;
-            }
             KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
                 self.call_history.search_mode = true;
                 self.call_history.search_query.clear();
@@ -152,6 +189,15 @@ impl super::app::App {
                     self.call_history.selected += 1;
                 }
             }
+            KeyCode::PageUp => {
+                self.call_history.selected = self.call_history.selected.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                if filtered_len > 0 {
+                    self.call_history.selected =
+                        (self.call_history.selected + 10).min(filtered_len - 1);
+                }
+            }
             KeyCode::Enter => {
                 if let Some(&real_idx) = indices.get(self.call_history.selected) {
                     let peer = self.call_history.entries[real_idx].peer.clone();
@@ -162,20 +208,17 @@ impl super::app::App {
                     self.call_history.search_mode = false;
                 }
             }
-            // d → delete selected filtered entry
+            // d → confirm deletion of the selected entry
             KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => {
-                if let Some(&real_idx) = indices.get(self.call_history.selected) {
-                    self.call_history.entries.remove(real_idx);
-                    self.rewrite_call_history_file();
-                    let new_len = self.call_history.filtered_indices(&self.contacts).len();
-                    if self.call_history.selected >= new_len && new_len > 0 {
-                        self.call_history.selected = new_len - 1;
-                    }
+                if indices.get(self.call_history.selected).is_some() {
+                    self.call_history.delete_confirm = Some(HistoryDelete::One);
+                    self.confirm_yes = false;
                 }
             }
-            // D → clear entire history
-            KeyCode::Char('D') if key.modifiers == KeyModifiers::SHIFT => {
-                self.clear_call_history();
+            // D → confirm clearing the whole history
+            KeyCode::Char('D') if key.modifiers == KeyModifiers::SHIFT && filtered_len > 0 => {
+                self.call_history.delete_confirm = Some(HistoryDelete::All);
+                self.confirm_yes = false;
             }
             _ => {}
         }
@@ -208,7 +251,8 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     let indices = app.call_history.filtered_indices(&app.contacts);
     let total = app.call_history.entries.len();
     let filtered_len = indices.len();
-    let visible = area.height.saturating_sub(2) as usize;
+    // 2 border rows + 1 footer row.
+    let visible = area.height.saturating_sub(3) as usize;
 
     let sel = if filtered_len > 0 {
         app.call_history.selected.min(filtered_len - 1)
@@ -222,14 +266,7 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
         .enumerate()
         .skip(scroll)
         .take(visible)
-        .map(|(fi, &ri)| {
-            let item = call_history_item(&app.call_history.entries[ri], app);
-            if fi == sel {
-                item.style(Style::default().bg(app.theme.subtle.get()))
-            } else {
-                item
-            }
-        })
+        .map(|(fi, &ri)| call_history_item(&app.call_history.entries[ri], app, fi == sel))
         .collect();
 
     let accent = Style::default().fg(app.theme.accent.get());
@@ -272,15 +309,36 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
         ])
     };
 
-    f.render_widget(
-        List::new(items).block(Block::default().title(title).borders(Borders::TOP)),
-        area,
-    );
+    let footer = if app.call_history.search_mode {
+        "  type to filter   Enter confirm   Esc clear"
+    } else {
+        "  ↑↓/PgUp/PgDn nav   Enter redial   / search   d del   D clear   Esc close"
+    };
+
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .title(title)
+        .title_alignment(ratatui::layout::Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let footer_h = if inner.height >= 2 { 1 } else { 0 };
+    let list_area = Rect::new(inner.x, inner.y, inner.width, inner.height - footer_h);
+    f.render_widget(List::new(items), list_area);
+    if footer_h == 1 {
+        f.render_widget(
+            Paragraph::new(footer).style(subtle),
+            Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
+        );
+    }
 }
 
 fn call_history_item<'a>(
     e: &'a super::app::CallHistoryEntry,
     app: &super::app::App,
+    selected: bool,
 ) -> ListItem<'a> {
     let (arrow, dir_style) = if e.dir == "outgoing" {
         ("↗", Style::default().fg(app.theme.accent.get()))
@@ -288,10 +346,17 @@ fn call_history_item<'a>(
         ("↙", Style::default().fg(app.theme.success.get()))
     };
 
+    // On the selected row the background is `subtle`, so the subtle-grey columns
+    // (duration, timestamp) would be invisible — fall back to the default fg there.
+    let dim = if selected {
+        Style::default()
+    } else {
+        Style::default().fg(app.theme.subtle.get())
+    };
     let dur_style = if e.duration == "missed" || e.duration == "no answer" {
         Style::default().fg(app.theme.danger.get())
     } else {
-        Style::default().fg(app.theme.subtle.get())
+        dim
     };
 
     let peer_display = match crate::contacts::resolve_name(&app.contacts, &e.peer) {
@@ -303,13 +368,15 @@ fn call_history_item<'a>(
         Span::styled(format!(" {} ", arrow), dir_style),
         Span::raw(format!("{:<45}", peer_display)),
         Span::styled(format!("{:<11}", e.duration), dur_style),
-        Span::styled(
-            format!("  {}", e.ts),
-            Style::default().fg(app.theme.subtle.get()),
-        ),
+        Span::styled(format!("  {}", e.ts), dim),
     ]);
 
-    ListItem::new(line)
+    let item = ListItem::new(line);
+    if selected {
+        item.style(Style::default().bg(app.theme.subtle.get()))
+    } else {
+        item
+    }
 }
 
 #[cfg(test)]
@@ -334,6 +401,7 @@ mod tests {
             selected: 0,
             search_query: query.to_string(),
             search_mode: false,
+            delete_confirm: None,
         }
     }
 

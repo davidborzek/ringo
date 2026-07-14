@@ -15,15 +15,12 @@ impl super::app::App {
                 if !account.is_empty() {
                     self.account_aor = account;
                 }
-                self.push_log("✓ Registered");
             }
             AppEvent::RegisterFailed { reason } => {
                 self.reg_status = RegStatus::Failed(reason.clone());
-                self.push_log(format!("✗ Registration failed: {}", reason));
             }
-            AppEvent::Unregistered { account } => {
+            AppEvent::Unregistered { .. } => {
                 self.reg_status = RegStatus::Failed("Unregistered".into());
-                self.push_log(format!("→ Unregistered: {}", account));
             }
             AppEvent::CallIncoming {
                 call_id,
@@ -45,25 +42,14 @@ impl super::app::App {
                 self.mwi.waiting = waiting;
                 self.mwi.new_messages = new_count;
                 if changed && waiting {
-                    self.push_log(format!("✉ {} new voicemail message(s)", new_count));
                     self.notify("Voicemail", &format!("{} new message(s)", new_count));
                 }
             }
-            AppEvent::Response { ok, data } => {
-                if data.is_empty() {
-                    self.push_log(format!("[resp] ok={}", ok));
-                } else {
-                    for line in data.lines() {
-                        self.push_log(format!("[resp] {}", line));
-                    }
-                }
-            }
-            AppEvent::Unknown { class, type_ } => {
-                self.push_log(format!("[{}] {}", class, type_));
-            }
+            // Remote-control responses go back over the socket; there's no TUI echo.
+            AppEvent::Response { .. } => {}
+            AppEvent::Unknown { .. } => {}
             AppEvent::BackendConnectFailed { reason } => {
                 self.reg_status = RegStatus::Failed(format!("backend unreachable: {}", reason));
-                self.push_log(format!("✗ Cannot connect to backend: {}", reason));
             }
         }
     }

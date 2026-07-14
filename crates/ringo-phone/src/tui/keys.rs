@@ -37,7 +37,10 @@ impl super::app::App {
             || (self.contacts_state.show && self.contacts_state.search_mode)
             || (self.contacts_state.show
                 && self.contacts_state.form.mode != super::app::ContactFormMode::None)
-            || (self.call_history.show && self.call_history.search_mode);
+            || (self.contacts_state.show && self.contacts_state.delete_confirm.is_some())
+            || (self.call_history.show && self.call_history.search_mode)
+            || (self.call_history.show && self.call_history.delete_confirm.is_some())
+            || (self.log.show && self.log.search_mode);
         if !in_text_input {
             match key.code {
                 KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
@@ -48,6 +51,44 @@ impl super::app::App {
                     self.command.active = true;
                     self.command.input.clear();
                     self.command.error = None;
+                    return;
+                }
+                // Overlay toggles work from anywhere: open the target, switch
+                // straight from another overlay, or close it if it's already up.
+                KeyCode::Char('l') if key.modifiers == KeyModifiers::NONE => {
+                    let open = !self.log.show;
+                    self.close_overlays();
+                    if open {
+                        self.log.show = true;
+                        self.refresh_log();
+                    }
+                    return;
+                }
+                KeyCode::Char('c') if key.modifiers == KeyModifiers::NONE => {
+                    let open = !self.call_history.show;
+                    self.close_overlays();
+                    if open {
+                        self.call_history.show = true;
+                        self.refresh_call_history();
+                    }
+                    return;
+                }
+                KeyCode::Char('f') if key.modifiers == KeyModifiers::NONE => {
+                    let open = !self.contacts_state.show;
+                    self.close_overlays();
+                    if open {
+                        self.contacts_state.show = true;
+                        self.contacts_state.selected = 0;
+                        self.contacts_state.search_query.clear();
+                        self.contacts_state.search_mode = false;
+                        self.contacts_state.target = super::app::ContactPickerTarget::Dial;
+                    }
+                    return;
+                }
+                KeyCode::Char('?') if key.modifiers == KeyModifiers::NONE => {
+                    let open = !self.help_show;
+                    self.close_overlays();
+                    self.help_show = open;
                     return;
                 }
                 _ => {}
@@ -78,8 +119,19 @@ impl super::app::App {
             return;
         }
 
-        // Event log / baresip log view
-        if self.log.show || self.log.show_baresip {
+        // Help modal — Esc / ? / q close it, everything else is swallowed.
+        if self.help_show {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')
+            ) {
+                self.help_show = false;
+            }
+            return;
+        }
+
+        // Logs modal
+        if self.log.show {
             self.handle_log_key(key);
             return;
         }
@@ -170,46 +222,15 @@ impl super::app::App {
                 self.switch_line();
             }
             KeyCode::Tab => {
+                self.close_overlays();
                 self.contacts_state.show = true;
                 self.contacts_state.selected = 0;
                 self.contacts_state.search_query.clear();
                 self.contacts_state.search_mode = false;
                 self.contacts_state.target = super::app::ContactPickerTarget::Dial;
-                self.log.show = false;
-                self.log.show_baresip = false;
-                self.call_history.show = false;
             }
-            KeyCode::Char('e') if !ctrl => {
-                self.log.show = true;
-                self.log.show_baresip = false;
-                self.call_history.show = false;
-                self.log.scroll = 0;
-            }
-            KeyCode::Char('l') if !ctrl => {
-                self.log.show_baresip = true;
-                self.log.show = false;
-                self.call_history.show = false;
-                self.refresh_baresip_log();
-                self.log.scroll = 0;
-            }
-            KeyCode::Char('c') if !ctrl => {
-                self.call_history.show = true;
-                self.log.show = false;
-                self.log.show_baresip = false;
-                self.contacts_state.show = false;
-                self.refresh_call_history();
-                self.log.scroll = 0;
-            }
-            KeyCode::Char('f') if !ctrl => {
-                self.contacts_state.show = true;
-                self.contacts_state.selected = 0;
-                self.contacts_state.search_query.clear();
-                self.contacts_state.search_mode = false;
-                self.contacts_state.target = super::app::ContactPickerTarget::Dial;
-                self.log.show = false;
-                self.log.show_baresip = false;
-                self.call_history.show = false;
-            }
+            // l / c / f / ? (open/switch/close overlays) are handled globally
+            // above so they also work from inside another overlay.
             KeyCode::Char('r') if ctrl => {
                 self.dial.draft = self.dial.input.clone();
                 self.dial.query.clear();
