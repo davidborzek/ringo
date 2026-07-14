@@ -435,12 +435,24 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
         ])
     };
 
-    let footer = if app.contacts_state.form.mode != ContactFormMode::None {
-        "" // the form overlay draws its own hints
+    let search_footer = [("Enter", "confirm"), ("Esc", "clear")];
+    let nav_footer = [
+        ("↑↓", "nav"),
+        ("PgUp/PgDn", "page"),
+        ("Enter", "dial"),
+        ("/", "search"),
+        ("a", "add"),
+        ("e", "edit"),
+        ("d", "del"),
+        ("Esc", "close"),
+    ];
+    // The add/edit form overlay draws its own hints, so no footer then.
+    let footer: &[super::ui::Hint] = if app.contacts_state.form.mode != ContactFormMode::None {
+        &[]
     } else if app.contacts_state.search_mode {
-        "  type to filter   Enter confirm   Esc clear"
+        &search_footer
     } else {
-        "  ↑↓/PgUp/PgDn nav   Enter dial   / search   a add   e edit   d del   Esc close"
+        &nav_footer
     };
 
     f.render_widget(Clear, area);
@@ -461,10 +473,11 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     f.render_widget(List::new(items), list_area);
     if footer_h == 1 {
         f.render_widget(
-            Paragraph::new(footer).style(subtle),
+            Paragraph::new(super::ui::styled_hints(footer, &app.theme)),
             Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
         );
     }
+    super::ui::render_scrollbar(f, &app.theme, area, filtered_len, visible, scroll);
 
     // Form overlay
     if app.contacts_state.form.mode != ContactFormMode::None {

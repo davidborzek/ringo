@@ -13,14 +13,47 @@ impl super::app::App {
             return;
         }
 
-        // Quit confirmation captures all input
+        // Quit confirmation popup captures all input.
         if self.quit_confirm {
+            let mut do_quit = false;
             match key.code {
-                KeyCode::Char('y') | KeyCode::Enter => {
-                    self.phone.hangup_all();
-                    self.quit = true;
+                KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                    self.confirm_yes = !self.confirm_yes;
                 }
-                _ => self.quit_confirm = false,
+                KeyCode::Char('y') | KeyCode::Char('Y') => do_quit = true,
+                KeyCode::Enter if self.confirm_yes => do_quit = true,
+                KeyCode::Enter | KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    self.quit_confirm = false;
+                    self.confirm_yes = false;
+                }
+                _ => {}
+            }
+            if do_quit {
+                self.phone.hangup_all();
+                self.quit = true;
+            }
+            return;
+        }
+
+        // Switch-profile confirmation popup (back to the picker).
+        if self.switch_confirm {
+            let mut do_switch = false;
+            match key.code {
+                KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                    self.confirm_yes = !self.confirm_yes;
+                }
+                KeyCode::Char('y') | KeyCode::Char('Y') => do_switch = true,
+                KeyCode::Enter if self.confirm_yes => do_switch = true,
+                KeyCode::Enter | KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    self.switch_confirm = false;
+                    self.confirm_yes = false;
+                }
+                _ => {}
+            }
+            if do_switch {
+                self.phone.hangup_all();
+                self.switch_to = true;
+                self.quit = true;
             }
             return;
         }
@@ -45,6 +78,8 @@ impl super::app::App {
             match key.code {
                 KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
                     self.quit_confirm = true;
+                    // Preselect Quit so `q` then Enter exits quickly.
+                    self.confirm_yes = true;
                     return;
                 }
                 KeyCode::Char(':') => {
@@ -172,9 +207,9 @@ impl super::app::App {
                 self.quit = true;
             }
             KeyCode::Esc => {
-                self.phone.hangup_all();
-                self.switch_to = true;
-                self.quit = true;
+                self.switch_confirm = true;
+                // Preselect Switch so Esc then Enter goes back quickly.
+                self.confirm_yes = true;
             }
             KeyCode::Char('d') if !ctrl => {
                 self.dial.mode = InputMode::Dial;

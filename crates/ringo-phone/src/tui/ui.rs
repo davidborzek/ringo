@@ -1,9 +1,12 @@
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{
+        Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
 };
 
 use crate::config::Theme;
@@ -18,7 +21,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
         Span::raw(" "),
         Span::styled("ringo", Style::default().fg(app.theme.accent.get())),
     ]);
-    let outer = Block::default().title(title_left).borders(Borders::ALL);
+    let outer = Block::default()
+        .title(title_left)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded);
 
     let inner = outer.inner(area);
     f.render_widget(outer, area);
@@ -52,25 +58,56 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // Modal overlays (mutually exclusive — `close_overlays` keeps only one open).
     if app.log.show {
+        // Tail-follow / wrap status shown in the title.
+        let mut status = if app.log.scroll == 0 {
+            "  ● live".to_string()
+        } else {
+            format!("  ↑{} paused", app.log.scroll)
+        };
+        if app.log.wrap {
+            status.push_str("  wrap");
+        }
         let title = if app.log.search_mode {
             format!("Logs  / {}_", app.log.search_query)
         } else if !app.log.search_query.is_empty() {
             format!(
-                "Logs  /{}  ({})",
+                "Logs  /{}  ({}){}",
                 app.log.search_query,
-                app.log_filtered().len()
+                app.log_filtered().len(),
+                status
             )
         } else {
-            "Logs".to_string()
+            format!("Logs{status}")
         };
-        let footer = if app.log.search_mode {
-            "type to filter   Enter confirm   Esc clear"
+        let search_footer = [("Enter", "confirm"), ("Esc", "clear")];
+        let nav_footer = [
+            ("↑↓", "scroll"),
+            ("PgUp/PgDn", "page"),
+            ("g/G", "ends"),
+            ("/", "search"),
+            ("w", "wrap"),
+            ("Esc", "close"),
+        ];
+        let footer: &[Hint] = if app.log.search_mode {
+            &search_footer
         } else {
-            "↑↓ / PgUp PgDn scroll   g/G top/bottom   / search   Esc close"
+            &nav_footer
         };
         let content = render_modal(f, &app.theme, 80, 80, &title, footer);
-        app.log.visible_height = content.height as usize;
         super::log::render_logs(f, app, content);
+        let top = app
+            .log
+            .content_rows
+            .saturating_sub(app.log.visible_height)
+            .saturating_sub(app.log.scroll);
+        render_scrollbar(
+            f,
+            &app.theme,
+            centered_rect(area, 80, 80),
+            app.log.content_rows,
+            app.log.visible_height,
+            top,
+        );
     } else if app.help_show {
         render_help(f, app);
     } else if app.call_history.show {
@@ -80,20 +117,60 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 super::app::HistoryDelete::One => "Delete the selected call?".to_string(),
                 super::app::HistoryDelete::All => "Clear the entire call history?".to_string(),
             };
-            render_confirm_popup(f, &app.theme, &q, "Delete", app.confirm_yes);
+            render_confirm_popup(f, &app.theme, &q, "Delete", app.confirm_yes, true);
         }
     } else if app.contacts_state.show {
         super::contacts::render(f, app, centered_rect(area, 80, 80));
         if let Some(ci) = app.contacts_state.delete_confirm {
             let name = app.contacts.get(ci).map(|c| c.name.as_str()).unwrap_or("?");
             let q = format!("Delete \"{}\"?", name);
-            render_confirm_popup(f, &app.theme, &q, "Delete", app.confirm_yes);
+            render_confirm_popup(f, &app.theme, &q, "Delete", app.confirm_yes, true);
         }
     }
 
     if app.dial.mode == InputMode::HistorySearch {
         super::dial::render_history_search(f, app, inner);
     }
+
+    // Confirmation popups sit on top of everything.
+    if app.quit_confirm {
+        render_confirm_popup(f, &app.theme, "Quit ringo?", "Quit", app.confirm_yes, false);
+    } else if app.switch_confirm {
+        render_confirm_popup(
+            f,
+            &app.theme,
+            "Switch profile?",
+            "Switch",
+            app.confirm_yes,
+            false,
+        );
+    }
+}
+
+/// Draw a vertical scrollbar on the right border of a bordered `rect` (between
+/// its top and bottom borders). No-op when everything fits. `total` is the item
+/// / row count, `visible` the viewport size, `position` the top index shown.
+pub(super) fn render_scrollbar(
+    f: &mut Frame,
+    theme: &Theme,
+    rect: Rect,
+    total: usize,
+    visible: usize,
+    position: usize,
+) {
+    if total <= visible || rect.height < 3 {
+        return;
+    }
+    // Map the scroll range (0..=total-visible) onto the track so the thumb sits
+    // at the bottom when the view is at the end.
+    let range = total - visible;
+    let mut state = ScrollbarState::new(range).position(position.min(range));
+    let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .thumb_style(Style::default().fg(theme.accent.get()))
+        .track_style(Style::default().fg(theme.subtle.get()));
+    f.render_stateful_widget(bar, rect.inner(Margin::new(0, 1)), &mut state);
 }
 
 /// A centered rectangle sized to `w_pct`×`h_pct` of `area`.
@@ -118,14 +195,17 @@ fn render_modal(
     w_pct: u16,
     h_pct: u16,
     title: &str,
-    footer: &str,
+    footer: &[Hint],
 ) -> Rect {
     let rect = centered_rect(f.area(), w_pct, h_pct);
     f.render_widget(Clear, rect);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(title)
+        .title(Span::styled(
+            title.to_string(),
+            Style::default().fg(theme.accent.get()),
+        ))
         .title_alignment(Alignment::Center);
     let inner = block.inner(rect);
     f.render_widget(block, rect);
@@ -133,7 +213,7 @@ fn render_modal(
     if !footer.is_empty() && inner.height >= 2 {
         let fy = inner.y + inner.height - 1;
         f.render_widget(
-            Paragraph::new(format!("  {}", footer)).style(Style::default().fg(theme.subtle.get())),
+            Paragraph::new(styled_hints(footer, theme)),
             Rect::new(inner.x, fy, inner.width, 1),
         );
         return Rect::new(inner.x, inner.y, inner.width, inner.height - 1);
@@ -150,7 +230,15 @@ fn render_confirm_popup(
     question: &str,
     confirm_label: &str,
     yes: bool,
+    danger: bool,
 ) {
+    // Destructive actions (delete) use the danger colour; benign ones (quit,
+    // switch) use the accent colour.
+    let accent = if danger {
+        theme.danger.get()
+    } else {
+        theme.accent.get()
+    };
     let area = f.area();
     let w = (question.chars().count() as u16 + 8)
         .clamp(36, 60)
@@ -166,8 +254,8 @@ fn render_confirm_popup(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(theme.danger.get()))
-        .title("Confirm")
+        .border_style(Style::default().fg(accent))
+        .title(Span::styled("Confirm", Style::default().fg(accent)))
         .title_alignment(Alignment::Center);
     let inner = block.inner(rect);
     f.render_widget(block, rect);
@@ -180,23 +268,22 @@ fn render_confirm_popup(
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
 
-    let button = |label: &str, selected: bool, danger: bool| {
-        let style = if selected {
-            let base = if danger {
-                Style::default().fg(theme.danger.get())
-            } else {
-                Style::default()
-            };
-            base.add_modifier(Modifier::REVERSED | Modifier::BOLD)
-        } else {
-            Style::default().fg(theme.subtle.get())
-        };
-        Span::styled(format!("  {}  ", label), style)
+    let cancel = if !yes {
+        Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.subtle.get())
+    };
+    let confirm = if yes {
+        Style::default()
+            .fg(accent)
+            .add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    } else {
+        Style::default().fg(theme.subtle.get())
     };
     let buttons = Line::from(vec![
-        button("Cancel", !yes, false),
+        Span::styled("  Cancel  ", cancel),
         Span::raw("   "),
-        button(confirm_label, yes, true),
+        Span::styled(format!("  {confirm_label}  "), confirm),
     ]);
     f.render_widget(
         Paragraph::new(buttons).alignment(Alignment::Center),
@@ -206,12 +293,13 @@ fn render_confirm_popup(
 
 /// Static key/command reference shown in the Help modal.
 fn render_help(f: &mut Frame, app: &App) {
-    let content = render_modal(f, &app.theme, 60, 70, "Help", "Esc close");
+    let content = render_modal(f, &app.theme, 60, 70, "Help", &[("Esc", "close")]);
     let accent = Style::default().fg(app.theme.accent.get());
     let subtle = Style::default().fg(app.theme.subtle.get());
     let row = |key: &str, desc: &str| {
         Line::from(vec![
-            Span::styled(format!("  {:<12}", key), accent),
+            Span::styled(format!("  {key:<10}"), accent),
+            Span::styled("→ ", subtle),
             Span::styled(desc.to_string(), Style::default()),
         ])
     };
@@ -339,13 +427,6 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 // ─── Command / Hint Bar ──────────────────────────────────────────────────────
 
 fn render_command_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    if app.quit_confirm {
-        f.render_widget(
-            Paragraph::new(" Quit? (y/n)").style(Style::default().fg(app.theme.attention.get())),
-            area,
-        );
-        return;
-    }
     if app.command.active {
         let line = Line::from(vec![
             Span::styled(":", Style::default().fg(app.theme.accent.get())),
@@ -367,55 +448,84 @@ fn render_command_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     use super::app::InputMode;
 
-    let text = match &app.transfer_mode {
+    let hints: Vec<Hint> = match &app.transfer_mode {
         TransferMode::BlindInput(_) | TransferMode::AttendedInput(_) => {
-            "[Enter] send  [Tab] contacts  [Esc] cancel".to_string()
+            vec![("Enter", "send"), ("Tab", "contacts"), ("Esc", "cancel")]
         }
-        TransferMode::AttendedPending => "[X] execute transfer  [Esc] abort".to_string(),
+        TransferMode::AttendedPending => vec![("X", "execute transfer"), ("Esc", "abort")],
         TransferMode::None => match app.dial.mode {
-            InputMode::Dial | InputMode::HistoryNav => {
-                "[Enter] dial  [Tab] contacts  [Esc] cancel  [↑/↓] history  [^R] search".to_string()
-            }
-            InputMode::HistorySearch => String::new(),
+            InputMode::Dial | InputMode::HistoryNav => vec![
+                ("Enter", "dial"),
+                ("Tab", "contacts"),
+                ("Esc", "cancel"),
+                ("↑/↓", "history"),
+                ("^R", "search"),
+            ],
+            InputMode::HistorySearch => Vec::new(),
             InputMode::Normal => {
                 // Overlay-specific hints live in each modal's own footer; the base
                 // hint line always shows the main call actions.
-                {
-                    let mut parts: Vec<&str> = vec!["[d] dial"];
-                    if app.has_incoming_ringing() {
-                        parts.push("[a] accept");
-                    }
-                    if app.has_any_call() {
-                        parts.push("[b] hangup");
-                    }
-                    if app.in_active_call() {
-                        parts.push("[h] hold");
-                    }
-                    if app.selected_call_on_hold() {
-                        parts.push("[r] resume");
-                    }
-                    if app.in_active_call() {
-                        parts.push("[m] mute");
-                    }
-                    if app.in_active_call() {
-                        parts.push("[t] xfer  [T] att.xfer");
-                    }
-                    if app.calls.len() > 1 {
-                        parts.push("[Tab] switch");
-                    }
-                    parts.push("[l] logs");
-                    parts.push("[c] history");
-                    parts.push("[f] contacts");
-                    parts.push("[?] help");
-                    parts.push("[:] cmd");
-                    parts.push("[q] quit");
-                    parts.join("  ")
+                let mut h: Vec<Hint> = vec![("d", "dial")];
+                if app.has_incoming_ringing() {
+                    h.push(("a", "accept"));
                 }
+                if app.has_any_call() {
+                    h.push(("b", "hangup"));
+                }
+                if app.in_active_call() {
+                    h.push(("h", "hold"));
+                }
+                if app.selected_call_on_hold() {
+                    h.push(("r", "resume"));
+                }
+                if app.in_active_call() {
+                    h.push(("m", "mute"));
+                    h.push(("t", "xfer"));
+                    h.push(("T", "att.xfer"));
+                }
+                if app.calls.len() > 1 {
+                    h.push(("Tab", "switch"));
+                }
+                h.extend([
+                    ("l", "logs"),
+                    ("c", "history"),
+                    ("f", "contacts"),
+                    ("?", "help"),
+                    (":", "cmd"),
+                    ("q", "quit"),
+                ]);
+                h
             }
         },
     };
-    f.render_widget(
-        Paragraph::new(text).style(Style::default().fg(app.theme.subtle.get())),
-        area,
-    );
+    f.render_widget(Paragraph::new(styled_hints(&hints, &app.theme)), area);
+}
+
+/// One keybind hint: the key (or chord) and what it does. Structured so the
+/// keys can later come from a configurable keymap instead of literals.
+pub(crate) type Hint<'a> = (&'a str, &'a str);
+
+/// Render `(key, label)` hints as styled spans — key in bold accent, label
+/// subtle — for a which-key-ish look. Ctrl chords written `^X` display as `C-x`.
+pub(crate) fn styled_hints(hints: &[Hint], theme: &Theme) -> Line<'static> {
+    let key_style = Style::default()
+        .fg(theme.accent.get())
+        .add_modifier(Modifier::BOLD);
+    let lbl_style = Style::default().fg(theme.subtle.get());
+    // Leading space to line up with the status bar's indent above.
+    let mut spans: Vec<Span> = vec![Span::raw(" ")];
+    for (i, (key, label)) in hints.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("   ", lbl_style));
+        }
+        let key = match key.strip_prefix('^') {
+            Some(c) => format!("C-{}", c.to_lowercase()),
+            None => (*key).to_string(),
+        };
+        spans.push(Span::styled(key, key_style));
+        if !label.is_empty() {
+            spans.push(Span::styled(format!(" {label}"), lbl_style));
+        }
+    }
+    Line::from(spans)
 }

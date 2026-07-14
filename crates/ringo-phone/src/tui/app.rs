@@ -145,13 +145,19 @@ pub struct LogState {
     pub lines: Vec<String>,
     /// Whether the Logs modal is open.
     pub show: bool,
+    /// Scroll offset in display rows, counted back from the bottom (0 = follow).
     pub scroll: usize,
     /// Case-insensitive substring filter (grep-style); empty shows all lines.
     pub search_query: String,
     /// Whether the `/` search input is currently capturing keys.
     pub search_mode: bool,
+    /// Soft-wrap long lines instead of truncating them.
+    pub wrap: bool,
     /// Last known visible height (set during render, used to clamp scroll).
     pub visible_height: usize,
+    /// Total display rows of the current (filtered, possibly wrapped) content,
+    /// set during render and used to clamp scrolling.
+    pub content_rows: usize,
 }
 
 pub struct CommandState {
@@ -230,6 +236,8 @@ pub struct App {
     pub(crate) phone: Box<dyn Phone>,
     pub quit: bool,
     pub quit_confirm: bool,
+    /// Whether the "switch profile" (back to picker) confirm popup is open.
+    pub switch_confirm: bool,
     /// Whether the Help modal is open.
     pub help_show: bool,
     /// Which button is highlighted in the active confirm popup (`true` = the
@@ -275,6 +283,7 @@ impl App {
             phone,
             quit: false,
             quit_confirm: false,
+            switch_confirm: false,
             help_show: false,
             confirm_yes: false,
             switch_to: false,
@@ -309,7 +318,9 @@ impl App {
                 scroll: 0,
                 search_query: String::new(),
                 search_mode: false,
+                wrap: false,
                 visible_height: 0,
+                content_rows: 0,
             },
             last_call_reason: None,
             last_call: None,
