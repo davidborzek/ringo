@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph},
 };
 use std::io;
 
@@ -66,19 +66,20 @@ pub(crate) fn run(
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(header_height),
-                    Constraint::Length(3),
-                    Constraint::Min(1),
-                    Constraint::Length(1),
+                    Constraint::Length(header_height), // [0] logo
+                    Constraint::Length(3),             // [1] search box
+                    Constraint::Length(1),             // [2] gap
+                    Constraint::Min(1),                // [3] list box
+                    Constraint::Length(1),             // [4] hint
                 ])
                 .split(area);
 
-            // ASCII logo + version — vertically centered in header area
+            // ASCII logo + version — vertically centered in the header area.
             let version_line = Line::from(Span::styled(
                 format!("v{}", env!("CARGO_PKG_VERSION")),
                 Style::default().fg(theme.subtle.get()),
             ));
-            let logo_height = LOGO.len() as u16 + 1; // +1 for version
+            let logo_height = LOGO.len() as u16 + 1;
             let top_pad = chunks[0].height.saturating_sub(logo_height) / 2;
             let mut logo_lines: Vec<Line> = std::iter::repeat_n(Line::from(""), top_pad as usize)
                 .chain(LOGO.iter().map(|l| Line::from(*l)))
@@ -94,12 +95,29 @@ pub(crate) fn run(
                 chunks[0],
             );
 
-            // Search input
+            // Search box
             frame.render_widget(
-                Paragraph::new(query.as_str())
-                    .block(Block::default().borders(Borders::ALL).title(" 🔍 search ")),
+                Paragraph::new(query.as_str()).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_type(BorderType::Rounded)
+                        .padding(Padding::horizontal(1))
+                        .title(" 🔍 search "),
+                ),
                 chunks[1],
             );
+            // Cursor after the border (1) + left padding (1) + typed query.
+            frame.set_cursor_position((
+                chunks[1].x + 2 + query.chars().count() as u16,
+                chunks[1].y + 1,
+            ));
+
+            // Pad the name to the widest one so the aor subtitles line up.
+            let name_w = filtered
+                .iter()
+                .map(|i| i.name.chars().count())
+                .max()
+                .unwrap_or(0);
 
             // Profile list — selection styling handled by the List widget
             let list_items: Vec<ListItem> = filtered
@@ -109,7 +127,7 @@ pub(crate) fn run(
                         ListItem::new(Line::from(item.name.as_str()))
                     } else {
                         ListItem::new(Line::from(vec![
-                            Span::raw(item.name.as_str()),
+                            Span::raw(format!("{:<name_w$}", item.name)),
                             Span::styled(
                                 format!("  {}", item.subtitle),
                                 Style::default().fg(theme.subtle.get()),
@@ -119,32 +137,59 @@ pub(crate) fn run(
                 })
                 .collect();
 
-            let mut list_state = ListState::default();
-            list_state.select(if filtered.is_empty() {
-                None
+            let list_block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .padding(Padding::horizontal(1))
+                .title(" profiles ")
+                .title_style(Style::default().fg(theme.accent.get()));
+
+            if filtered.is_empty() {
+                // Empty state: no profiles at all, or none matching the query.
+                let inner = list_block.inner(chunks[3]);
+                frame.render_widget(list_block, chunks[3]);
+                let msg = if query.trim().is_empty() {
+                    "  no profiles yet — press Ctrl+N to create one".to_string()
+                } else {
+                    format!("  no profiles match \"{}\"", query)
+                };
+                frame.render_widget(
+                    Paragraph::new(msg).style(Style::default().fg(theme.subtle.get())),
+                    inner,
+                );
             } else {
-                Some(selected)
-            });
-            frame.render_stateful_widget(
-                List::new(list_items)
-                    .block(Block::default().borders(Borders::ALL))
-                    .highlight_style(
-                        Style::default()
-                            .fg(theme.accent.get())
-                            .add_modifier(Modifier::BOLD),
-                    )
-                    .highlight_symbol("▶ "),
-                chunks[2],
-                &mut list_state,
-            );
+                let mut list_state = ListState::default();
+                list_state.select(Some(selected));
+                frame.render_stateful_widget(
+                    List::new(list_items)
+                        .block(list_block)
+                        .highlight_style(
+                            Style::default()
+                                .fg(theme.accent.get())
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .highlight_symbol("▶ "),
+                    chunks[3],
+                    &mut list_state,
+                );
+            }
 
             // Hint line
             frame.render_widget(
-                Paragraph::new(
-                    "  Enter start  ·  ^E edit  ·  ^R rename  ·  ^Y clone  ·  ^D delete  ·  ^N new  ·  ^S settings  ·  Esc quit",
-                )
-                .style(Style::default().fg(theme.subtle.get())),
-                chunks[3],
+                Paragraph::new(crate::tui::ui::styled_hints(
+                    &[
+                        ("Enter", "start"),
+                        ("^E", "edit"),
+                        ("^R", "rename"),
+                        ("^Y", "clone"),
+                        ("^D", "delete"),
+                        ("^N", "new"),
+                        ("^S", "settings"),
+                        ("Esc", "quit"),
+                    ],
+                    theme,
+                )),
+                chunks[4],
             );
         })?;
 

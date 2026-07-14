@@ -2,9 +2,9 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::Span,
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
 use super::Term;
@@ -30,6 +30,7 @@ pub fn run_restart_confirm(terminal: &mut Term, theme: &Theme) -> Result<bool> {
 
             let block = Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(" Profile saved ")
                 .title_alignment(Alignment::Center);
             let inner = block.inner(popup);
@@ -44,20 +45,16 @@ pub fn run_restart_confirm(terminal: &mut Term, theme: &Theme) -> Result<bool> {
             let btn_x = inner.x + inner.width.saturating_sub(19) / 2;
 
             let later_style = if !confirm_yes {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::White)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
             } else {
-                Style::default()
+                Style::default().fg(theme.subtle.get())
             };
             let restart_style = if confirm_yes {
                 Style::default()
-                    .fg(Color::White)
-                    .bg(theme.accent.get())
-                    .add_modifier(Modifier::BOLD)
+                    .fg(theme.accent.get())
+                    .add_modifier(Modifier::REVERSED | Modifier::BOLD)
             } else {
-                Style::default()
+                Style::default().fg(theme.subtle.get())
             };
 
             frame.render_widget(
@@ -116,6 +113,7 @@ pub fn run_rename(
 
             let block = Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(" Rename Profile ")
                 .title_alignment(Alignment::Center);
             let inner = block.inner(popup);
@@ -229,6 +227,7 @@ pub fn run_confirm(terminal: &mut Term, name: &str, theme: &Theme) -> Result<boo
 
             let block = Block::default()
                 .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
                 .title(" Delete Profile ")
                 .title_alignment(Alignment::Center);
             let inner = block.inner(popup);
@@ -243,20 +242,16 @@ pub fn run_confirm(terminal: &mut Term, name: &str, theme: &Theme) -> Result<boo
             let btn_x = inner.x + inner.width.saturating_sub(17) / 2;
 
             let no_style = if !confirm_yes {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::White)
-                    .add_modifier(Modifier::BOLD)
+                Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
             } else {
-                Style::default()
+                Style::default().fg(theme.subtle.get())
             };
             let yes_style = if confirm_yes {
                 Style::default()
-                    .fg(Color::White)
-                    .bg(theme.danger.get())
-                    .add_modifier(Modifier::BOLD)
+                    .fg(theme.danger.get())
+                    .add_modifier(Modifier::REVERSED | Modifier::BOLD)
             } else {
-                Style::default()
+                Style::default().fg(theme.subtle.get())
             };
 
             frame.render_widget(

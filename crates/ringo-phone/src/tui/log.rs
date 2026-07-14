@@ -1,5 +1,11 @@
 use crossterm::event::{KeyCode, KeyModifiers};
-use ratatui::{Frame, layout::Rect, style::Style, text::Line, widgets::Paragraph};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::Style,
+    text::Line,
+    widgets::{Paragraph, Wrap},
+};
 
 impl super::app::App {
     /// Lines matching the current search filter (case-insensitive substring);
@@ -15,8 +21,8 @@ impl super::app::App {
     }
 
     fn log_max_scroll(&self) -> usize {
-        self.log_filtered()
-            .len()
+        self.log
+            .content_rows
             .saturating_sub(self.log.visible_height)
     }
 
@@ -64,6 +70,10 @@ impl super::app::App {
                 self.log.search_query.clear();
                 self.log.scroll = 0;
             }
+            KeyCode::Char('w') if key.modifiers == KeyModifiers::NONE => {
+                self.log.wrap = !self.log.wrap;
+                self.log.scroll = 0;
+            }
             KeyCode::Up => {
                 let max = self.log_max_scroll();
                 if self.log.scroll < max {
@@ -90,21 +100,39 @@ impl super::app::App {
     }
 }
 
-/// Render the (filtered) log lines into a modal's content area (frame/title/footer
-/// drawn by the caller). Newest lines sit at the bottom; `scroll` counts lines back
-/// from the end.
-pub(super) fn render_logs(f: &mut Frame, app: &super::app::App, area: Rect) {
+/// Render the (filtered) log into a modal's content area (frame/title/footer are
+/// drawn by the caller). The view is anchored to the bottom; `scroll` counts
+/// display rows back from the end (0 = following the tail). Long lines are
+/// truncated unless `wrap` is on.
+pub(super) fn render_logs(f: &mut Frame, app: &mut super::app::App, area: Rect) {
+    let width = (area.width as usize).max(1);
     let visible = area.height as usize;
-    let lines = app.log_filtered();
-    let total = lines.len();
-    let skip = app.log.scroll.min(total.saturating_sub(visible));
-    let end = total.saturating_sub(skip);
-    let start = end.saturating_sub(visible);
 
-    let text: Vec<Line> = lines[start..end].iter().map(|s| Line::from(*s)).collect();
+    let lines: Vec<String> = app.log_filtered().iter().map(|s| s.to_string()).collect();
+    // Total display rows: wrapped lines span ceil(len / width) rows each.
+    let total: usize = if app.log.wrap {
+        lines
+            .iter()
+            .map(|l| l.chars().count().div_ceil(width).max(1))
+            .sum()
+    } else {
+        lines.len()
+    };
+    app.log.content_rows = total;
+    app.log.visible_height = visible;
 
-    f.render_widget(
-        Paragraph::new(text).style(Style::default().fg(app.theme.subtle.get())),
-        area,
-    );
+    let max_scroll = total.saturating_sub(visible);
+    if app.log.scroll > max_scroll {
+        app.log.scroll = max_scroll;
+    }
+    let top = max_scroll.saturating_sub(app.log.scroll) as u16;
+
+    let text: Vec<Line> = lines.into_iter().map(Line::from).collect();
+    let mut para = Paragraph::new(text)
+        .style(Style::default().fg(app.theme.subtle.get()))
+        .scroll((top, 0));
+    if app.log.wrap {
+        para = para.wrap(Wrap { trim: false });
+    }
+    f.render_widget(para, area);
 }

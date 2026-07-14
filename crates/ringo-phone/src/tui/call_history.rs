@@ -9,6 +9,18 @@ use ratatui::{
 
 use super::app::{Call, CallDirection, CallHistoryEntry};
 
+/// Truncate `s` to `width` display columns (char-aware, appending `…` when it
+/// doesn't fit), otherwise left-pad it to `width` so the next column aligns.
+fn fit(s: &str, width: usize) -> String {
+    if s.chars().count() > width {
+        let mut t: String = s.chars().take(width.saturating_sub(1)).collect();
+        t.push('…');
+        t
+    } else {
+        format!("{s:<width$}")
+    }
+}
+
 impl super::app::App {
     pub(super) fn append_call_history(&self, call: &Call) {
         use std::io::Write;
@@ -261,12 +273,18 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     };
     let scroll = if sel < visible { 0 } else { sel - visible + 1 };
 
+    // Peer column width adapts to the modal, reserving room for arrow (3), gaps,
+    // duration (9) and timestamp (19); the rest goes to the peer (truncated).
+    let peer_w = (area.width as usize)
+        .saturating_sub(2 + 3 + 2 + 9 + 2 + 19)
+        .clamp(12, 60);
+
     let items: Vec<ListItem> = indices
         .iter()
         .enumerate()
         .skip(scroll)
         .take(visible)
-        .map(|(fi, &ri)| call_history_item(&app.call_history.entries[ri], app, fi == sel))
+        .map(|(fi, &ri)| call_history_item(&app.call_history.entries[ri], app, fi == sel, peer_w))
         .collect();
 
     let accent = Style::default().fg(app.theme.accent.get());
@@ -309,10 +327,20 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
         ])
     };
 
-    let footer = if app.call_history.search_mode {
-        "  type to filter   Enter confirm   Esc clear"
+    let search_footer = [("Enter", "confirm"), ("Esc", "clear")];
+    let nav_footer = [
+        ("↑↓", "nav"),
+        ("PgUp/PgDn", "page"),
+        ("Enter", "redial"),
+        ("/", "search"),
+        ("d", "del"),
+        ("D", "clear"),
+        ("Esc", "close"),
+    ];
+    let footer: &[super::ui::Hint] = if app.call_history.search_mode {
+        &search_footer
     } else {
-        "  ↑↓/PgUp/PgDn nav   Enter redial   / search   d del   D clear   Esc close"
+        &nav_footer
     };
 
     f.render_widget(Clear, area);
@@ -329,16 +357,18 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     f.render_widget(List::new(items), list_area);
     if footer_h == 1 {
         f.render_widget(
-            Paragraph::new(footer).style(subtle),
+            Paragraph::new(super::ui::styled_hints(footer, &app.theme)),
             Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
         );
     }
+    super::ui::render_scrollbar(f, &app.theme, area, filtered_len, visible, scroll);
 }
 
 fn call_history_item<'a>(
     e: &'a super::app::CallHistoryEntry,
     app: &super::app::App,
     selected: bool,
+    peer_w: usize,
 ) -> ListItem<'a> {
     let (arrow, dir_style) = if e.dir == "outgoing" {
         ("↗", Style::default().fg(app.theme.accent.get()))
@@ -366,8 +396,8 @@ fn call_history_item<'a>(
 
     let line = Line::from(vec![
         Span::styled(format!(" {} ", arrow), dir_style),
-        Span::raw(format!("{:<45}", peer_display)),
-        Span::styled(format!("{:<11}", e.duration), dur_style),
+        Span::raw(fit(&peer_display, peer_w)),
+        Span::styled(format!("  {:<9}", e.duration), dur_style),
         Span::styled(format!("  {}", e.ts), dim),
     ]);
 
