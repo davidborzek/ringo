@@ -133,7 +133,7 @@ pub fn pick_profile(focus: Option<&str>) -> Result<String> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
+    let backend = CrosstermBackend::new(Box::new(stdout) as crate::tui::TermWriter);
     let mut terminal = Terminal::new(backend)?;
     // Clear explicitly: when the phone TUI hands over on a profile switch we stay
     // in the alternate screen (no leave/re-enter to wipe it), so the picker must
@@ -151,7 +151,7 @@ pub fn pick_profile(focus: Option<&str>) -> Result<String> {
 }
 
 fn pick_profile_loop(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut crate::tui::Term,
     initial_focus: Option<&str>,
 ) -> Result<String> {
     use crate::picker::{PickerAction, PickerItem};
@@ -224,7 +224,7 @@ fn pick_profile_loop(
     }
 }
 
-fn open_settings(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+fn open_settings(terminal: &mut crate::tui::Term) -> Result<()> {
     use crossterm::terminal::{
         EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     };

@@ -22,6 +22,81 @@ use std::{io, path::PathBuf, sync::mpsc, time::Duration};
 
 use ringo_core::backend::Session;
 
+/// The TUI's terminal writer. Boxed so it can be either the process stdout or a
+/// private `dup` of it — the latter lets us render on the original stdout
+/// terminal while redirecting fd 1/2 into the log, keeping baresip/libre's raw
+/// stdout off the screen.
+pub(crate) type TermWriter = Box<dyn std::io::Write + Send>;
+pub(crate) type Term = Terminal<CrosstermBackend<TermWriter>>;
+
+/// Renders the TUI on a private handle to the original stdout terminal while
+/// redirecting the process's stdout+stderr (fd 1/2) into the log file. baresip/
+/// libre print interface info via raw `re_printf` to fd 1, bypassing the log
+/// handlers ringo-core installs; without this it corrupts the screen. The TUI
+/// keeps its own `dup` of the terminal, so it still draws there while fd 1/2 go
+/// to the log. `restore()` (also run on drop, idempotent) puts fd 1/2 back.
+/// Unix-only; on other platforms it's a no-op and the TUI renders on stdout.
+struct StdioRedirect {
+    saved: Option<(i32, i32)>,
+}
+
+impl StdioRedirect {
+    /// Duplicate the current stdout into a writer for the TUI, then point fd 1/2
+    /// at `file`. Returns the writer plus the guard that restores fd 1/2.
+    #[cfg(unix)]
+    fn install(file: &std::fs::File) -> (TermWriter, Self) {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        let fd = file.as_raw_fd();
+        unsafe {
+            // `tui` renders the TUI, `out`/`err` restore fd 1/2 on teardown —
+            // three distinct dups so nothing gets double-closed.
+            let tui = libc::dup(1);
+            let out = libc::dup(1);
+            let err = libc::dup(2);
+            if tui < 0 || out < 0 || err < 0 {
+                for f in [tui, out, err] {
+                    if f >= 0 {
+                        libc::close(f);
+                    }
+                }
+                return (Box::new(io::stdout()), Self { saved: None });
+            }
+            libc::dup2(fd, 1);
+            libc::dup2(fd, 2);
+            let writer: TermWriter = Box::new(std::fs::File::from_raw_fd(tui));
+            (
+                writer,
+                Self {
+                    saved: Some((out, err)),
+                },
+            )
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn install(_file: &std::fs::File) -> (TermWriter, Self) {
+        (Box::new(io::stdout()), Self { saved: None })
+    }
+
+    fn restore(&mut self) {
+        if let Some((out, err)) = self.saved.take() {
+            #[cfg(unix)]
+            unsafe {
+                libc::dup2(out, 1);
+                libc::dup2(err, 2);
+                libc::close(out);
+                libc::close(err);
+            }
+        }
+    }
+}
+
+impl Drop for StdioRedirect {
+    fn drop(&mut self) {
+        self.restore();
+    }
+}
+
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 /// Parameters shared by [`run`] and [`run_headless`] to build a session.
@@ -123,14 +198,32 @@ fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
 }
 
 pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<String>> {
+    let log_path = params.log_path.clone();
     let (rt, mut app, msg_rx, remote_rx, _control, _backend) = setup(rt, params)?;
 
-    // Set up terminal
+    // Render the TUI on a private `dup` of the original stdout while redirecting
+    // fd 1/2 into the log file: baresip/libre print interface info via raw
+    // `re_printf` to fd 1, bypassing ringo-core's log handlers, which would
+    // otherwise corrupt the screen. If the log can't be opened we just render on
+    // stdout with no redirect (e.g. CI/headless).
     crossterm::terminal::enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    crossterm::execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+    let (writer, mut redirect): (TermWriter, Option<StdioRedirect>) =
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            Ok(log) => {
+                let (writer, redirect) = StdioRedirect::install(&log);
+                (writer, Some(redirect))
+            }
+            Err(_) => (Box::new(io::stdout()), None),
+        };
+    let mut terminal = Terminal::new(CrosstermBackend::new(writer))?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::EnterAlternateScreen
+    )?;
     terminal.clear()?;
 
     let mut do_restart = false;
@@ -177,19 +270,30 @@ pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<
     // Drop runtime without waiting for blocked TCP tasks
     rt.shutdown_background();
 
-    // On restart or a profile switch we go straight into another full-screen view
-    // (the next session's TUI, or the picker). Stay in the alternate screen and
-    // hand over seamlessly — dropping it here would flash the shell between views.
+    // On restart or a profile switch we continue in-process into another
+    // full-screen view (the next session's TUI, or the picker), which renders on
+    // stdout — so restore fd 1/2 first. Stay in the alternate screen and hand
+    // over seamlessly; dropping it here would flash the shell between views.
     if do_restart {
+        if let Some(r) = redirect.as_mut() {
+            r.restore();
+        }
         return Ok(Some(app.profile_name.clone()));
     }
     if app.switch_to {
+        if let Some(r) = redirect.as_mut() {
+            r.restore();
+        }
         if let Ok(name) = crate::app::pick_profile(Some(&app.profile_name)) {
             return Ok(Some(name));
         }
     }
 
-    // Genuine exit: restore the terminal now.
+    // Genuine exit: leave fd 1/2 pointing at the log (skip the restore, incl. the
+    // Drop one) so any buffered or trailing baresip stdout flushes there instead
+    // of onto the shell after we quit. The parent shell keeps its own fds, so
+    // it's unaffected.
+    std::mem::forget(redirect);
     let _ = crossterm::terminal::disable_raw_mode();
     let _ = crossterm::execute!(
         terminal.backend_mut(),
@@ -255,7 +359,7 @@ pub fn run_headless(rt: tokio::runtime::Runtime, params: SessionParams) -> Resul
 // ─── Render loop ──────────────────────────────────────────────────────────────
 
 fn render_loop(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut Term,
     app: &mut App,
     msg_rx: &mpsc::Receiver<AppEvent>,
     remote_rx: &mpsc::Receiver<crate::control::RemoteRequest>,
@@ -276,10 +380,17 @@ fn render_loop(
         if dirty {
             // Wrap the frame in a synchronized-output block so the terminal renders
             // it atomically instead of tearing mid-repaint. Ignored by terminals
-            // that don't support it.
-            let _ = crossterm::execute!(io::stdout(), crossterm::terminal::BeginSynchronizedUpdate);
+            // that don't support it. Issued on the TUI writer (the tty), not fd 1
+            // (which is redirected to the log).
+            let _ = crossterm::execute!(
+                terminal.backend_mut(),
+                crossterm::terminal::BeginSynchronizedUpdate
+            );
             terminal.draw(|frame| ui::render(frame, app))?;
-            let _ = crossterm::execute!(io::stdout(), crossterm::terminal::EndSynchronizedUpdate);
+            let _ = crossterm::execute!(
+                terminal.backend_mut(),
+                crossterm::terminal::EndSynchronizedUpdate
+            );
             dirty = false;
         }
 

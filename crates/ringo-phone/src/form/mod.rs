@@ -12,14 +12,14 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use std::{io, path::Path};
+use std::path::Path;
 
 use crate::{config::Theme, profile::Profile};
 use field::*;
 
 pub use popups::{run_confirm, run_rename, run_restart_confirm};
 
-type Term = Terminal<CrosstermBackend<io::Stdout>>;
+type Term = Terminal<CrosstermBackend<crate::tui::TermWriter>>;
 
 const LABEL_W: u16 = 15;
 const SEP_W: u16 = 2;

@@ -1,14 +1,11 @@
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{
-    Terminal,
-    backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph},
 };
-use std::io;
 
 use crate::config::Theme;
 
@@ -40,7 +37,7 @@ const LOGO: &[&str] = &[
 /// Run the profile picker using an existing terminal (no terminal lifecycle management).
 /// When `focus` is provided the picker pre-selects the item with that name.
 pub(crate) fn run(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut crate::tui::Term,
     items: &[PickerItem],
     theme: &Theme,
     focus: Option<&str>,
