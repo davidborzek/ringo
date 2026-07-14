@@ -373,10 +373,41 @@ impl App {
     pub(super) fn refresh_baresip_log(&mut self) {
         if let Some(path) = &self.log.baresip_path {
             if let Ok(content) = std::fs::read_to_string(path) {
-                self.log.baresip_lines = content.lines().map(|l| l.to_string()).collect();
+                self.log.baresip_lines = content.lines().map(sanitize_log_line).collect();
             }
         }
     }
+}
+
+/// Clean a raw log line for display: emulate a terminal's carriage-return
+/// overwrite (keep only what follows the last `\r`, e.g. a curl progress meter's
+/// final state) and drop ANSI escape sequences and other control characters that
+/// would otherwise garble the rendering.
+fn sanitize_log_line(raw: &str) -> String {
+    let tail = raw.rsplit('\r').next().unwrap_or(raw);
+    let mut out = String::with_capacity(tail.len());
+    let mut chars = tail.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // CSI sequence: ESC '[' … final byte in '@'..='~'. Other escapes: drop
+            // the escape and its next byte, best-effort.
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for d in chars.by_ref() {
+                    if ('@'..='~').contains(&d) {
+                        break;
+                    }
+                }
+            } else {
+                chars.next();
+            }
+        } else if c == '\t' {
+            out.push(' ');
+        } else if !c.is_control() {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -384,6 +415,18 @@ mod tests {
     use super::*;
     use crate::phone::Phone;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn sanitize_log_line_strips_cr_and_ansi() {
+        // Carriage-return overwrite keeps only the final segment.
+        assert_eq!(sanitize_log_line("old text\rnew text"), "new text");
+        // ANSI colour codes are removed, printable text survives.
+        assert_eq!(sanitize_log_line("\x1b[32mok\x1b[0m"), "ok");
+        // Tabs become spaces; other control chars are dropped.
+        assert_eq!(sanitize_log_line("a\tb\x07c"), "a bc");
+        // A plain line is untouched.
+        assert_eq!(sanitize_log_line("plain"), "plain");
+    }
 
     #[derive(Clone, Default)]
     struct RecordingPhone {
