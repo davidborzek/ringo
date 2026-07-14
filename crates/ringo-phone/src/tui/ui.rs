@@ -5,7 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState,
+        ScrollbarState, Wrap,
     },
 };
 
@@ -29,17 +29,25 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let inner = outer.inner(area);
     f.render_widget(outer, area);
 
+    // The hint bar wraps onto extra rows on narrow terminals; size it to fit so
+    // it doesn't overflow. The command bar / error line is always one row.
+    let cmd_h = if app.command.active || app.command.error.is_some() {
+        1
+    } else {
+        hint_rows(&normal_hints(app), inner.width)
+    };
+
     // Fixed layout; all secondary views (Logs, Help, Call history, Contacts) are
     // centered modal overlays drawn on top.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(6),    // [0] calls
-            Constraint::Length(1), // [1] spacer
-            Constraint::Length(1), // [2] dial
-            Constraint::Length(1), // [3] error reason
-            Constraint::Length(1), // [4] status bar
-            Constraint::Length(1), // [5] hints / command bar
+            Constraint::Min(6),        // [0] calls
+            Constraint::Length(1),     // [1] spacer
+            Constraint::Length(1),     // [2] dial
+            Constraint::Length(1),     // [3] error reason
+            Constraint::Length(1),     // [4] status bar
+            Constraint::Length(cmd_h), // [5] hints / command bar
         ])
         .split(inner);
 
@@ -210,13 +218,18 @@ fn render_modal(
     let inner = block.inner(rect);
     f.render_widget(block, rect);
 
-    if !footer.is_empty() && inner.height >= 2 {
-        let fy = inner.y + inner.height - 1;
-        f.render_widget(
-            Paragraph::new(styled_hints(footer, theme)),
-            Rect::new(inner.x, fy, inner.width, 1),
-        );
-        return Rect::new(inner.x, inner.y, inner.width, inner.height - 1);
+    if !footer.is_empty() {
+        let footer_h = hint_rows(footer, inner.width);
+        if inner.height > footer_h {
+            let fy = inner.y + inner.height - footer_h;
+            render_hint_bar(
+                f,
+                Rect::new(inner.x, fy, inner.width, footer_h),
+                footer,
+                theme,
+            );
+            return Rect::new(inner.x, inner.y, inner.width, inner.height - footer_h);
+        }
     }
     inner
 }
@@ -445,10 +458,10 @@ fn render_command_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 }
 
-fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    use super::app::InputMode;
-
-    let hints: Vec<Hint> = match &app.transfer_mode {
+/// The base hint line's keys for the current mode. Overlay-specific hints live
+/// in each modal's own footer; this is the always-visible call-action bar.
+fn normal_hints(app: &App) -> Vec<Hint<'static>> {
+    match &app.transfer_mode {
         TransferMode::BlindInput(_) | TransferMode::AttendedInput(_) => {
             vec![("Enter", "send"), ("Tab", "contacts"), ("Esc", "cancel")]
         }
@@ -463,8 +476,6 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             ],
             InputMode::HistorySearch => Vec::new(),
             InputMode::Normal => {
-                // Overlay-specific hints live in each modal's own footer; the base
-                // hint line always shows the main call actions.
                 let mut h: Vec<Hint> = vec![("d", "dial")];
                 if app.has_incoming_ringing() {
                     h.push(("a", "accept"));
@@ -497,23 +508,30 @@ fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 h
             }
         },
-    };
-    f.render_widget(Paragraph::new(styled_hints(&hints, &app.theme)), area);
+    }
+}
+
+fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    render_hint_bar(f, area, &normal_hints(app), &app.theme);
 }
 
 /// One keybind hint: the key (or chord) and what it does. Structured so the
 /// keys can later come from a configurable keymap instead of literals.
 pub(crate) type Hint<'a> = (&'a str, &'a str);
 
+/// Left indent shared by every hint bar so wrapped rows line up with the first.
+const HINT_INDENT: u16 = 1;
+
 /// Render `(key, label)` hints as styled spans — key in bold accent, label
 /// subtle — for a which-key-ish look. Ctrl chords written `^X` display as `C-x`.
+/// No leading indent (that's applied by [`render_hint_bar`] so wrapped rows line
+/// up too); render with wrapping.
 pub(crate) fn styled_hints(hints: &[Hint], theme: &Theme) -> Line<'static> {
     let key_style = Style::default()
         .fg(theme.accent.get())
         .add_modifier(Modifier::BOLD);
     let lbl_style = Style::default().fg(theme.subtle.get());
-    // Leading space to line up with the status bar's indent above.
-    let mut spans: Vec<Span> = vec![Span::raw(" ")];
+    let mut spans: Vec<Span> = Vec::new();
     for (i, (key, label)) in hints.iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled("   ", lbl_style));
@@ -528,4 +546,72 @@ pub(crate) fn styled_hints(hints: &[Hint], theme: &Theme) -> Line<'static> {
         }
     }
     Line::from(spans)
+}
+
+/// How many rows the hints need in an area of `width`, accounting for the shared
+/// left indent, so a hint bar can wrap onto extra lines instead of overflowing.
+pub(crate) fn hint_rows(hints: &[Hint], width: u16) -> u16 {
+    let mut w = 0usize;
+    for (i, (key, label)) in hints.iter().enumerate() {
+        if i > 0 {
+            w += 3; // separator
+        }
+        // `^X` renders as `C-x` (3 cols).
+        w += if key.starts_with('^') {
+            key.chars().count() + 1
+        } else {
+            key.chars().count()
+        };
+        if !label.is_empty() {
+            w += 1 + label.chars().count();
+        }
+    }
+    let avail = width.saturating_sub(HINT_INDENT).max(1);
+    (w as u16).div_ceil(avail).max(1)
+}
+
+/// Render a wrapping hint bar into `area`, indented so every (wrapped) row lines
+/// up. Pair with [`hint_rows`] to size the area's height.
+pub(crate) fn render_hint_bar(f: &mut Frame, area: Rect, hints: &[Hint], theme: &Theme) {
+    let inner = Rect::new(
+        area.x + HINT_INDENT,
+        area.y,
+        area.width.saturating_sub(HINT_INDENT),
+        area.height,
+    );
+    f.render_widget(
+        Paragraph::new(styled_hints(hints, theme)).wrap(Wrap { trim: false }),
+        inner,
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::styled_hints;
+    use crate::config::Theme;
+
+    #[test]
+    fn hints_wrap_onto_more_rows_when_narrow() {
+        use super::hint_rows;
+        let theme = Theme::default();
+        let hints = [
+            ("d", "dial"),
+            ("a", "accept"),
+            ("b", "hangup"),
+            ("q", "quit"),
+        ];
+
+        // Wide: fits on one row.
+        assert_eq!(hint_rows(&hints, 200), 1);
+        // Narrow: wraps onto more rows.
+        assert!(hint_rows(&hints, 12) > 1);
+
+        // The full line keeps every token (no truncation) — wrapping shows them.
+        let s: String = styled_hints(&hints, &theme)
+            .spans
+            .iter()
+            .map(|sp| sp.content.as_ref())
+            .collect();
+        assert!(s.contains("quit"));
+    }
 }

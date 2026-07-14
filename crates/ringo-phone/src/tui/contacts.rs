@@ -329,14 +329,43 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     let entries = app.contacts_display_entries();
     let total_contacts = app.contacts.len();
     let filtered_len = entries.len();
-    // 2 border rows + 1 footer row.
-    let visible = area.height.saturating_sub(3) as usize;
 
     let sel = if filtered_len > 0 {
         app.contacts_state.selected.min(filtered_len - 1)
     } else {
         0
     };
+
+    let search_footer = [("Enter", "confirm"), ("Esc", "clear")];
+    let nav_footer = [
+        ("↑↓", "nav"),
+        ("PgUp/PgDn", "page"),
+        ("Enter", "dial"),
+        ("/", "search"),
+        ("a", "add"),
+        ("e", "edit"),
+        ("d", "del"),
+        ("Esc", "close"),
+    ];
+    // The add/edit form overlay draws its own hints, so no footer then.
+    let footer: &[super::ui::Hint] = if app.contacts_state.form.mode != ContactFormMode::None {
+        &[]
+    } else if app.contacts_state.search_mode {
+        &search_footer
+    } else {
+        &nav_footer
+    };
+
+    // Size the visible window to the real list area (inner minus the — possibly
+    // wrapped — footer) so the selected row stays in view. `inner` is `area` inset
+    // by the 1-col borders.
+    let inner_h = area.height.saturating_sub(2);
+    let footer_h = if footer.is_empty() {
+        0
+    } else {
+        super::ui::hint_rows(footer, area.width.saturating_sub(2)).min(inner_h.saturating_sub(1))
+    };
+    let visible = inner_h.saturating_sub(footer_h) as usize;
     let scroll = if sel < visible { 0 } else { sel - visible + 1 };
 
     // Size the name column to the longest name, but cap it so the number column
@@ -435,26 +464,6 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
         ])
     };
 
-    let search_footer = [("Enter", "confirm"), ("Esc", "clear")];
-    let nav_footer = [
-        ("↑↓", "nav"),
-        ("PgUp/PgDn", "page"),
-        ("Enter", "dial"),
-        ("/", "search"),
-        ("a", "add"),
-        ("e", "edit"),
-        ("d", "del"),
-        ("Esc", "close"),
-    ];
-    // The add/edit form overlay draws its own hints, so no footer then.
-    let footer: &[super::ui::Hint] = if app.contacts_state.form.mode != ContactFormMode::None {
-        &[]
-    } else if app.contacts_state.search_mode {
-        &search_footer
-    } else {
-        &nav_footer
-    };
-
     f.render_widget(Clear, area);
     let block = Block::default()
         .title(title)
@@ -464,18 +473,11 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let footer_h = if inner.height >= 2 && !footer.is_empty() {
-        1
-    } else {
-        0
-    };
-    let list_area = Rect::new(inner.x, inner.y, inner.width, inner.height - footer_h);
+    let list_area = Rect::new(inner.x, inner.y, inner.width, visible as u16);
     f.render_widget(List::new(items), list_area);
-    if footer_h == 1 {
-        f.render_widget(
-            Paragraph::new(super::ui::styled_hints(footer, &app.theme)),
-            Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
-        );
+    if footer_h > 0 {
+        let footer_area = Rect::new(inner.x, inner.y + visible as u16, inner.width, footer_h);
+        super::ui::render_hint_bar(f, footer_area, footer, &app.theme);
     }
     super::ui::render_scrollbar(f, &app.theme, area, filtered_len, visible, scroll);
 

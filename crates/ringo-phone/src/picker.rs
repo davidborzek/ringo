@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
 };
 use std::io;
 
@@ -37,6 +37,18 @@ const LOGO: &[&str] = &[
     "╚═╝  ╚═╝╚═╝╚═╝  ╚══╝ ╚═════╝  ╚═════╝",
 ];
 
+/// Keybind hints shown at the bottom of the picker.
+const PICKER_HINTS: &[(&str, &str)] = &[
+    ("Enter", "start"),
+    ("^E", "edit"),
+    ("^R", "rename"),
+    ("^Y", "clone"),
+    ("^D", "delete"),
+    ("^N", "new"),
+    ("^S", "settings"),
+    ("Esc", "quit"),
+];
+
 /// Run the profile picker using an existing terminal (no terminal lifecycle management).
 /// When `focus` is provided the picker pre-selects the item with that name.
 pub(crate) fn run(
@@ -63,6 +75,7 @@ pub(crate) fn run(
         terminal.draw(|frame| {
             let area = frame.area();
             let header_height = (area.height / 4).max(8);
+            let hint_h = crate::tui::ui::hint_rows(PICKER_HINTS, area.width);
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
@@ -70,7 +83,7 @@ pub(crate) fn run(
                     Constraint::Length(3),             // [1] search box
                     Constraint::Length(1),             // [2] gap
                     Constraint::Min(1),                // [3] list box
-                    Constraint::Length(1),             // [4] hint
+                    Constraint::Length(hint_h),        // [4] hint
                 ])
                 .split(area);
 
@@ -174,21 +187,10 @@ pub(crate) fn run(
                 );
             }
 
-            // Hint line
+            // Hint line (wraps onto extra rows on narrow terminals)
             frame.render_widget(
-                Paragraph::new(crate::tui::ui::styled_hints(
-                    &[
-                        ("Enter", "start"),
-                        ("^E", "edit"),
-                        ("^R", "rename"),
-                        ("^Y", "clone"),
-                        ("^D", "delete"),
-                        ("^N", "new"),
-                        ("^S", "settings"),
-                        ("Esc", "quit"),
-                    ],
-                    theme,
-                )),
+                Paragraph::new(crate::tui::ui::styled_hints(PICKER_HINTS, theme))
+                    .wrap(Wrap { trim: false }),
                 chunks[4],
             );
         })?;

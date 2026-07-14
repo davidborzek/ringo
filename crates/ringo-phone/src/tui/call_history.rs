@@ -4,7 +4,7 @@ use ratatui::{
     layout::Rect,
     style::Style,
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem},
 };
 
 use super::app::{Call, CallDirection, CallHistoryEntry};
@@ -263,29 +263,12 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     let indices = app.call_history.filtered_indices(&app.contacts);
     let total = app.call_history.entries.len();
     let filtered_len = indices.len();
-    // 2 border rows + 1 footer row.
-    let visible = area.height.saturating_sub(3) as usize;
 
     let sel = if filtered_len > 0 {
         app.call_history.selected.min(filtered_len - 1)
     } else {
         0
     };
-    let scroll = if sel < visible { 0 } else { sel - visible + 1 };
-
-    // Peer column width adapts to the modal, reserving room for arrow (3), gaps,
-    // duration (9) and timestamp (19); the rest goes to the peer (truncated).
-    let peer_w = (area.width as usize)
-        .saturating_sub(2 + 3 + 2 + 9 + 2 + 19)
-        .clamp(12, 60);
-
-    let items: Vec<ListItem> = indices
-        .iter()
-        .enumerate()
-        .skip(scroll)
-        .take(visible)
-        .map(|(fi, &ri)| call_history_item(&app.call_history.entries[ri], app, fi == sel, peer_w))
-        .collect();
 
     let accent = Style::default().fg(app.theme.accent.get());
     let subtle = Style::default().fg(app.theme.subtle.get());
@@ -352,13 +335,34 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let footer_h = if inner.height >= 2 { 1 } else { 0 };
-    let list_area = Rect::new(inner.x, inner.y, inner.width, inner.height - footer_h);
+    // Size the visible window to the actual list area (inner minus the — possibly
+    // wrapped — footer) so the selected row is always kept in view.
+    let footer_h = super::ui::hint_rows(footer, inner.width).min(inner.height.saturating_sub(1));
+    let visible = inner.height.saturating_sub(footer_h) as usize;
+    let scroll = if sel < visible { 0 } else { sel - visible + 1 };
+
+    // Peer column width adapts to the modal, reserving room for arrow (3), gaps,
+    // duration (9) and timestamp (19); the rest goes to the peer (truncated).
+    let peer_w = (area.width as usize)
+        .saturating_sub(2 + 3 + 2 + 9 + 2 + 19)
+        .clamp(12, 60);
+
+    let items: Vec<ListItem> = indices
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(visible)
+        .map(|(fi, &ri)| call_history_item(&app.call_history.entries[ri], app, fi == sel, peer_w))
+        .collect();
+
+    let list_area = Rect::new(inner.x, inner.y, inner.width, visible as u16);
     f.render_widget(List::new(items), list_area);
-    if footer_h == 1 {
-        f.render_widget(
-            Paragraph::new(super::ui::styled_hints(footer, &app.theme)),
-            Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
+    if footer_h > 0 {
+        super::ui::render_hint_bar(
+            f,
+            Rect::new(inner.x, inner.y + visible as u16, inner.width, footer_h),
+            footer,
+            &app.theme,
         );
     }
     super::ui::render_scrollbar(f, &app.theme, area, filtered_len, visible, scroll);
