@@ -135,6 +135,10 @@ pub fn pick_profile(focus: Option<&str>) -> Result<String> {
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    // Clear explicitly: when the phone TUI hands over on a profile switch we stay
+    // in the alternate screen (no leave/re-enter to wipe it), so the picker must
+    // clear any leftover frame itself.
+    terminal.clear()?;
 
     let result = pick_profile_loop(&mut terminal, focus);
 

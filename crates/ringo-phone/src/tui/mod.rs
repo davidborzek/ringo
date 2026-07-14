@@ -176,16 +176,11 @@ pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<
         // Form cancelled or "Later" → resume TUI
     }
 
-    // Restore terminal unconditionally
-    let _ = crossterm::terminal::disable_raw_mode();
-    let _ = crossterm::execute!(
-        terminal.backend_mut(),
-        crossterm::terminal::LeaveAlternateScreen
-    );
-
     // Tear down the session (fires ua_unregister) and wait for the PBX to
     // process the de-register before the caller stops the RE thread — otherwise
     // we leave a stale contact. Bounded so an unresponsive PBX can't hang exit.
+    // Do this *before* restoring the screen so the wait happens behind the
+    // alternate screen rather than flashing the shell.
     drop(_backend);
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
     while ringo_core::is_registered() && std::time::Instant::now() < deadline {
@@ -195,16 +190,24 @@ pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<
     // Drop runtime without waiting for blocked TCP tasks
     rt.shutdown_background();
 
+    // On restart or a profile switch we go straight into another full-screen view
+    // (the next session's TUI, or the picker). Stay in the alternate screen and
+    // hand over seamlessly — dropping it here would flash the shell between views.
     if do_restart {
         return Ok(Some(app.profile_name.clone()));
     }
-
     if app.switch_to {
         if let Ok(name) = crate::app::pick_profile(Some(&app.profile_name)) {
             return Ok(Some(name));
         }
     }
 
+    // Genuine exit: restore the terminal now.
+    let _ = crossterm::terminal::disable_raw_mode();
+    let _ = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::LeaveAlternateScreen
+    );
     Ok(None)
 }
 
@@ -312,26 +315,45 @@ fn render_loop(
     remote_rx: &mpsc::Receiver<crate::control::RemoteRequest>,
 ) -> Result<()> {
     use std::time::Duration;
+    // Redraw only when something changed. The loop still spins every 16ms to stay
+    // responsive to backend/remote events, but we skip the terminal write on idle
+    // frames — that's what stops the constant repaint/flicker.
+    let mut dirty = true;
     loop {
         app.tick = app.tick.wrapping_add(1);
         // Refresh backend log every ~500ms (30 ticks × 16ms) when visible
         if app.log.show_baresip && app.tick % 30 == 0 {
             app.refresh_baresip_log();
+            dirty = true;
         }
 
-        terminal.draw(|frame| ui::render(frame, app))?;
+        if dirty {
+            // Wrap the frame in a synchronized-output block so the terminal renders
+            // it atomically instead of tearing mid-repaint. Ignored by terminals
+            // that don't support it.
+            let _ = crossterm::execute!(io::stdout(), crossterm::terminal::BeginSynchronizedUpdate);
+            terminal.draw(|frame| ui::render(frame, app))?;
+            let _ = crossterm::execute!(io::stdout(), crossterm::terminal::EndSynchronizedUpdate);
+            dirty = false;
+        }
 
         if ct_event::poll(Duration::from_millis(16))? {
-            if let Event::Key(key) = ct_event::read()? {
-                app.handle_key(key);
-                if app.quit {
-                    break;
+            match ct_event::read()? {
+                Event::Key(key) => {
+                    app.handle_key(key);
+                    dirty = true;
+                    if app.quit {
+                        break;
+                    }
                 }
+                Event::Resize(_, _) => dirty = true,
+                _ => {}
             }
         }
 
         while let Ok(event) = msg_rx.try_recv() {
             app.handle_message(event);
+            dirty = true;
         }
 
         // Dispatch any remote-control commands through the same path as the
@@ -342,6 +364,7 @@ fn render_loop(
                 Err(e) => crate::control::ControlResponse::err(e),
             };
             let _ = req.reply.send(resp);
+            dirty = true;
         }
         // A remote `shutdown` sets `app.quit` outside the key handler.
         if app.quit {
