@@ -1,13 +1,28 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
 };
 
 use super::app::{ContactFormField, ContactFormMode};
+
+/// Minimum width of the contact-name column.
+const NAME_COL_MIN: usize = 12;
+
+/// Truncate `s` to `width` display columns (char-aware, appending `…` when it
+/// doesn't fit), otherwise left-pad it to `width` so the next column aligns.
+fn fit(s: &str, width: usize) -> String {
+    if s.chars().count() > width {
+        let mut t: String = s.chars().take(width.saturating_sub(1)).collect();
+        t.push('…');
+        t
+    } else {
+        format!("{s:<width$}")
+    }
+}
 
 /// A flattened entry for display: one row per number.
 struct DisplayEntry {
@@ -52,23 +67,32 @@ impl super::app::App {
     }
 
     pub(super) fn handle_contacts_key(&mut self, key: crossterm::event::KeyEvent) {
-        // Delete confirmation captures all input
+        // Delete confirmation popup captures all input.
         if let Some(ci) = self.contacts_state.delete_confirm {
+            let mut do_delete = false;
+            let mut close = false;
             match key.code {
-                KeyCode::Char('y') => {
-                    if ci < self.contacts.len() {
-                        self.contacts.remove(ci);
-                        crate::contacts::save(&self.contacts);
-                        let new_len = self.contacts_display_entries().len();
-                        if self.contacts_state.selected >= new_len && new_len > 0 {
-                            self.contacts_state.selected = new_len - 1;
-                        }
-                    }
-                    self.contacts_state.delete_confirm = None;
+                KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                    self.confirm_yes = !self.confirm_yes;
                 }
-                _ => {
-                    self.contacts_state.delete_confirm = None;
+                KeyCode::Char('y') | KeyCode::Char('Y') => do_delete = true,
+                KeyCode::Enter if self.confirm_yes => do_delete = true,
+                KeyCode::Enter | KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                    close = true;
                 }
+                _ => {}
+            }
+            if do_delete && ci < self.contacts.len() {
+                self.contacts.remove(ci);
+                crate::contacts::save(&self.contacts);
+                let new_len = self.contacts_display_entries().len();
+                if self.contacts_state.selected >= new_len && new_len > 0 {
+                    self.contacts_state.selected = new_len - 1;
+                }
+            }
+            if do_delete || close {
+                self.contacts_state.delete_confirm = None;
+                self.confirm_yes = false;
             }
             return;
         }
@@ -117,11 +141,6 @@ impl super::app::App {
                     self.contacts_state.show = false;
                 }
             }
-            KeyCode::Char('f') if key.modifiers == KeyModifiers::NONE => {
-                self.contacts_state.search_query.clear();
-                self.contacts_state.search_mode = false;
-                self.contacts_state.show = false;
-            }
             KeyCode::Char('/') if key.modifiers == KeyModifiers::NONE => {
                 self.contacts_state.search_mode = true;
                 self.contacts_state.search_query.clear();
@@ -144,12 +163,10 @@ impl super::app::App {
                     self.contacts_state.form.cursor = self.contacts_state.form.name.len();
                 }
             }
-            KeyCode::Char('E') if key.modifiers == KeyModifiers::SHIFT => {
-                self.open_contacts_editor();
-            }
             KeyCode::Char('d') if key.modifiers == KeyModifiers::NONE => {
                 if let Some(ci) = self.selected_contact_idx() {
                     self.contacts_state.delete_confirm = Some(ci);
+                    self.confirm_yes = false;
                 }
             }
             KeyCode::Char('g') if key.modifiers == KeyModifiers::NONE => {
@@ -168,6 +185,14 @@ impl super::app::App {
             KeyCode::Down => {
                 if self.contacts_state.selected + 1 < len {
                     self.contacts_state.selected += 1;
+                }
+            }
+            KeyCode::PageUp => {
+                self.contacts_state.selected = self.contacts_state.selected.saturating_sub(10);
+            }
+            KeyCode::PageDown => {
+                if len > 0 {
+                    self.contacts_state.selected = (self.contacts_state.selected + 10).min(len - 1);
                 }
             }
             KeyCode::Enter => {
@@ -289,11 +314,6 @@ impl super::app::App {
             _ => {}
         }
     }
-
-    fn open_contacts_editor(&mut self) {
-        self.edit_contacts = true;
-        self.quit = true;
-    }
 }
 
 fn form_buf_and_cursor(form: &mut super::app::ContactFormState) -> (&mut String, &mut usize) {
@@ -309,7 +329,8 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     let entries = app.contacts_display_entries();
     let total_contacts = app.contacts.len();
     let filtered_len = entries.len();
-    let visible = area.height.saturating_sub(2) as usize;
+    // 2 border rows + 1 footer row.
+    let visible = area.height.saturating_sub(3) as usize;
 
     let sel = if filtered_len > 0 {
         app.contacts_state.selected.min(filtered_len - 1)
@@ -317,6 +338,19 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
         0
     };
     let scroll = if sel < visible { 0 } else { sel - visible + 1 };
+
+    // Size the name column to the longest name, but cap it so the number column
+    // still fits (reserve ~24 cols for borders, gap and the number).
+    let name_w = app
+        .contacts
+        .iter()
+        .map(|c| c.name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .clamp(
+            NAME_COL_MIN,
+            (area.width as usize).saturating_sub(24).max(NAME_COL_MIN),
+        );
 
     let items: Vec<ListItem> = entries
         .iter()
@@ -328,15 +362,17 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
             let number = &contact.numbers[entry.number_idx];
 
             let is_first_number = entry.number_idx == 0;
+            // Fixed-width name column (truncated with an ellipsis) so the number
+            // column always lines up; a trailing gap separates it from the number.
             let name_part = if is_first_number {
-                format!("{:<20}", contact.name)
+                fit(&contact.name, name_w)
             } else {
-                " ".repeat(20)
+                " ".repeat(name_w)
             };
 
             let line = Line::from(vec![
                 Span::styled(
-                    format!(" {}", name_part),
+                    format!(" {}  ", name_part),
                     Style::default()
                         .fg(app.theme.accent.get())
                         .add_modifier(if is_first_number {
@@ -359,16 +395,7 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
 
     let accent = Style::default().fg(app.theme.accent.get());
     let subtle = Style::default().fg(app.theme.subtle.get());
-    let title: Line = if let Some(ci) = app.contacts_state.delete_confirm {
-        let name = app.contacts.get(ci).map(|c| c.name.as_str()).unwrap_or("?");
-        Line::from(vec![
-            Span::styled("Contacts", accent),
-            Span::styled(
-                format!("  Delete \"{}\"? (y/n)", name),
-                Style::default().fg(app.theme.danger.get()),
-            ),
-        ])
-    } else if app.contacts_state.form.mode != ContactFormMode::None {
+    let title: Line = if app.contacts_state.form.mode != ContactFormMode::None {
         Line::from(vec![Span::styled("Contacts", accent)])
     } else if app.contacts_state.search_mode {
         Line::from(vec![
@@ -408,10 +435,36 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
         ])
     };
 
-    f.render_widget(
-        List::new(items).block(Block::default().title(title).borders(Borders::TOP)),
-        area,
-    );
+    let footer = if app.contacts_state.form.mode != ContactFormMode::None {
+        "" // the form overlay draws its own hints
+    } else if app.contacts_state.search_mode {
+        "  type to filter   Enter confirm   Esc clear"
+    } else {
+        "  ↑↓/PgUp/PgDn nav   Enter dial   / search   a add   e edit   d del   Esc close"
+    };
+
+    f.render_widget(Clear, area);
+    let block = Block::default()
+        .title(title)
+        .title_alignment(Alignment::Center)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let footer_h = if inner.height >= 2 && !footer.is_empty() {
+        1
+    } else {
+        0
+    };
+    let list_area = Rect::new(inner.x, inner.y, inner.width, inner.height - footer_h);
+    f.render_widget(List::new(items), list_area);
+    if footer_h == 1 {
+        f.render_widget(
+            Paragraph::new(footer).style(subtle),
+            Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
+        );
+    }
 
     // Form overlay
     if app.contacts_state.form.mode != ContactFormMode::None {

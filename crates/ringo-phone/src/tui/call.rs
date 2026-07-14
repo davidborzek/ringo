@@ -121,15 +121,7 @@ impl super::app::App {
                     "error": error,
                 }),
             );
-            let log_entry = if error {
-                Some(format!("✗ {} — {}", call.peer, reason))
-            } else {
-                None
-            };
             self.append_call_history(call);
-            if let Some(entry) = log_entry {
-                self.push_log(entry);
-            }
         }
         if let Some(lc) = closed {
             self.last_call = Some(lc);

@@ -94,6 +94,15 @@ pub struct MwiState {
     pub new_messages: u32,
 }
 
+/// Pending call-history deletion awaiting y/n confirmation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HistoryDelete {
+    /// The currently selected entry.
+    One,
+    /// The whole history.
+    All,
+}
+
 pub struct CallHistoryState {
     pub path: Option<PathBuf>,
     pub entries: Vec<CallHistoryEntry>,
@@ -101,6 +110,8 @@ pub struct CallHistoryState {
     pub selected: usize,
     pub search_query: String,
     pub search_mode: bool,
+    /// Set while a `d`/`D` deletion is waiting for confirmation.
+    pub delete_confirm: Option<HistoryDelete>,
 }
 
 impl CallHistoryState {
@@ -128,12 +139,17 @@ impl CallHistoryState {
 }
 
 pub struct LogState {
-    pub entries: VecDeque<String>,
-    pub scroll: usize,
+    /// On-disk log file backing the Logs modal.
+    pub path: Option<PathBuf>,
+    /// Sanitized lines read from `path`, refreshed while the modal is open.
+    pub lines: Vec<String>,
+    /// Whether the Logs modal is open.
     pub show: bool,
-    pub baresip_path: Option<PathBuf>,
-    pub show_baresip: bool,
-    pub baresip_lines: Vec<String>,
+    pub scroll: usize,
+    /// Case-insensitive substring filter (grep-style); empty shows all lines.
+    pub search_query: String,
+    /// Whether the `/` search input is currently capturing keys.
+    pub search_mode: bool,
     /// Last known visible height (set during render, used to clamp scroll).
     pub visible_height: usize,
 }
@@ -214,9 +230,13 @@ pub struct App {
     pub(crate) phone: Box<dyn Phone>,
     pub quit: bool,
     pub quit_confirm: bool,
+    /// Whether the Help modal is open.
+    pub help_show: bool,
+    /// Which button is highlighted in the active confirm popup (`true` = the
+    /// destructive action). Reset to `false` (safe) each time a popup opens.
+    pub confirm_yes: bool,
     pub switch_to: bool,
     pub edit_profile: bool,
-    pub edit_contacts: bool,
     pub theme: Theme,
     pub hooks: Vec<Hook>,
     pub profile: Profile,
@@ -232,7 +252,7 @@ impl App {
     pub fn new(
         profile_name: String,
         account_aor: String,
-        baresip_log_path: Option<PathBuf>,
+        log_path: Option<PathBuf>,
         call_history_path: Option<PathBuf>,
         notify_enabled: bool,
         phone: Box<dyn Phone>,
@@ -255,6 +275,8 @@ impl App {
             phone,
             quit: false,
             quit_confirm: false,
+            help_show: false,
+            confirm_yes: false,
             switch_to: false,
             dial: DialState {
                 input: String::new(),
@@ -278,14 +300,15 @@ impl App {
                 selected: 0,
                 search_query: String::new(),
                 search_mode: false,
+                delete_confirm: None,
             },
             log: LogState {
-                entries: VecDeque::with_capacity(200),
-                scroll: 0,
+                path: log_path,
+                lines: Vec::new(),
                 show: false,
-                baresip_path: baresip_log_path,
-                show_baresip: false,
-                baresip_lines: Vec::new(),
+                scroll: 0,
+                search_query: String::new(),
+                search_mode: false,
                 visible_height: 0,
             },
             last_call_reason: None,
@@ -298,7 +321,6 @@ impl App {
                 tab_index: 0,
             },
             edit_profile: false,
-            edit_contacts: false,
             theme,
             hooks,
             profile,
@@ -354,14 +376,6 @@ impl App {
         }
     }
 
-    pub fn push_log(&mut self, msg: impl Into<String>) {
-        if self.log.entries.len() >= 200 {
-            self.log.entries.pop_front();
-        }
-        self.log.entries.push_back(msg.into());
-        self.log.scroll = 0; // auto-scroll to bottom on new entry
-    }
-
     pub fn notify(&self, summary: &str, body: &str) {
         if !self.notify_enabled {
             return;
@@ -370,10 +384,25 @@ impl App {
         crate::notify::send(summary, &body_with_profile);
     }
 
-    pub(super) fn refresh_baresip_log(&mut self) {
-        if let Some(path) = &self.log.baresip_path {
+    /// Close every overlay (Logs / Help / Call history / Contacts). Callers open
+    /// exactly one afterwards, keeping overlays mutually exclusive.
+    pub(super) fn close_overlays(&mut self) {
+        self.log.show = false;
+        self.log.search_mode = false;
+        self.log.search_query.clear();
+        self.help_show = false;
+        self.call_history.show = false;
+        self.call_history.delete_confirm = None;
+        self.contacts_state.show = false;
+        self.contacts_state.delete_confirm = None;
+        self.confirm_yes = false;
+        self.log.scroll = 0;
+    }
+
+    pub(super) fn refresh_log(&mut self) {
+        if let Some(path) = &self.log.path {
             if let Ok(content) = std::fs::read_to_string(path) {
-                self.log.baresip_lines = content.lines().map(sanitize_log_line).collect();
+                self.log.lines = content.lines().map(sanitize_log_line).collect();
             }
         }
     }

@@ -137,19 +137,6 @@ pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<
     loop {
         render_loop(&mut terminal, &mut app, &msg_rx, &remote_rx)?;
 
-        if app.edit_contacts {
-            app.edit_contacts = false;
-            app.quit = false;
-
-            open_contacts_editor(&mut terminal)?;
-
-            app.contacts = crate::contacts::load();
-            app.contacts_state.selected = 0;
-            app.contacts_state.search_query.clear();
-            app.contacts_state.search_mode = false;
-            continue;
-        }
-
         if !app.edit_profile {
             break;
         }
@@ -265,47 +252,6 @@ pub fn run_headless(rt: tokio::runtime::Runtime, params: SessionParams) -> Resul
     Ok(())
 }
 
-// ─── Contacts editor ─────────────────────────────────────────────────────────
-
-fn open_contacts_editor(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-) -> anyhow::Result<()> {
-    use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
-    use std::process::Command;
-
-    let Some(path) = crate::contacts::contacts_path() else {
-        return Ok(());
-    };
-
-    if !path.exists() {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(
-            &path,
-            "# ringo contacts\n\
-             # [[contacts]]\n\
-             # name = \"Alice\"\n\
-             # numbers = [\"+49123456789\", \"alice.work\"]\n",
-        )?;
-    }
-
-    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
-
-    crossterm::terminal::disable_raw_mode()?;
-    crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-
-    let status = Command::new(&editor).arg(&path).status();
-
-    crossterm::terminal::enable_raw_mode()?;
-    crossterm::execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-    terminal.clear()?;
-
-    status
-        .map(|_| ())
-        .map_err(|e| anyhow::anyhow!("Failed to open editor '{}': {}", editor, e))
-}
-
 // ─── Render loop ──────────────────────────────────────────────────────────────
 
 fn render_loop(
@@ -321,9 +267,9 @@ fn render_loop(
     let mut dirty = true;
     loop {
         app.tick = app.tick.wrapping_add(1);
-        // Refresh backend log every ~500ms (30 ticks × 16ms) when visible
-        if app.log.show_baresip && app.tick % 30 == 0 {
-            app.refresh_baresip_log();
+        // Refresh the log file every ~500ms (30 ticks × 16ms) while the modal is open
+        if app.log.show && app.tick % 30 == 0 {
+            app.refresh_log();
             dirty = true;
         }
 
