@@ -98,7 +98,28 @@ pub(crate) enum FieldKind {
     SubMenu {
         count: usize,
     },
-    Button,
+}
+
+/// Which settings tab a field lives on. Ordered as shown in the tab bar; extend
+/// here (e.g. a `Forwarding` tab for 302 redirects) and assign fields in
+/// `build_fields` — the form picks the rest up automatically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tab {
+    Account,
+    Network,
+    Features,
+}
+
+impl Tab {
+    pub const ALL: &'static [Tab] = &[Tab::Account, Tab::Network, Tab::Features];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Tab::Account => "Account",
+            Tab::Network => "Network",
+            Tab::Features => "Features",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,11 +134,11 @@ pub(crate) enum FieldId {
     Outbound,
     StunServer,
     Encryption,
+    Regint,
     Notes,
     Notify,
     Mwi,
     SipHeaders,
-    Save,
 }
 
 pub(crate) struct Field {
@@ -125,6 +146,10 @@ pub(crate) struct Field {
     pub label: &'static str,
     pub required: bool,
     pub kind: FieldKind,
+    /// Settings tab this field appears on.
+    pub group: Tab,
+    /// One-line help shown in the footer while this field is focused.
+    pub desc: &'static str,
 }
 
 impl Field {
@@ -143,6 +168,8 @@ impl Field {
                 tf: TextField::new(value),
                 masked,
             },
+            group: Tab::Account,
+            desc: "",
         }
     }
     pub fn select(
@@ -156,6 +183,8 @@ impl Field {
             label,
             required: false,
             kind: FieldKind::Select { options, idx },
+            group: Tab::Account,
+            desc: "",
         }
     }
     pub fn toggle(id: FieldId, label: &'static str, value: bool) -> Self {
@@ -164,6 +193,8 @@ impl Field {
             label,
             required: false,
             kind: FieldKind::Toggle { value },
+            group: Tab::Account,
+            desc: "",
         }
     }
     pub fn submenu(id: FieldId, label: &'static str, count: usize) -> Self {
@@ -172,15 +203,21 @@ impl Field {
             label,
             required: false,
             kind: FieldKind::SubMenu { count },
+            group: Tab::Account,
+            desc: "",
         }
     }
-    pub fn button(id: FieldId, label: &'static str) -> Self {
-        Self {
-            id,
-            label,
-            required: false,
-            kind: FieldKind::Button,
-        }
+
+    /// Assign this field to a settings tab (builder).
+    pub fn group(mut self, group: Tab) -> Self {
+        self.group = group;
+        self
+    }
+
+    /// Attach the footer help line for this field (builder).
+    pub fn desc(mut self, desc: &'static str) -> Self {
+        self.desc = desc;
+        self
     }
 }
 
@@ -248,20 +285,6 @@ impl Field {
                     Style::default().fg(Color::White)
                 };
                 frame.render_widget(Paragraph::new(Span::styled(text, style)), area);
-            }
-            FieldKind::Button => {
-                let style = if focused {
-                    Style::default()
-                        .fg(Color::White)
-                        .bg(theme.accent.get())
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(theme.subtle.get())
-                };
-                frame.render_widget(
-                    Paragraph::new(Span::styled(format!("  {}  ", self.label), style)),
-                    area,
-                );
             }
         }
         None

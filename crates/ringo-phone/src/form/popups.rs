@@ -148,10 +148,12 @@ pub fn run_rename(
 
             // Hint
             let hint_y = inner.y + inner.height.saturating_sub(1);
-            frame.render_widget(
-                Paragraph::new("  Enter confirm  ·  Esc cancel")
-                    .style(Style::default().fg(theme.subtle.get())),
+            let hints: &[crate::tui::ui::Hint] = &[("Enter", "confirm"), ("Esc", "cancel")];
+            crate::tui::ui::render_hint_bar(
+                frame,
                 Rect::new(inner.x, hint_y, inner.width, 1),
+                hints,
+                theme,
             );
         })?;
 
@@ -201,6 +203,92 @@ pub fn run_rename(
                 }
                 KeyCode::Home => cursor = 0,
                 KeyCode::End => cursor = input.len(),
+                _ => {}
+            }
+        }
+    }
+}
+
+// ─── Discard-changes confirm popup ───────────────────────────────────────────
+
+/// Ask whether to discard unsaved form edits. Returns `true` to discard (leave
+/// the form), `false` to keep editing. Defaults to "keep editing".
+pub fn run_discard_confirm(terminal: &mut Term, theme: &Theme) -> Result<bool> {
+    let mut discard = false;
+
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.area();
+            let w = 52u16.min(area.width);
+            let h = 7u16.min(area.height);
+            let popup = Rect::new(
+                area.width.saturating_sub(w) / 2,
+                area.height.saturating_sub(h) / 2,
+                w,
+                h,
+            );
+            frame.render_widget(Clear, popup);
+
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .title(" Unsaved changes ")
+                .title_alignment(Alignment::Center);
+            let inner = block.inner(popup);
+            frame.render_widget(block, popup);
+
+            frame.render_widget(
+                Paragraph::new("Discard your changes?").alignment(Alignment::Center),
+                Rect::new(inner.x, inner.y + 1, inner.width, 1),
+            );
+
+            let keep_label = "  Keep editing  ";
+            let discard_label = "  Discard  ";
+            let gap = 3u16;
+            let total = keep_label.len() as u16 + gap + discard_label.len() as u16;
+            let btn_y = inner.y + 3;
+            let btn_x = inner.x + inner.width.saturating_sub(total) / 2;
+
+            let keep_style = if !discard {
+                Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.subtle.get())
+            };
+            let discard_style = if discard {
+                Style::default()
+                    .fg(theme.danger.get())
+                    .add_modifier(Modifier::REVERSED | Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.subtle.get())
+            };
+
+            frame.render_widget(
+                Paragraph::new(Span::styled(keep_label, keep_style)),
+                Rect::new(btn_x, btn_y, keep_label.len() as u16, 1),
+            );
+            frame.render_widget(
+                Paragraph::new(Span::styled(discard_label, discard_style)),
+                Rect::new(
+                    btn_x + keep_label.len() as u16 + gap,
+                    btn_y,
+                    discard_label.len() as u16,
+                    1,
+                ),
+            );
+        })?;
+
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Esc => return Ok(false),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    return Ok(false);
+                }
+                KeyCode::Left | KeyCode::Right | KeyCode::Tab | KeyCode::BackTab => {
+                    discard = !discard;
+                }
+                KeyCode::Enter => return Ok(discard),
+                KeyCode::Char('y') | KeyCode::Char('Y') => return Ok(true),
+                KeyCode::Char('n') | KeyCode::Char('N') => return Ok(false),
                 _ => {}
             }
         }
