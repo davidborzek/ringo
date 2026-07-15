@@ -194,6 +194,17 @@ fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
         }
     }
 
+    // Arm call deflection (302) if configured — before any inbound call.
+    if app.profile.deflect {
+        if let Some(target) = &app.profile.deflect_target {
+            if !target.is_empty() {
+                let uri = command::normalize_sip_uri(target, &aor);
+                app.phone.deflect_incoming(&uri, Some(&aor));
+                crate::rlog!(Info, "call deflection armed: 302 -> {uri}");
+            }
+        }
+    }
+
     Ok((rt, app, msg_rx, remote_rx, control, backend_handle))
 }
 
@@ -371,6 +382,13 @@ fn render_loop(
     let mut dirty = true;
     loop {
         app.tick = app.tick.wrapping_add(1);
+        // Auto-clear deflected indicator after 10 s.
+        if let Some(d) = &app.deflected {
+            if d.at.elapsed().as_secs() >= 10 {
+                app.deflected = None;
+                dirty = true;
+            }
+        }
         // Refresh the log file every ~500ms (30 ticks × 16ms) while the modal is open
         if app.log.show && app.tick % 30 == 0 {
             app.refresh_log();
@@ -418,6 +436,7 @@ fn render_loop(
             match ct_event::read()? {
                 Event::Key(key) => {
                     app.handle_key(key);
+                    app.deflected = None;
                     dirty = true;
                     if app.quit {
                         break;

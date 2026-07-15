@@ -37,6 +37,11 @@ impl super::app::App {
                 reason,
                 error,
             } => self.handle_call_closed(call_id, reason, error),
+            AppEvent::CallDeflected {
+                from,
+                display_name,
+                target,
+            } => self.handle_call_deflected(from, display_name, target),
             AppEvent::VoicemailStatus { waiting, new_count } => {
                 let changed = self.mwi.waiting != waiting || self.mwi.new_messages != new_count;
                 self.mwi.waiting = waiting;

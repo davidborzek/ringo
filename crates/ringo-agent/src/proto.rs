@@ -355,6 +355,11 @@ pub enum WireEvent {
         reason: String,
         error: bool,
     },
+    CallDeflected {
+        from: String,
+        display_name: Option<String>,
+        target: String,
+    },
     VoicemailStatus {
         waiting: bool,
         new_count: u32,
@@ -415,6 +420,15 @@ impl From<&AppEvent> for WireEvent {
                 reason: reason.clone(),
                 error: *error,
             },
+            AppEvent::CallDeflected {
+                from,
+                display_name,
+                target,
+            } => Self::CallDeflected {
+                from: from.clone(),
+                display_name: display_name.clone(),
+                target: target.clone(),
+            },
             AppEvent::VoicemailStatus { waiting, new_count } => Self::VoicemailStatus {
                 waiting: *waiting,
                 new_count: *new_count,
@@ -463,6 +477,15 @@ impl From<WireEvent> for AppEvent {
                 call_id,
                 reason,
                 error,
+            },
+            WireEvent::CallDeflected {
+                from,
+                display_name,
+                target,
+            } => AppEvent::CallDeflected {
+                from,
+                display_name,
+                target,
             },
             WireEvent::VoicemailStatus { waiting, new_count } => {
                 AppEvent::VoicemailStatus { waiting, new_count }

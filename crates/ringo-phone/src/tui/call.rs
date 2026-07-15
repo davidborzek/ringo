@@ -15,6 +15,7 @@ impl super::app::App {
         number: String,
         display_name: Option<String>,
     ) {
+        self.deflected = None;
         self.last_call_reason = None;
         let notify_text = match &display_name {
             Some(name) => format!("{} ({})", name, number),
@@ -46,6 +47,7 @@ impl super::app::App {
 
     pub(super) fn handle_call_outgoing(&mut self, call_id: String, number: String) {
         self.last_call_reason = None;
+        self.deflected = None;
 
         crate::hooks::run(
             &self.hooks,
@@ -137,6 +139,25 @@ impl super::app::App {
         }
     }
 
+    pub(super) fn handle_call_deflected(
+        &mut self,
+        from: String,
+        display_name: Option<String>,
+        target: String,
+    ) {
+        let peer = display_name
+            .as_ref()
+            .map(|n| format!("{n} ({from})"))
+            .unwrap_or_else(|| from.clone());
+        self.notify("Call deflected", &format!("{peer} → {target}"));
+        self.deflected = Some(super::app::DeflectedInfo {
+            from,
+            display_name,
+            target,
+            at: std::time::Instant::now(),
+        });
+    }
+
     pub(super) fn in_active_call(&self) -> bool {
         self.calls
             .get(self.selected_call)
@@ -205,18 +226,7 @@ impl super::app::App {
 }
 
 pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
-    if app.calls.is_empty() {
-        let w = Paragraph::new("  (no active calls)")
-            .style(Style::default().fg(app.theme.subtle.get()))
-            .block(Block::default().title(Span::styled(
-                "CALLS",
-                Style::default().fg(app.theme.subtle.get()),
-            )));
-        f.render_widget(w, area);
-        return;
-    }
-
-    let items: Vec<ListItem> = app
+    let mut items: Vec<ListItem> = app
         .calls
         .iter()
         .enumerate()
@@ -322,6 +332,33 @@ pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
             ListItem::new(lines)
         })
         .collect();
+
+    // Transient deflected-call entry (302). Shown alongside active calls or
+    // alone when the call list is empty; auto-cleared after 10 s by the
+    // render loop.
+    if let Some(d) = &app.deflected {
+        let caller = d
+            .display_name
+            .as_deref()
+            .map(|n| format!("{n} ({})", d.from))
+            .unwrap_or_else(|| d.from.clone());
+        let style = Style::default().fg(app.theme.accent.get());
+        items.push(ListItem::new(vec![Line::from(vec![
+            Span::styled("   ↪ ", style),
+            Span::styled(format!("deflected  {caller}  → {}", d.target), style),
+        ])]));
+    }
+
+    if items.is_empty() {
+        let w = Paragraph::new("  (no active calls)")
+            .style(Style::default().fg(app.theme.subtle.get()))
+            .block(Block::default().title(Span::styled(
+                "CALLS",
+                Style::default().fg(app.theme.subtle.get()),
+            )));
+        f.render_widget(w, area);
+        return;
+    }
 
     let list = List::new(items).block(Block::default().title(Span::styled(
         "CALLS",

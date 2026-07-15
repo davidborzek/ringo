@@ -28,7 +28,8 @@ impl super::app::App {
                 let aor = self.account_aor.clone();
                 match old {
                     TransferMode::BlindInput(uri) => {
-                        self.phone.transfer(&normalize_sip_uri(&uri, &aor));
+                        self.phone
+                            .transfer(&super::command::normalize_sip_uri(&uri, &aor));
                     }
                     TransferMode::AttendedInput(uri) => {
                         // baresip puts the current call on hold immediately
@@ -37,7 +38,9 @@ impl super::app::App {
                             c.state = CallState::OnHold;
                         }
                         self.phone
-                            .attended_transfer_start(&normalize_sip_uri(&uri, &aor));
+                            .attended_transfer_start(&super::command::normalize_sip_uri(
+                                &uri, &aor,
+                            ));
                         self.transfer_mode = TransferMode::AttendedPending;
                     }
                     _ => {}
@@ -136,18 +139,5 @@ impl super::app::App {
             TransferMode::BlindInput(s) | TransferMode::AttendedInput(s) => *s = value,
             _ => {}
         }
-    }
-}
-
-/// Ensure the input is a full SIP URI.
-fn normalize_sip_uri(input: &str, account_aor: &str) -> String {
-    if input.starts_with("sip:") || input.starts_with("sips:") {
-        return input.to_string();
-    }
-    let domain = account_aor.split_once('@').map(|x| x.1).unwrap_or("");
-    if domain.is_empty() {
-        input.to_string()
-    } else {
-        format!("sip:{}@{}", input, domain)
     }
 }

@@ -206,6 +206,37 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
                     } else {
                         crate::rlog!(Warn, "failed to send armed {} response", r.scode);
                     }
+                    // For 302 deflections, emit a CallDeflected event so the
+                    // UI can show that a call was forwarded (no call object is
+                    // ever created, so no CallIncoming/CallClosed pair fires).
+                    if r.scode == 302 {
+                        let from = pl_to_string(unsafe { &(*msg).from.auri as *const Pl });
+                        let dname = pl_to_string(unsafe { &(*msg).from.dname as *const Pl });
+                        let display_name = if dname.is_empty() { None } else { Some(dname) };
+                        let target = r
+                            .headers
+                            .iter()
+                            .find_map(|h| {
+                                h.strip_prefix("Contact: <")
+                                    .and_then(|s| s.split('>').next())
+                                    .map(|s| s.to_string())
+                            })
+                            .unwrap_or_default();
+                        let evt = AppEvent::CallDeflected {
+                            from,
+                            display_name,
+                            target,
+                        };
+                        if let Some(mtx) = EVENT_TX.get() {
+                            if let Some(tx) = mtx
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .get(&(ua as usize))
+                            {
+                                let _ = tx.send(evt);
+                            }
+                        }
+                    }
                     // Stop propagation so nothing else accepts the call.
                     unsafe { bevent_stop(event) };
                     return;

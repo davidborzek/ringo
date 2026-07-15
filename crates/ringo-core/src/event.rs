@@ -65,6 +65,11 @@ pub enum AppEvent {
         reason: String,
         error: bool,
     },
+    CallDeflected {
+        from: String,
+        display_name: Option<String>,
+        target: String,
+    },
     VoicemailStatus {
         waiting: bool,
         new_count: u32,
