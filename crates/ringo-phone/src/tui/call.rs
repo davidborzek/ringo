@@ -340,12 +340,10 @@ pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
             .as_deref()
             .map(|n| format!("{n} ({})", d.from))
             .unwrap_or_else(|| d.from.clone());
-        let style = Style::default()
-            .fg(app.theme.subtle.get())
-            .add_modifier(Modifier::DIM);
+        let style = Style::default().fg(app.theme.accent.get());
         items.push(ListItem::new(vec![Line::from(vec![
             Span::styled("   ↪ ", style),
-            Span::styled(format!("deflected  {caller:<40}  → {}", d.target), style),
+            Span::styled(format!("deflected  {caller}  → {}", d.target), style),
         ])]));
     }
 
