@@ -208,6 +208,8 @@ impl FormState {
             notify: get_toggle(self.field(Notify)),
             mwi: get_toggle(self.field(Mwi)),
             catchall: prev_profile.catchall,
+            deflect: get_toggle(self.field(Deflect)),
+            deflect_target: opt(get_text(self.field(DeflectTarget))),
             regint: {
                 let s = get_text(self.field(Regint));
                 let s = s.trim();
@@ -597,6 +599,24 @@ fn build_fields(profile: &Profile, include_name: bool) -> Vec<Field> {
         Field::toggle(Mwi, "MWI", profile.mwi)
             .group(Tab::Features)
             .desc("Subscribe to message-waiting (voicemail) indication."),
+    );
+
+    // ── Forwarding ───────────────────────────────────────────────────────────
+    f.push(
+        Field::toggle(Deflect, "Call deflection", profile.deflect)
+            .group(Tab::Forwarding)
+            .desc("Deflect incoming calls with a 302 Moved Temporarily."),
+    );
+    f.push(
+        Field::text(
+            DeflectTarget,
+            "Deflect target",
+            profile.deflect_target.as_deref().unwrap_or(""),
+            false,
+            false,
+        )
+        .group(Tab::Forwarding)
+        .desc("SIP URI or bare number (resolved to sip:<number>@<domain>)."),
     );
 
     f

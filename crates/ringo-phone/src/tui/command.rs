@@ -318,7 +318,7 @@ impl App {
     }
 }
 
-fn normalize_sip_uri(input: &str, account_aor: &str) -> String {
+pub(super) fn normalize_sip_uri(input: &str, account_aor: &str) -> String {
     if input.starts_with("sip:") || input.starts_with("sips:") {
         return input.to_string();
     }

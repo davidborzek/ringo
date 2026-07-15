@@ -30,6 +30,13 @@ pub struct Profile {
     /// with `404 (UA not found)`. On by default; ringo-phone runs a single UA.
     #[serde(default = "default_true")]
     pub catchall: bool,
+    /// Deflect incoming calls with a 302 Moved Temporarily to `deflect_target`.
+    /// The target is either a full SIP URI or a bare number/extension (resolved
+    /// to `sip:<target>@<domain>` at startup, like ringo-flow's `deflect_to_uri`).
+    #[serde(default)]
+    pub deflect: bool,
+    #[serde(default)]
+    pub deflect_target: Option<String>,
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }
@@ -57,6 +64,8 @@ impl Default for Profile {
             notify: false,
             mwi: false,
             catchall: true,
+            deflect: false,
+            deflect_target: None,
             metadata: HashMap::new(),
         }
     }

@@ -194,6 +194,17 @@ fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
         }
     }
 
+    // Arm call deflection (302) if configured — before any inbound call.
+    if app.profile.deflect {
+        if let Some(target) = &app.profile.deflect_target {
+            if !target.is_empty() {
+                let uri = command::normalize_sip_uri(target, &aor);
+                app.phone.deflect_incoming(&uri, Some(&aor));
+                crate::rlog!(Info, "call deflection armed: 302 -> {uri}");
+            }
+        }
+    }
+
     Ok((rt, app, msg_rx, remote_rx, control, backend_handle))
 }
 

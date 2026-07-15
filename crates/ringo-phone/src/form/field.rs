@@ -101,18 +101,24 @@ pub(crate) enum FieldKind {
 }
 
 /// Which settings tab a field lives on. Ordered as shown in the tab bar; extend
-/// here (e.g. a `Forwarding` tab for 302 redirects) and assign fields in
-/// `build_fields` — the form picks the rest up automatically.
+/// here and assign fields in `build_fields` — the form picks the rest up automatically.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tab {
     Account,
     Network,
     Audio,
     Features,
+    Forwarding,
 }
 
 impl Tab {
-    pub const ALL: &'static [Tab] = &[Tab::Account, Tab::Network, Tab::Audio, Tab::Features];
+    pub const ALL: &'static [Tab] = &[
+        Tab::Account,
+        Tab::Network,
+        Tab::Audio,
+        Tab::Features,
+        Tab::Forwarding,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -120,6 +126,7 @@ impl Tab {
             Tab::Network => "Network",
             Tab::Audio => "Audio",
             Tab::Features => "Features",
+            Tab::Forwarding => "Forwarding",
         }
     }
 }
@@ -142,6 +149,8 @@ pub(crate) enum FieldId {
     Notify,
     Mwi,
     SipHeaders,
+    Deflect,
+    DeflectTarget,
 }
 
 pub(crate) struct Field {
