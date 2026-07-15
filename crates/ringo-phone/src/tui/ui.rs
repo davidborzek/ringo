@@ -412,6 +412,23 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 .add_modifier(Modifier::BOLD),
         ));
     }
+    // Call deflected (302)
+    if let Some(d) = &app.deflected {
+        spans.push(sep.clone());
+        spans.push(Span::styled(
+            format!(
+                "↪ Deflected: {} → {}",
+                d.display_name
+                    .as_deref()
+                    .map(|n| format!("{n} ({})", d.from))
+                    .unwrap_or_else(|| d.from.clone()),
+                d.target
+            ),
+            Style::default()
+                .fg(app.theme.attention.get())
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 
     // AOR on the right side
     let right_spans = vec![Span::styled(

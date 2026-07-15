@@ -137,6 +137,25 @@ impl super::app::App {
         }
     }
 
+    pub(super) fn handle_call_deflected(
+        &mut self,
+        from: String,
+        display_name: Option<String>,
+        target: String,
+    ) {
+        let peer = display_name
+            .as_ref()
+            .map(|n| format!("{n} ({from})"))
+            .unwrap_or_else(|| from.clone());
+        self.notify("Call deflected", &format!("{peer} → {target}"));
+        self.deflected = Some(super::app::DeflectedInfo {
+            from,
+            display_name,
+            target,
+            at: std::time::Instant::now(),
+        });
+    }
+
     pub(super) fn in_active_call(&self) -> bool {
         self.calls
             .get(self.selected_call)

@@ -37,6 +37,15 @@ pub struct Call {
     pub started_at: Option<Instant>,
 }
 
+/// A call that was deflected (302) — shown transiently in the UI.
+#[derive(Debug, Clone)]
+pub struct DeflectedInfo {
+    pub from: String,
+    pub display_name: Option<String>,
+    pub target: String,
+    pub at: Instant,
+}
+
 /// A snapshot of the most recently closed call, retained after it leaves
 /// `calls` so a status poller can see how (and why) the last call ended.
 #[derive(Debug, Clone)]
@@ -48,7 +57,6 @@ pub struct LastCall {
     pub duration_secs: u64,
     pub answered: bool,
 }
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputMode {
     Normal,        // Default — single keys are shortcuts
@@ -260,6 +268,7 @@ pub struct App {
     /// templates (e.g. containing `$uuid`) are re-rendered per call by
     /// [`Self::dial`].
     pub custom_headers: Vec<(String, HeaderTemplate)>,
+    pub deflected: Option<DeflectedInfo>,
 }
 
 impl App {
@@ -360,6 +369,7 @@ impl App {
                 },
             },
             custom_headers,
+            deflected: None,
         }
     }
 

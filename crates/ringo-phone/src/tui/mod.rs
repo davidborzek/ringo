@@ -382,6 +382,13 @@ fn render_loop(
     let mut dirty = true;
     loop {
         app.tick = app.tick.wrapping_add(1);
+        // Auto-clear deflected indicator after 10 s.
+        if let Some(d) = &app.deflected {
+            if d.at.elapsed().as_secs() >= 10 {
+                app.deflected = None;
+                dirty = true;
+            }
+        }
         // Refresh the log file every ~500ms (30 ticks × 16ms) while the modal is open
         if app.log.show && app.tick % 30 == 0 {
             app.refresh_log();
