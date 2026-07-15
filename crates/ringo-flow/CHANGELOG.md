@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.11.1...ringo-flow-v0.11.2) - 2026-07-15
+
+### Bug Fixes
+
+- *(ringo-flow)* check uses the same expr-depth limits as run
+- *(ringo-flow)* resolve imports relative to the importing file
+
+### Features
+
+- *(ringo-phone)* live call quality and codec selection
+- *(ringo-flow)* let agents carry free-form metadata
+
 ## [0.11.1](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.11.0...ringo-flow-v0.11.1) - 2026-06-30
 
 ### Bug Fixes
