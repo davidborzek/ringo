@@ -15,6 +15,7 @@ impl super::app::App {
         number: String,
         display_name: Option<String>,
     ) {
+        self.deflected = None;
         self.last_call_reason = None;
         let notify_text = match &display_name {
             Some(name) => format!("{} ({})", name, number),
@@ -46,6 +47,7 @@ impl super::app::App {
 
     pub(super) fn handle_call_outgoing(&mut self, call_id: String, number: String) {
         self.last_call_reason = None;
+        self.deflected = None;
 
         crate::hooks::run(
             &self.hooks,

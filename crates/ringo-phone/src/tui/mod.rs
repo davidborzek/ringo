@@ -436,6 +436,7 @@ fn render_loop(
             match ct_event::read()? {
                 Event::Key(key) => {
                     app.handle_key(key);
+                    app.deflected = None;
                     dirty = true;
                     if app.quit {
                         break;
