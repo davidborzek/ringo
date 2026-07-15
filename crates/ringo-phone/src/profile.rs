@@ -13,6 +13,10 @@ pub struct Profile {
     pub outbound: Option<String>,
     pub stun_server: Option<String>,
     pub media_enc: Option<String>,
+    /// Restrict/order the offered audio codecs (most-preferred first), e.g.
+    /// `["opus", "PCMU"]`. Empty = baresip's default set/order.
+    #[serde(default)]
+    pub audio_codecs: Vec<String>,
     pub regint: Option<u32>,
     pub notes: Option<String>,
     #[serde(default, deserialize_with = "deserialize_custom_headers")]
@@ -46,6 +50,7 @@ impl Default for Profile {
             outbound: None,
             stun_server: None,
             media_enc: None,
+            audio_codecs: Vec::new(),
             regint: None,
             notes: None,
             custom_headers: Vec::new(),

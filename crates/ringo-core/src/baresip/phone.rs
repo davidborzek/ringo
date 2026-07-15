@@ -346,6 +346,9 @@ impl Phone for BaresipPhone {
     fn media_stats(&self) -> Option<crate::event::MediaStats> {
         super::stats::media_stats(self.ua)
     }
+    fn audio_codec(&self) -> Option<crate::event::CodecInfo> {
+        super::stats::current_codec(self.ua)
+    }
     fn received_dtmf(&self) -> String {
         super::events::received_dtmf(self.ua)
     }

@@ -377,6 +377,26 @@ fn render_loop(
             dirty = true;
         }
 
+        // Poll live call quality every ~1s (60 ticks × 16ms) for the active call.
+        // Mark dirty only while a call is up so the stats refresh live; when idle
+        // both stay None and we don't force an otherwise-needless repaint.
+        if app.tick % 60 == 0 {
+            let active = app.in_active_call();
+            app.media = if active {
+                app.phone.media_stats()
+            } else {
+                None
+            };
+            app.codec = if active {
+                app.phone.audio_codec()
+            } else {
+                None
+            };
+            if active {
+                dirty = true;
+            }
+        }
+
         if dirty {
             // Wrap the frame in a synchronized-output block so the terminal renders
             // it atomically instead of tearing mid-repaint. Ignored by terminals

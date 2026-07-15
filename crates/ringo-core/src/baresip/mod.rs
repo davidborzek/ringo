@@ -138,6 +138,12 @@ pub fn call_count() -> u32 {
     rx.recv().unwrap_or(0)
 }
 
+/// The audio codecs this baresip build has registered (name + real srate/ch).
+/// Empty until a session has started the RE thread.
+pub fn available_audio_codecs() -> Vec<crate::event::CodecInfo> {
+    stats::available_audio_codecs()
+}
+
 /// Backend that uses libbaresip directly via FFI (no process spawning,
 /// no ctrl_tcp wire protocol). libre and libbaresip are built from the
 /// vendored submodules and statically linked into the binary.
@@ -278,8 +284,14 @@ impl Backend for BaresipBackend {
             } else {
                 ""
             };
+            // Restrict/order the offered audio codecs (baresip account param).
+            let codecs_param = if account.audio_codecs.is_empty() {
+                String::new()
+            } else {
+                format!(";audio_codecs={}", account.audio_codecs.join(","))
+            };
             let aor = match CString::new(format!(
-                "{}<sip:{}@{}>{}{}{}",
+                "{}<sip:{}@{}>{}{}{}{}",
                 account
                     .display_name
                     .as_deref()
@@ -295,6 +307,7 @@ impl Backend for BaresipBackend {
                     .map(|s| format!(";transport={s}"))
                     .unwrap_or_default(),
                 audio_params,
+                codecs_param,
                 catchall_param,
             )) {
                 Ok(s) => s,

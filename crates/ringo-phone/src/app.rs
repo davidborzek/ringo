@@ -104,6 +104,7 @@ fn account_from(p: &profile::Profile) -> crate::account::Account {
         mwi: p.mwi,
         dtmf_mode: None, // ringo-phone uses baresip's default (real, clocked audio device)
         catchall: p.catchall,
+        audio_codecs: p.audio_codecs.clone(),
     }
 }
 

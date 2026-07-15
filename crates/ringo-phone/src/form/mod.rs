@@ -1,3 +1,4 @@
+mod codecs;
 mod field;
 mod headers;
 mod popups;
@@ -31,6 +32,7 @@ enum Action {
     None,
     Cancel,
     OpenHeaders,
+    OpenCodecs,
     OpenEditor,
     Save,
 }
@@ -38,6 +40,7 @@ enum Action {
 struct FormState {
     fields: Vec<Field>,
     custom_headers: Vec<(String, String)>,
+    audio_codecs: Vec<String>,
     active_tab: Tab,
     /// Focus position *within the active tab's fields* (not an index into `fields`).
     focused: usize,
@@ -50,6 +53,7 @@ impl FormState {
         Self {
             fields: build_fields(profile, is_new),
             custom_headers: profile.custom_headers.clone(),
+            audio_codecs: profile.audio_codecs.clone(),
             active_tab: Tab::Account,
             focused: 0,
             error: None,
@@ -123,7 +127,10 @@ impl FormState {
                     return Action::Cancel;
                 }
                 if let FieldKind::SubMenu { .. } = &self.fields[self.focused_index()].kind {
-                    return Action::OpenHeaders;
+                    return match self.fields[self.focused_index()].id {
+                        FieldId::AudioCodecs => Action::OpenCodecs,
+                        _ => Action::OpenHeaders,
+                    };
                 }
             }
             // On the button row, ← → move between Save and Cancel.
@@ -147,6 +154,18 @@ impl FormState {
         if let Some(f) = self.fields.iter_mut().find(|f| f.id == FieldId::SipHeaders) {
             if let FieldKind::SubMenu { count } = &mut f.kind {
                 *count = self.custom_headers.len();
+            }
+        }
+    }
+
+    fn update_codec_count(&mut self) {
+        if let Some(f) = self
+            .fields
+            .iter_mut()
+            .find(|f| f.id == FieldId::AudioCodecs)
+        {
+            if let FieldKind::SubMenu { count } = &mut f.kind {
+                *count = self.audio_codecs.len();
             }
         }
     }
@@ -185,6 +204,7 @@ impl FormState {
                 Some(ENCRYPTIONS[enc_idx].into())
             },
             notes: opt(get_text(self.field(Notes))),
+            audio_codecs: self.audio_codecs.clone(),
             notify: get_toggle(self.field(Notify)),
             mwi: get_toggle(self.field(Mwi)),
             catchall: prev_profile.catchall,
@@ -560,6 +580,13 @@ fn build_fields(profile: &Profile, include_name: bool) -> Vec<Field> {
         .desc("Re-register interval in seconds (empty = default 3600)."),
     );
 
+    // ── Audio ────────────────────────────────────────────────────────────────
+    f.push(
+        Field::submenu(AudioCodecs, "Audio codecs", profile.audio_codecs.len())
+            .group(Tab::Audio)
+            .desc("Restrict/reorder the audio codecs offered (empty = default set)."),
+    );
+
     // ── Features ─────────────────────────────────────────────────────────────
     f.push(
         Field::toggle(Notify, "Notifications", profile.notify)
@@ -615,6 +642,10 @@ pub fn run_form(
                 Action::OpenHeaders => {
                     headers::run_headers_submenu(terminal, &mut state.custom_headers, theme)?;
                     state.update_header_count();
+                }
+                Action::OpenCodecs => {
+                    codecs::run_codecs_submenu(terminal, &mut state.audio_codecs, theme)?;
+                    state.update_codec_count();
                 }
                 Action::Save => {
                     let (name, profile_out) = state.extract(&base_profile);

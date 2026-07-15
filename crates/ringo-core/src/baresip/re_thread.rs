@@ -204,13 +204,19 @@ pub fn start_re_thread() -> Result<(), String> {
 
 /// Stop the RE thread following baresip's own shutdown sequence from main.c:
 ///
-/// 1. ua_stop_all(true) — hang up all calls, destroy all UAs (on the RE thread,
-///    while re_global is still valid)
+/// 1. ua_stop_all(false) — graceful: hang up calls + destroy all UAs, but do
+///    NOT force-close the SIP stack. `forced=true` would additionally call
+///    `sip_close(force)`, which aborts any in-flight SIP transaction; if a
+///    REGISTER is still pending (we quit mid-registration), its response handler
+///    then `mem_deref`s the registration a second time (it was already deref'd by
+///    `ua_destroy`) → refcount underflow → SIGTRAP. baresip's own main.c uses the
+///    graceful form here and only forces as a last-resort fallback.
 /// 2. re_cancel() — break out of re_main
 /// 3. join() — the RE thread then runs the rest of the teardown (ua_close …
 ///    libre_close) AFTER re_main returns; see start_re_thread. The teardown
 ///    MUST run after re_main and on the RE thread (where libre_init ran), so it
-///    can't live here on the main thread before the join.
+///    can't live here on the main thread before the join. libre_close closes the
+///    SIP stack, so skipping the forced close above loses nothing.
 pub fn stop_re_thread() {
     let handle_mutex = match RE_HANDLE.get() {
         Some(m) => m,
@@ -222,7 +228,7 @@ pub fn stop_re_thread() {
     }
 
     on_re_thread(|| unsafe {
-        ua_stop_all(true);
+        ua_stop_all(false);
     });
 
     // Cancel re_main and join. The RE thread tears the rest down after re_main.

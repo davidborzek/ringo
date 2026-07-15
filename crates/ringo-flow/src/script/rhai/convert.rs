@@ -428,6 +428,7 @@ pub(super) fn account_from_map(name: &str, map: &Map) -> Result<Account, Box<Eva
         // In-process agents keep baresip's default routing; the process-per-agent
         // backend sets catchall itself (one UA per process).
         catchall: false,
+        audio_codecs: Vec::new(), // TODO: surface as an agent-config key
     })
 }
 

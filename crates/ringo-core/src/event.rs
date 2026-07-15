@@ -20,6 +20,17 @@ pub struct MediaStats {
     pub mos: f64,
 }
 
+/// The negotiated audio codec on a call (backend-neutral).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodecInfo {
+    /// Codec name as the backend reports it, e.g. `"opus"`, `"PCMU"`.
+    pub name: String,
+    /// Codec sample rate in Hz.
+    pub srate: u32,
+    /// Channel count (1 = mono, 2 = stereo).
+    pub ch: u8,
+}
+
 #[derive(Debug, Clone)]
 pub enum AppEvent {
     Registering {

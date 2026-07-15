@@ -107,16 +107,18 @@ pub(crate) enum FieldKind {
 pub(crate) enum Tab {
     Account,
     Network,
+    Audio,
     Features,
 }
 
 impl Tab {
-    pub const ALL: &'static [Tab] = &[Tab::Account, Tab::Network, Tab::Features];
+    pub const ALL: &'static [Tab] = &[Tab::Account, Tab::Network, Tab::Audio, Tab::Features];
 
     pub fn label(self) -> &'static str {
         match self {
             Tab::Account => "Account",
             Tab::Network => "Network",
+            Tab::Audio => "Audio",
             Tab::Features => "Features",
         }
     }
@@ -135,6 +137,7 @@ pub(crate) enum FieldId {
     StunServer,
     Encryption,
     Regint,
+    AudioCodecs,
     Notes,
     Notify,
     Mwi,

@@ -419,6 +419,7 @@ fn generate_bindings() {
         .allowlist_function("ua_.*|uag_find_msg|uag_list|uag_call_count|baresip_init|baresip_close|conf_.*|module_load|module_app_unload|module_unload")
         .allowlist_function("account_.*|call_.*|audio_.*|stream_rtcp_stats|stream_metric_get_.*")
         .allowlist_function("ausrc_register|baresip_ausrcl|auplay_register|baresip_auplayl|auframe_init|aufmt_sample_size|mem_zalloc|mem_alloc")
+        .allowlist_function("baresip_aucodecl")
         .allowlist_function("bevent_.*")
         .allowlist_function("uag_sip|sip_set_trace_handler|sip_transp_name|sip_treplyf")
         .allowlist_function("sa_af|sa_in|sa_in6|sa_port")
