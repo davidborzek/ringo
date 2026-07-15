@@ -221,6 +221,12 @@ pub struct App {
     pub calls: Vec<Call>,
     pub selected_call: usize,
     pub muted: bool,
+    /// Live media stats for the active (selected) call, polled ~1 Hz. baresip
+    /// reports stats for its current call, which `switch_line` keeps in sync
+    /// with `selected_call`. `None` when no call is established.
+    pub media: Option<crate::event::MediaStats>,
+    /// Negotiated audio codec for the active (selected) call, polled with `media`.
+    pub codec: Option<crate::event::CodecInfo>,
     pub notify_enabled: bool,
     pub transfer_mode: TransferMode,
     pub tick: u64,
@@ -277,6 +283,8 @@ impl App {
             calls: Vec::new(),
             selected_call: 0,
             muted: false,
+            media: None,
+            codec: None,
             notify_enabled,
             transfer_mode: TransferMode::None,
             tick: 0,

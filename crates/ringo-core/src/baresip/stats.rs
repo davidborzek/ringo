@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use crate::event::MediaStats;
+use crate::event::{CodecInfo, MediaStats};
 
 use super::bindings::*;
 use super::re_thread::on_re_thread;
@@ -114,6 +114,90 @@ pub fn media_stats(ua: usize) -> Option<MediaStats> {
             .get(&ua)
             .copied()
     })
+}
+
+/// The audio codecs baresip has registered (what this build supports), with
+/// their real sample rate / channels — the source of truth for offering codecs
+/// to force and for writing an exact `name/srate/ch` spec (bare names default to
+/// 8000 Hz in baresip, so e.g. G722 at 16000 must carry its rate). Empty if the
+/// RE thread isn't running yet (no session).
+pub fn available_audio_codecs() -> Vec<CodecInfo> {
+    let mut out: Vec<CodecInfo> = Vec::new();
+    on_re_thread(|| {
+        let lst = unsafe { baresip_aucodecl() };
+        if lst.is_null() {
+            return;
+        }
+        unsafe extern "C" fn collect(le: *mut le, arg: *mut std::os::raw::c_void) -> bool {
+            let out = unsafe { &mut *(arg as *mut Vec<CodecInfo>) };
+            let ac = unsafe { (*le).data as *const aucodec };
+            if !ac.is_null() {
+                let ac = unsafe { &*ac };
+                if !ac.name.is_null() {
+                    let name = unsafe { std::ffi::CStr::from_ptr(ac.name) }
+                        .to_string_lossy()
+                        .into_owned();
+                    let info = CodecInfo {
+                        name,
+                        srate: ac.srate,
+                        ch: ac.ch,
+                    };
+                    // baresip may list the same codec more than once (per fmtp); dedup.
+                    if !out
+                        .iter()
+                        .any(|c| c.name == info.name && c.srate == info.srate && c.ch == info.ch)
+                    {
+                        out.push(info);
+                    }
+                }
+            }
+            false // continue walking
+        }
+        unsafe {
+            list_apply(
+                lst as *const _,
+                true,
+                Some(collect),
+                (&mut out) as *mut Vec<CodecInfo> as *mut std::os::raw::c_void,
+            );
+        }
+    });
+    out
+}
+
+/// The negotiated (transmit) audio codec on `ua`'s active call, read off the
+/// audio stream. Must run on the RE thread; `None` if there's no call or the
+/// codec isn't negotiated yet.
+pub fn current_codec(ua: usize) -> Option<CodecInfo> {
+    let mut info = None;
+    on_re_thread(|| {
+        let call = unsafe { ua_call(ua as *mut Ua) };
+        if call.is_null() {
+            return;
+        }
+        let audio = unsafe { call_audio(call) };
+        if audio.is_null() {
+            return;
+        }
+        // tx = true: the codec we encode with (the negotiated one matches rx).
+        let ac = unsafe { audio_codec(audio, true) };
+        if ac.is_null() {
+            return;
+        }
+        let ac = unsafe { &*ac };
+        if ac.name.is_null() {
+            return;
+        }
+        let name = unsafe { std::ffi::CStr::from_ptr(ac.name) }
+            .to_string_lossy()
+            .into_owned();
+        info = Some(CodecInfo {
+            name,
+            srate: ac.srate,
+            ch: ac.ch,
+        });
+    });
+    info
 }
 
 #[cfg(test)]

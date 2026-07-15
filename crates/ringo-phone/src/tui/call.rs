@@ -186,6 +186,9 @@ impl super::app::App {
         }
         let next = (cur + 1) % self.calls.len();
         self.selected_call = next;
+        // stale: re-polled for the newly-active call next tick
+        self.media = None;
+        self.codec = None;
         self.phone.switch_line(next + 1);
         if self
             .calls
@@ -272,7 +275,7 @@ pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
                 Style::default().fg(app.theme.success.get())
             };
 
-            let line = Line::from(vec![
+            let mut spans = vec![
                 Span::styled(format!(" {} [{}] ", marker, i + 1), base_style),
                 Span::styled(format!("{} ", arrow), arrow_style),
                 Span::styled(
@@ -287,10 +290,36 @@ pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
                     ),
                     base_style,
                 ),
-                Span::styled(state_str, state_style),
-            ]);
+            ];
 
-            ListItem::new(line)
+            // Live quality for the active (selected) call only — baresip reports
+            // media stats for its current call, which `switch_line` keeps in sync
+            // with `selected_call`.
+            let quality = if selected && call.state == CallState::Established {
+                app.media.as_ref()
+            } else {
+                None
+            };
+            spans.push(Span::styled(state_str, state_style));
+
+            let mut lines = vec![Line::from(spans)];
+            // Expand the focused/active call with a metrics row: MOS score plus
+            // the jitter / loss / rtt / codec detail, all in one quiet line.
+            if let Some(m) = quality {
+                let mut detail = format!(
+                    "MOS {:.1}  ·  jitter {:.0}ms · loss {:.1}% · rtt {:.0}ms",
+                    m.mos, m.jitter_ms, m.packet_loss_pct, m.rtt_ms
+                );
+                if let Some(c) = &app.codec {
+                    detail.push_str(&format!(" · {} {}kHz", c.name, c.srate / 1000));
+                }
+                lines.push(Line::from(Span::styled(
+                    format!("        {detail}"),
+                    Style::default().fg(app.theme.subtle.get()),
+                )));
+            }
+
+            ListItem::new(lines)
         })
         .collect();
 

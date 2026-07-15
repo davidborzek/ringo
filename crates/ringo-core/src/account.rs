@@ -27,6 +27,11 @@ pub struct Account {
     /// Only safe with a single registered UA per process — with several, baresip
     /// routes the fallback to just one of them.
     pub catchall: bool,
+    /// Restrict/order the audio codecs offered for this account, most-preferred
+    /// first (baresip account param `audio_codecs`). Names as baresip knows them,
+    /// e.g. `["opus", "PCMU", "PCMA"]`. Empty = baresip's default codec set/order.
+    #[serde(default)]
+    pub audio_codecs: Vec<String>,
 }
 
 /// Overrides for auto-detected backend settings. Any `None`/empty field

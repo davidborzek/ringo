@@ -29,6 +29,12 @@ pub trait Phone: Send {
         None
     }
 
+    /// The negotiated audio codec on the active call. `None` if there's no call
+    /// or it isn't negotiated yet. Default: `None` (mocks).
+    fn audio_codec(&self) -> Option<crate::event::CodecInfo> {
+        None
+    }
+
     /// DTMF digits received on the active/last call so far, in order (e.g.
     /// `"1234#"`). Default: empty (mocks).
     fn received_dtmf(&self) -> String {
