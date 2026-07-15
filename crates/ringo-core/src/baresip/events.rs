@@ -218,7 +218,8 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
                             .iter()
                             .find_map(|h| {
                                 h.strip_prefix("Contact: <")
-                                    .map(|s| s.trim_end_matches('>').to_string())
+                                    .and_then(|s| s.split('>').next())
+                                    .map(|s| s.to_string())
                             })
                             .unwrap_or_default();
                         let evt = AppEvent::CallDeflected {
