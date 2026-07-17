@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.12.0...ringo-core-v0.13.0) - 2026-07-17
+
+### Features
+
+- *(ringo-core)* call deflection via SIP 302 ([#61](https://github.com/davidborzek/ringo/pull/61))
+- *(ringo-core)* live call quality and codec selection
+
 ## [0.12.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.11.0...ringo-core-v0.12.0) - 2026-06-30
 
 ### Features

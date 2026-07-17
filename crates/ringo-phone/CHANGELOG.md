@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.11.1...ringo-phone-v0.12.0) - 2026-07-17
+
+### Bug Fixes
+
+- *(ringo-phone)* keep baresip's raw stdout off the TUI screen
+- *(ringo-phone)* wrap keybind hints and keep selection in view
+- *(ringo-phone)* smoother TUI rendering, cleaner log view
+
+### Features
+
+- *(ringo-phone)* call deflection via SIP 302 ([#61](https://github.com/davidborzek/ringo/pull/61))
+- *(ringo-phone)* live call quality and codec selection
+- *(ringo-phone)* tabbed profile form with descriptions
+
+### Refactor
+
+- *(ringo-phone)* TUI polish — log pager, unified dialogs, which-key hints
+- *(ringo-phone)* move secondary views into modal overlays
+
 ## [0.11.1](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.11.0...ringo-phone-v0.11.1) - 2026-06-30
 
 ### Features
