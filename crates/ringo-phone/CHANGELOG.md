@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.11.2](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.11.1...ringo-phone-v0.11.2) - 2026-07-15
+## [0.12.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.11.1...ringo-phone-v0.12.0) - 2026-07-15
 
 ### Bug Fixes
 

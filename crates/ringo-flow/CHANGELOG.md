@@ -16,7 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 
-- *(ringo-phone)* live call quality and codec selection
 - *(ringo-flow)* let agents carry free-form metadata
 
 ## [0.11.1](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.11.0...ringo-flow-v0.11.1) - 2026-06-30

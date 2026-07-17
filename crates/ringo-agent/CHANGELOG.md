@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 
-- *(ringo-phone)* call deflection via SIP 302 ([#61](https://github.com/davidborzek/ringo/pull/61))
+- *(ringo-agent)* call deflection via SIP 302 ([#61](https://github.com/davidborzek/ringo/pull/61))
 
 ## [0.1.0](https://github.com/davidborzek/ringo/releases/tag/ringo-agent-v0.1.0) - 2026-06-30
 
