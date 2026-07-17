@@ -7,6 +7,12 @@
 # changelogs). Merging that PR -> release-plz publishes + tags + creates the GitHub
 # releases. Nothing publishes until the Release PR is merged.
 
+[workspace]
+# In 0.x, treat a `feat` as a breaking change: bump the minor (0.x -> 0.(x+1))
+# instead of the patch. Matches SemVer's 0.x rule where the minor is the
+# breaking level, so a new feature no longer ships as a mere patch.
+features_always_increment_minor = true
+
 [changelog]
 # Mirror the previous cliff.toml grouping (skip chore/style noise).
 commit_parsers = [
