@@ -379,11 +379,14 @@ impl Drop for BaresipSessionHandle {
         }
         super::stats::forget(ua);
         super::events::clear_dtmf(ua);
-        // ua_unregister sends REGISTER expires=0 via sipreg_unregister and
-        // waits for the 200 OK. ua_stop_register would just mem_deref the
-        // sipreg without sending anything — leaving stale contacts on the PBX.
-        // Do NOT call ua_destroy here — the UA is destroyed later by
-        // ua_stop_all(true) in stop_re_thread (full shutdown sequence).
+        // ua_unregister sends REGISTER expires=0 via sipreg_unregister; the UA
+        // stays registered until the 200 OK, so `is_registered()` reflects the
+        // pending de-REGISTER — stop_re_thread waits on that before stopping the
+        // loop, and a profile switch lets it drain in the background on the
+        // still-running RE thread. Do NOT ua_destroy here: it unlinks the UA
+        // immediately (is_registered would read false before the ack, dropping
+        // the wait) — the UA is destroyed later by ua_stop_all(false) in
+        // stop_re_thread.
         on_re_thread(move || unsafe {
             ua_unregister(ua as *mut Ua);
         });
