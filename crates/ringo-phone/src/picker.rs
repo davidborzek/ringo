@@ -17,6 +17,9 @@ pub enum PickerAction {
     Rename(String),
     New,
     Settings,
+    /// User left the picker without choosing a profile (Esc / Ctrl+C). Not an
+    /// error — the caller exits cleanly.
+    Quit,
 }
 
 /// A profile entry shown in the picker. `subtitle` may be empty.
@@ -195,8 +198,8 @@ pub(crate) fn run(
         if let Event::Key(key) = event::read()? {
             let ctrl = key.modifiers == KeyModifiers::CONTROL;
             match key.code {
-                KeyCode::Esc => anyhow::bail!("No selection made."),
-                KeyCode::Char('c') if ctrl => anyhow::bail!("No selection made."),
+                KeyCode::Esc => return Ok(PickerAction::Quit),
+                KeyCode::Char('c') if ctrl => return Ok(PickerAction::Quit),
                 KeyCode::Char('n') if ctrl => return Ok(PickerAction::New),
                 KeyCode::Char('s') if ctrl => return Ok(PickerAction::Settings),
                 KeyCode::Char('e') if ctrl => {

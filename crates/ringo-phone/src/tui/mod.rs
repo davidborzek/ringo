@@ -298,9 +298,10 @@ pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<
         if let Some(r) = redirect.as_mut() {
             r.restore();
         }
-        if let Ok(name) = crate::app::pick_profile(Some(&app.profile_name)) {
+        if let Ok(Some(name)) = crate::app::pick_profile(Some(&app.profile_name)) {
             return Ok(Some(name));
         }
+        // Quit from the picker (Ok(None)) or an error → fall through to genuine exit.
     }
 
     // Genuine exit: leave fd 1/2 pointing at the log (skip the restore, incl. the
