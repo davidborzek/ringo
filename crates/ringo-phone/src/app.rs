@@ -16,7 +16,10 @@ pub fn run(name: Option<String>, notify: bool, headless: bool) -> Result<()> {
     let mut current = match name {
         Some(n) => n,
         None if headless => bail!("--headless requires a profile name"),
-        None => pick_profile(None)?,
+        None => match pick_profile(None)? {
+            Some(n) => n,
+            None => return Ok(()), // left the picker without choosing — clean exit
+        },
     };
 
     loop {
@@ -130,7 +133,7 @@ fn backend_options(c: &crate::config::BaresipConfig) -> crate::account::BackendO
 /// Open the interactive profile picker; loops until a profile is selected to start.
 /// Manages the terminal lifecycle; stays in alternate screen on success so the
 /// TUI can take over seamlessly.
-pub fn pick_profile(focus: Option<&str>) -> Result<String> {
+pub fn pick_profile(focus: Option<&str>) -> Result<Option<String>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -143,7 +146,9 @@ pub fn pick_profile(focus: Option<&str>) -> Result<String> {
 
     let result = pick_profile_loop(&mut terminal, focus);
 
-    if result.is_err() {
+    // On success (Start) we intentionally stay in the alternate screen so the TUI
+    // takes over seamlessly; restore the terminal on error or a clean quit.
+    if !matches!(result, Ok(Some(_))) {
         let _ = disable_raw_mode();
         let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
     }
@@ -154,7 +159,7 @@ pub fn pick_profile(focus: Option<&str>) -> Result<String> {
 fn pick_profile_loop(
     terminal: &mut crate::tui::Term,
     initial_focus: Option<&str>,
-) -> Result<String> {
+) -> Result<Option<String>> {
     use crate::picker::{PickerAction, PickerItem};
     let mut focus: Option<String> = initial_focus.map(|s| s.to_string());
     loop {
@@ -174,7 +179,8 @@ fn pick_profile_loop(
             })
             .collect();
         match crate::picker::run(terminal, &items, theme, focus.as_deref())? {
-            PickerAction::Start(name) => return Ok(name),
+            PickerAction::Start(name) => return Ok(Some(name)),
+            PickerAction::Quit => return Ok(None),
             PickerAction::New => {
                 if let Some((name, p)) = crate::form::run_form(
                     terminal,
