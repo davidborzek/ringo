@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{RecvTimeoutError, SyncSender};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// An item queued for the single stdout writer: a JSON control message or a raw
 /// audio frame (mono s16 PCM, the agent's received audio).
@@ -39,12 +39,6 @@ const HEADER_POLL_INTERVAL: Duration = Duration::from_millis(150);
 /// parent is briefly slow to drain; a full queue applies backpressure (blocking
 /// send) rather than dropping events, which the parent's state machine needs.
 const WRITER_CHANNEL_BOUND: usize = 1024;
-
-/// Max wait for the de-REGISTER to be transmitted before force-stopping. The
-/// registrar drops the binding on receipt (we don't need the 200 OK), and the RE
-/// loop transmits the queued request within a tick, so this is a small upper
-/// bound — exited early if the registration state clears first.
-const UNREGISTER_TIMEOUT: Duration = Duration::from_millis(600);
 
 /// Run the worker: read the config handshake, spawn the backend, then pump
 /// stdin (commands/queries) and stdout (events/replies/headers) until stdin
@@ -233,20 +227,9 @@ pub fn run() -> Result<()> {
     }
     drop(phone);
     drop(handle); // schedules ua_unregister (de-REGISTER, expires=0) on the RE thread
-    // Let the RE loop actually transmit the de-REGISTER and process its 200 OK
-    // before we stop it — otherwise `shutdown` force-stops the loop and the
-    // registration is left stale on the registrar (one binding leaks per run).
-    let deadline = Instant::now() + UNREGISTER_TIMEOUT;
-    while ringo_core::is_registered() && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    if ringo_core::is_registered() {
-        ringo_core::rlog!(
-            Warn,
-            "de-REGISTER not confirmed within {}ms; registrar binding may linger",
-            UNREGISTER_TIMEOUT.as_millis()
-        );
-    }
+    // stop_re_thread waits (bounded) for the registrar to ack the de-REGISTER —
+    // is_registered() stays true until the 200 OK — before stopping the RE loop,
+    // so the binding is cleared cleanly instead of force-abandoned. No poll here.
     ringo_core::shutdown();
     let _ = event_bridge.join();
     drop(tx);

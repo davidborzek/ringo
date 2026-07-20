@@ -267,15 +267,18 @@ pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<
         // Form cancelled or "Later" → resume TUI
     }
 
-    // Tear down the session (fires ua_unregister) and wait for the PBX to
-    // process the de-register before the caller stops the RE thread — otherwise
-    // we leave a stale contact. Bounded so an unresponsive PBX can't hang exit.
-    // Do this *before* restoring the screen so the wait happens behind the
-    // alternate screen rather than flashing the shell.
+    // Tear down the session: dropping the backend handle fires ua_unregister, so
+    // libre sends the final de-REGISTER and the registrar drops our binding.
     drop(_backend);
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
-    while ringo_core::is_registered() && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(20));
+
+    // On a genuine quit, stop the RE thread here — behind the alternate screen —
+    // so stop_re_thread's bounded wait for the registrar to ack the de-REGISTER
+    // happens before we flash the shell, and only as long as the round-trip takes.
+    // On a switch or in-place restart the RE thread stays up for the next profile
+    // and the de-REGISTER drains in the background, so leaving the profile is
+    // instant.
+    if !app.switch_to && !do_restart {
+        ringo_core::shutdown();
     }
 
     // Drop runtime without waiting for blocked TCP tasks

@@ -25,6 +25,11 @@ static RE_HANDLE: OnceLock<Mutex<Option<std::thread::JoinHandle<()>>>> = OnceLoc
 /// `on_re_thread`, so reading it through RE_HANDLE would self-deadlock.
 static RE_RUNNING: AtomicBool = AtomicBool::new(false);
 
+/// Upper bound on the wait for the registrar to ack the final de-REGISTER on
+/// shutdown. Reached only when the PBX is unresponsive; the happy path returns
+/// as soon as the SIP stack drains (typically one round-trip).
+const GRACEFUL_SHUTDOWN: std::time::Duration = std::time::Duration::from_millis(1500);
+
 /// RAII guard that calls `re_thread_leave()` on drop — even if the closure
 /// panics. Without this, a panic between `enter` and `leave` would permanently
 /// block the RE thread (deadlock on next command).
@@ -202,21 +207,25 @@ pub fn start_re_thread() -> Result<(), String> {
     Ok(())
 }
 
-/// Stop the RE thread following baresip's own shutdown sequence from main.c:
+/// Stop the RE thread, deregistering cleanly first. The caller already fired the
+/// un-REGISTER (dropping the session handle → ua_unregister), so:
 ///
-/// 1. ua_stop_all(false) — graceful: hang up calls + destroy all UAs, but do
-///    NOT force-close the SIP stack. `forced=true` would additionally call
-///    `sip_close(force)`, which aborts any in-flight SIP transaction; if a
-///    REGISTER is still pending (we quit mid-registration), its response handler
-///    then `mem_deref`s the registration a second time (it was already deref'd by
-///    `ua_destroy`) → refcount underflow → SIGTRAP. baresip's own main.c uses the
-///    graceful form here and only forces as a last-resort fallback.
-/// 2. re_cancel() — break out of re_main
-/// 3. join() — the RE thread then runs the rest of the teardown (ua_close …
-///    libre_close) AFTER re_main returns; see start_re_thread. The teardown
-///    MUST run after re_main and on the RE thread (where libre_init ran), so it
-///    can't live here on the main thread before the join. libre_close closes the
-///    SIP stack, so skipping the forced close above loses nothing.
+/// 1. Wait — bounded — for the registrar to ack it: `is_registered()` stays true
+///    until the un-REGISTER 200 OK arrives, and returns false fast when nothing
+///    is registered (e.g. stopping from the picker). Runs on whatever thread
+///    calls shutdown — behind the TUI's alternate screen on a genuine quit — so
+///    we never leave a stale binding, and never wait longer than the round-trip.
+/// 2. ua_stop_all(false) — graceful: hang up calls + destroy the (now
+///    deregistered) UAs, but do NOT force-close the SIP stack. forced=true would
+///    call sip_close(force), aborting an in-flight transaction; mid-registration
+///    that double-derefs the registration → SIGTRAP. baresip's main.c uses the
+///    graceful form and only forces as a last resort.
+/// 3. re_cancel() + async poke — break out of re_main (blocked in epoll_wait, so
+///    re_cancel alone won't wake it; post a dummy async event, the trick libre's
+///    re_thread_leave uses).
+/// 4. join() — the RE thread runs the rest of teardown (ua_close … libre_close)
+///    after re_main; it MUST run there (where libre_init ran), so it can't live
+///    here before the join.
 pub fn stop_re_thread() {
     let handle_mutex = match RE_HANDLE.get() {
         Some(m) => m,
@@ -225,6 +234,16 @@ pub fn stop_re_thread() {
     let mut guard = handle_mutex.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         return;
+    }
+
+    // Wait for the in-flight de-REGISTER to be acked before stopping the loop, so
+    // the registrar drops our binding instead of leaving it stale. Bounded so an
+    // unresponsive PBX can't hang exit; returns immediately when nothing is
+    // registered (e.g. quitting from the picker after a profile switch, whose
+    // de-REGISTER already drained on the still-running RE thread).
+    let deadline = std::time::Instant::now() + GRACEFUL_SHUTDOWN;
+    while super::is_registered() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 
     on_re_thread(|| unsafe {
