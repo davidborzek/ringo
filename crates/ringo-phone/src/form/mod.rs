@@ -698,7 +698,23 @@ fn open_editor(terminal: &mut Term, path: &Path) -> Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
-    let status = Command::new(&editor).arg(path).status();
+    // Point the editor at the controlling terminal. When a session's TUI is
+    // running, fd 1/2 are redirected to the profile log so baresip's raw stdout
+    // can't corrupt the screen (see StdioRedirect); a child inheriting those
+    // would render into the log file — the editor stays invisible and the process
+    // looks hung. /dev/tty is the real terminal regardless of that redirect.
+    let mut cmd = Command::new(&editor);
+    cmd.arg(path);
+    if let Ok(tty) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+    {
+        if let (Ok(out), Ok(err)) = (tty.try_clone(), tty.try_clone()) {
+            cmd.stdin(tty).stdout(out).stderr(err);
+        }
+    }
+    let status = cmd.status();
 
     enable_raw_mode()?;
     execute!(terminal.backend_mut(), EnterAlternateScreen)?;
