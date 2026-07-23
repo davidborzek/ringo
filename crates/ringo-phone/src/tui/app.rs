@@ -727,4 +727,75 @@ mod tests {
         );
         assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
+
+    #[test]
+    fn hanging_up_active_call_resumes_new_current_with_three_calls() {
+        let phone = RecordingPhone::default();
+        let resumes = phone.resumes.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        // A and B held, C active — the state after dialing three calls in a row.
+        app.calls
+            .push(mk_call("A", CallDirection::Outgoing, CallState::OnHold));
+        app.calls
+            .push(mk_call("B", CallDirection::Outgoing, CallState::OnHold));
+        app.calls.push(mk_call(
+            "C",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.selected_call = 2;
+
+        // Hang up the active (third) call.
+        app.handle_call_closed("C".into(), "Connection closed".into(), false);
+
+        assert_eq!(app.calls.len(), 2);
+        // The new current call (B) resumes; A stays on hold.
+        assert_eq!(app.selected_call, 1);
+        assert_eq!(app.calls[1].id, "B");
+        assert_eq!(
+            app.calls[1].state,
+            CallState::Established,
+            "the new current call must resume"
+        );
+        assert_eq!(app.calls[0].id, "A");
+        assert_eq!(
+            app.calls[0].state,
+            CallState::OnHold,
+            "the other held call stays on hold"
+        );
+        assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn hanging_up_a_held_call_does_not_resume_others() {
+        let phone = RecordingPhone::default();
+        let resumes = phone.resumes.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.calls
+            .push(mk_call("A", CallDirection::Outgoing, CallState::OnHold));
+        app.calls
+            .push(mk_call("B", CallDirection::Outgoing, CallState::OnHold));
+        app.calls.push(mk_call(
+            "C",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.selected_call = 2;
+
+        // A held call (A) ends on its own; the active call C is unaffected.
+        app.handle_call_closed("A".into(), "Connection closed".into(), false);
+
+        assert_eq!(app.calls.len(), 2);
+        assert_eq!(
+            app.calls.iter().find(|c| c.id == "C").unwrap().state,
+            CallState::Established,
+            "the active call stays active"
+        );
+        assert_eq!(
+            app.calls.iter().find(|c| c.id == "B").unwrap().state,
+            CallState::OnHold,
+            "the still-held call is not resumed"
+        );
+        assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
 }
