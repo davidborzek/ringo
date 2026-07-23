@@ -32,7 +32,8 @@ impl super::app::App {
                             .transfer(&super::command::normalize_sip_uri(&uri, &aor));
                     }
                     TransferMode::AttendedInput(uri) => {
-                        // baresip puts the current call on hold immediately
+                        // attended_transfer_start puts the current call on hold
+                        // (SIP re-INVITE); mirror that in the UI state.
                         let idx = self.selected_call;
                         if let Some(c) = self.calls.get_mut(idx) {
                             c.state = CallState::OnHold;
