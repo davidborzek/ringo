@@ -148,18 +148,23 @@ impl super::app::App {
         if self.transfer_mode == super::app::TransferMode::AttendedPending && self.calls.len() < 2 {
             self.transfer_mode = super::app::TransferMode::None;
         }
-        // Auto-resume: if the closed call left exactly one call behind and it is
-        // on hold, resume it. Covers the attended-transfer case (consultation
-        // leg aborted / rejected / hung up → the held original resumes) and the
-        // general two-call case. ringo doesn't load baresip's `menu` module, so
-        // nothing does this automatically. `resume()` targets the UA's current
-        // (tail) call; the closed call is already mem_deref'd by the time this
-        // runs, so the remaining held call is the tail.
-        if !completed_transfer && self.calls.len() == 1 && self.calls[0].state == CallState::OnHold
+        // Auto-resume: closing the active (non-held) call promotes the call that
+        // becomes baresip's new current (tail) call. If that call is on hold,
+        // resume it — ringo doesn't load baresip's `menu` module, so nothing does
+        // this automatically. Works for any call count: the selected_call fixup
+        // above already points at the new current call, and `resume()` targets
+        // the UA tail (the closed call is mem_deref'd before this runs). When the
+        // closed call was itself on hold, the active call keeps the selection and
+        // isn't on hold, so nothing is resumed. Skipped for a completed transfer,
+        // whose other leg is being torn down too.
+        if !completed_transfer
+            && self
+                .calls
+                .get(self.selected_call)
+                .is_some_and(|c| c.state == CallState::OnHold)
         {
-            self.selected_call = 0;
             self.phone.resume();
-            self.calls[0].state = CallState::Established;
+            self.calls[self.selected_call].state = CallState::Established;
             // stale: re-polled for the newly-active call next tick
             self.media = None;
             self.codec = None;
