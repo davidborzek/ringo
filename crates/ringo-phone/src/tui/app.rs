@@ -374,10 +374,12 @@ impl App {
     }
 
     /// Place an outbound call, re-rendering dynamic custom headers so each
-    /// call gets fresh placeholder values.
+    /// call gets fresh placeholder values. The target is sanitized so
+    /// human-formatted numbers (e.g. `0211-63554610`) dial correctly.
     pub fn dial(&mut self, target: &str) {
         self.refresh_dynamic_headers();
-        self.phone.dial(target);
+        let target = super::command::sanitize_dial_target(target);
+        self.phone.dial(&target);
     }
 
     fn refresh_dynamic_headers(&self) {

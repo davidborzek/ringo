@@ -318,19 +318,97 @@ impl App {
     }
 }
 
+/// Strip human-readable phone-number formatting from a dial target.
+///
+/// German-style numbers are commonly written with separators, e.g.
+/// `0211-63554610` or `(0211) 6355 4610`. Those separators are not valid in the
+/// user part of a SIP request-URI, so a PBX can't route them. When the target
+/// is a plain phone number — digits (optionally `+`/`*`/`#`) plus separators,
+/// no letters, not already a SIP URI — the separators are removed. A SIP
+/// username / extension name (contains letters) or an explicit `sip:`/`sips:`
+/// URI is left untouched so real user parts like `john.doe` survive.
+pub(super) fn sanitize_dial_target(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.starts_with("sip:")
+        || trimmed.starts_with("sips:")
+        || trimmed.contains('@')
+        || trimmed.chars().any(|c| c.is_ascii_alphabetic())
+    {
+        return trimmed.to_string();
+    }
+    trimmed
+        .chars()
+        .filter(|c| !(c.is_whitespace() || matches!(c, '-' | '.' | '/' | '(' | ')')))
+        .collect()
+}
+
 pub(super) fn normalize_sip_uri(input: &str, account_aor: &str) -> String {
+    let input = sanitize_dial_target(input);
     if input.starts_with("sip:") || input.starts_with("sips:") {
-        return input.to_string();
+        return input;
     }
     let domain = account_aor.split_once('@').map(|x| x.1).unwrap_or("");
     if domain.is_empty() {
-        input.to_string()
+        input
     } else {
-        format!("sip:{}@{}", input, domain)
+        format!("sip:{input}@{domain}")
     }
 }
 
 /// Valid DTMF symbols: digits, `*`, `#`, and the tones A–D (either case).
 fn is_dtmf_digit(c: char) -> bool {
     c.is_ascii_digit() || matches!(c, '*' | '#' | 'A'..='D' | 'a'..='d')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_sip_uri, sanitize_dial_target};
+
+    #[test]
+    fn strips_separators_from_phone_numbers() {
+        assert_eq!(sanitize_dial_target("0211-63554610"), "021163554610");
+        assert_eq!(sanitize_dial_target("(0211) 6355 4610"), "021163554610");
+        assert_eq!(sanitize_dial_target("0211.6355.4610"), "021163554610");
+        assert_eq!(sanitize_dial_target("  0211-6355  "), "02116355");
+    }
+
+    #[test]
+    fn keeps_dialable_symbols() {
+        assert_eq!(sanitize_dial_target("+49 211 6355"), "+492116355");
+        assert_eq!(sanitize_dial_target("*100#"), "*100#");
+        assert_eq!(sanitize_dial_target("100"), "100");
+    }
+
+    #[test]
+    fn leaves_sip_users_and_uris_untouched() {
+        // Letters mean it's a SIP user/extension name, not a phone number.
+        assert_eq!(sanitize_dial_target("john.doe"), "john.doe");
+        assert_eq!(sanitize_dial_target("alice-bob"), "alice-bob");
+        assert_eq!(sanitize_dial_target("user@host"), "user@host");
+        assert_eq!(
+            sanitize_dial_target("sip:0211-63554610@pbx"),
+            "sip:0211-63554610@pbx"
+        );
+    }
+
+    #[test]
+    fn normalize_strips_then_builds_uri() {
+        assert_eq!(
+            normalize_sip_uri("0211-63554610", "me@pbx.example"),
+            "sip:021163554610@pbx.example"
+        );
+    }
+
+    #[test]
+    fn normalize_passes_through_explicit_uri() {
+        assert_eq!(
+            normalize_sip_uri("sip:alice@example.com", "me@pbx.example"),
+            "sip:alice@example.com"
+        );
+    }
+
+    #[test]
+    fn normalize_without_domain_returns_sanitized_input() {
+        assert_eq!(normalize_sip_uri("0211-6355", ""), "02116355");
+    }
 }
