@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.12.0...ringo-phone-v0.13.0) - 2026-07-23
+
+### Bug Fixes
+
+- auto-resume the new current call with more than two calls
+- auto-hold the active call when placing a second one
+- auto-resume the held call after an attended transfer ends
+- signal SIP hold when starting an attended transfer
+- *(ringo-phone)* open $EDITOR on the real terminal from a running session
+- *(ringo-phone)* exit cleanly when leaving the picker without a selection
+- wait for de-REGISTER before teardown, switch profiles instantly
+
+### Features
+
+- accept human-formatted phone numbers when dialing
+
 ## [0.12.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.11.1...ringo-phone-v0.12.0) - 2026-07-17
 
 ### Bug Fixes
