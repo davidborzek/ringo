@@ -378,6 +378,19 @@ impl App {
     /// human-formatted numbers (e.g. `0211-63554610`) dial correctly.
     pub fn dial(&mut self, target: &str) {
         self.refresh_dynamic_headers();
+        // Auto-hold the current call before placing another. ringo doesn't load
+        // baresip's menu module, so nothing holds it automatically; without this
+        // the first party stays connected in parallel with the new call. hold()
+        // acts on the UA's current (tail) call, which — before the new call is
+        // dialed — is the active call shown as selected.
+        if self
+            .calls
+            .get(self.selected_call)
+            .is_some_and(|c| c.state == CallState::Established)
+        {
+            self.phone.hold();
+            self.calls[self.selected_call].state = CallState::OnHold;
+        }
         let target = super::command::sanitize_dial_target(target);
         self.phone.dial(&target);
     }
@@ -492,6 +505,7 @@ mod tests {
     struct RecordingPhone {
         log: Arc<Mutex<Vec<String>>>,
         resumes: Arc<std::sync::atomic::AtomicUsize>,
+        holds: Arc<std::sync::atomic::AtomicUsize>,
     }
     impl Phone for RecordingPhone {
         fn register(&self, _: &str, _: u32) {}
@@ -499,7 +513,9 @@ mod tests {
         fn hangup(&self) {}
         fn hangup_all(&self) {}
         fn accept(&self) {}
-        fn hold(&self) {}
+        fn hold(&self) {
+            self.holds.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         fn resume(&self) {
             self.resumes
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -652,5 +668,63 @@ mod tests {
             "a leg being torn down must not be resumed"
         );
         assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn dialing_while_in_a_call_auto_holds_the_current_call() {
+        let phone = RecordingPhone::default();
+        let holds = phone.holds.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.calls.push(mk_call(
+            "A",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.selected_call = 0;
+
+        app.dial("021163554610");
+
+        assert_eq!(
+            app.calls[0].state,
+            CallState::OnHold,
+            "the active call must be held when a second call is placed"
+        );
+        assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn second_call_then_hangup_holds_then_resumes_first() {
+        let phone = RecordingPhone::default();
+        let holds = phone.holds.clone();
+        let resumes = phone.resumes.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+
+        // First call, established and active.
+        app.handle_call_outgoing("A".into(), "sip:a@x".into());
+        app.handle_call_established("A".into());
+        assert_eq!(app.selected_call, 0);
+
+        // Manually place a second call → the first is auto-held.
+        app.dial("sip:b@x");
+        assert_eq!(app.calls[0].state, CallState::OnHold);
+        assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // The mock's dial() is a no-op, so drive the second call via handlers.
+        app.handle_call_outgoing("B".into(), "sip:b@x".into());
+        app.handle_call_established("B".into());
+        assert_eq!(app.selected_call, 1, "the new call becomes active");
+        assert_eq!(app.calls[0].state, CallState::OnHold);
+        assert_eq!(app.calls[1].state, CallState::Established);
+
+        // Hang up the second → the first resumes automatically.
+        app.handle_call_closed("B".into(), "Connection closed".into(), false);
+        assert_eq!(app.calls.len(), 1);
+        assert_eq!(app.calls[0].id, "A");
+        assert_eq!(
+            app.calls[0].state,
+            CallState::Established,
+            "the held call must resume on hangup"
+        );
+        assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }
