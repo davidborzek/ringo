@@ -489,6 +489,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct RecordingPhone {
         log: Arc<Mutex<Vec<String>>>,
+        resumes: Arc<std::sync::atomic::AtomicUsize>,
     }
     impl Phone for RecordingPhone {
         fn register(&self, _: &str, _: u32) {}
@@ -497,7 +498,10 @@ mod tests {
         fn hangup_all(&self) {}
         fn accept(&self) {}
         fn hold(&self) {}
-        fn resume(&self) {}
+        fn resume(&self) {
+            self.resumes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         fn mute(&self) {}
         fn send_dtmf(&self, _: char) {}
         fn switch_line(&self, _: usize) {}
@@ -572,5 +576,79 @@ mod tests {
         app.refresh_dynamic_headers();
 
         assert!(phone.log.lock().unwrap().is_empty());
+    }
+
+    fn mk_call(id: &str, dir: CallDirection, state: CallState) -> Call {
+        Call {
+            id: id.into(),
+            direction: dir,
+            peer: format!("sip:{id}@example.com"),
+            peer_display_name: None,
+            state,
+            started_at: Some(Instant::now()),
+        }
+    }
+
+    #[test]
+    fn attended_transfer_consult_hangup_resumes_held_original() {
+        let phone = RecordingPhone::default();
+        let resumes = phone.resumes.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.calls
+            .push(mk_call("A", CallDirection::Incoming, CallState::OnHold));
+        app.calls.push(mk_call(
+            "B",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.selected_call = 1;
+        app.transfer_mode = TransferMode::AttendedPending;
+
+        // Consultation leg (B) hangs up before the transfer is executed.
+        app.handle_call_closed("B".into(), "Connection closed".into(), false);
+
+        assert_eq!(app.calls.len(), 1);
+        assert_eq!(app.calls[0].id, "A");
+        assert_eq!(
+            app.calls[0].state,
+            CallState::Established,
+            "the held original must be resumed"
+        );
+        assert_eq!(app.selected_call, 0);
+        assert_eq!(app.transfer_mode, TransferMode::None);
+        assert_eq!(
+            resumes.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a resume re-INVITE must be signaled"
+        );
+    }
+
+    #[test]
+    fn completed_transfer_does_not_resume_surviving_leg() {
+        let phone = RecordingPhone::default();
+        let resumes = phone.resumes.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.calls
+            .push(mk_call("A", CallDirection::Incoming, CallState::OnHold));
+        app.calls.push(mk_call(
+            "B",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.selected_call = 1;
+        // 'X' (execute) already reset transfer_mode to None.
+        app.transfer_mode = TransferMode::None;
+
+        // The consultation leg closes as part of a completed transfer; the held
+        // leg is being torn down too and must not get a spurious resume.
+        app.handle_call_closed("B".into(), "200 Call transfered".into(), true);
+
+        assert_eq!(app.calls.len(), 1);
+        assert_eq!(
+            app.calls[0].state,
+            CallState::OnHold,
+            "a leg being torn down must not be resumed"
+        );
+        assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

@@ -91,6 +91,11 @@ impl super::app::App {
     }
 
     pub(super) fn handle_call_closed(&mut self, call_id: String, reason: String, error: bool) {
+        // A completed attended transfer tears down BOTH legs. Detect it up front
+        // (before `reason` may be moved below) so the surviving leg isn't given a
+        // spurious resume re-INVITE that races the incoming BYE. baresip spells
+        // it "Call transfered" (optionally prefixed with the SIP status code).
+        let completed_transfer = reason.to_lowercase().contains("transfer");
         let mut closed: Option<super::app::LastCall> = None;
         if let Some(call) = self.calls.iter().find(|c| c.id == call_id) {
             if call.direction == CallDirection::Incoming && call.started_at.is_none() {
@@ -136,6 +141,28 @@ impl super::app::App {
         self.calls.retain(|c| c.id != call_id);
         if self.selected_call >= self.calls.len() && !self.calls.is_empty() {
             self.selected_call = self.calls.len() - 1;
+        }
+        // The consultation leg of an attended transfer is gone — leave the
+        // pending state so keys route normally again. (A completed transfer
+        // already reset transfer_mode to None when 'X' was pressed.)
+        if self.transfer_mode == super::app::TransferMode::AttendedPending && self.calls.len() < 2 {
+            self.transfer_mode = super::app::TransferMode::None;
+        }
+        // Auto-resume: if the closed call left exactly one call behind and it is
+        // on hold, resume it. Covers the attended-transfer case (consultation
+        // leg aborted / rejected / hung up → the held original resumes) and the
+        // general two-call case. ringo doesn't load baresip's `menu` module, so
+        // nothing does this automatically. `resume()` targets the UA's current
+        // (tail) call; the closed call is already mem_deref'd by the time this
+        // runs, so the remaining held call is the tail.
+        if !completed_transfer && self.calls.len() == 1 && self.calls[0].state == CallState::OnHold
+        {
+            self.selected_call = 0;
+            self.phone.resume();
+            self.calls[0].state = CallState::Established;
+            // stale: re-polled for the newly-active call next tick
+            self.media = None;
+            self.codec = None;
         }
     }
 
