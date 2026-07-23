@@ -194,8 +194,21 @@ impl Phone for BaresipPhone {
     }
 
     fn attended_transfer_start(&self, uri: &str) {
-        // Place a consultation call to `uri`. The existing call is put on hold
-        // automatically by baresip when a new call is started.
+        // Put the existing call on hold at the SIP level, then place the
+        // consultation call. ringo doesn't load baresip's `menu` module, so
+        // `call_hold_other_calls` never auto-holds — without this explicit hold
+        // the first party keeps hearing us while the UI already shows "ON HOLD".
+        // `on_re_thread` is synchronous, so the hold re-INVITE is issued before
+        // the consultation call is dialed.
+        let ua = self.ua;
+        on_re_thread(move || unsafe {
+            let call = ua_call(ua as *mut Ua);
+            if !call.is_null() {
+                call_hold(call, true);
+            }
+        });
+        // The consultation call is appended to the tail of the UA list, becoming
+        // the current call (`ua_call`) for the subsequent exec/abort.
         self.dial(uri);
     }
 
