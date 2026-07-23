@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1](https://github.com/davidborzek/ringo/compare/ringo-core-v0.13.0...ringo-core-v0.13.1) - 2026-07-23
+
+### Bug Fixes
+
+- signal SIP hold when starting an attended transfer
+- wait for de-REGISTER before teardown, switch profiles instantly
+
 ## [0.13.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.12.0...ringo-core-v0.13.0) - 2026-07-17
 
 ### Features
