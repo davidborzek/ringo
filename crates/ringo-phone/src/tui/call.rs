@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, List, ListItem, Paragraph},
 };
 
-use super::app::{Call, CallDirection, CallState, TransferMode};
+use super::app::{Call, CallDirection, CallState};
 
 impl super::app::App {
     pub(super) fn handle_call_incoming(
@@ -68,10 +68,10 @@ impl super::app::App {
             state: CallState::Ringing,
             started_at: None,
         });
-        // During attended transfer, auto-select the new outgoing call (Line B)
-        if self.transfer_mode == TransferMode::AttendedPending {
-            self.selected_call = self.calls.len() - 1;
-        }
+        // Make the new outgoing call the active/selected one, keeping
+        // selected_call in sync with baresip's current (tail) call — hold(),
+        // resume() and the media view all target that call.
+        self.selected_call = self.calls.len() - 1;
     }
 
     pub(super) fn handle_call_ringing(&mut self, call_id: String) {
