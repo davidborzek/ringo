@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.13.1...ringo-core-v0.14.0) - 2026-07-24
+
+### Features
+
+- add select_call to target a specific call by id
+
 ## [0.13.1](https://github.com/davidborzek/ringo/compare/ringo-core-v0.13.0...ringo-core-v0.13.1) - 2026-07-23
 
 ### Bug Fixes

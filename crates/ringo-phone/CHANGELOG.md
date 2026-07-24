@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.13.0...ringo-phone-v0.14.0) - 2026-07-24
+
+### Bug Fixes
+
+- hold the active call when answering a second incoming call
+- act on the selected call across multi-call operations
+
+### Features
+
+- accept tel:/callto: dial targets and show attended-transfer state
+- add auto-hold profile setting and responsive profile form
+
 ## [0.13.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.12.0...ringo-phone-v0.13.0) - 2026-07-23
 
 ### Bug Fixes
