@@ -35,6 +35,9 @@ pub struct Call {
     pub peer_display_name: Option<String>,
     pub state: CallState,
     pub started_at: Option<Instant>,
+    /// Rendered inbound-header views (label, value) from the profile's
+    /// `header_display` templates; empty unless configured / for outgoing calls.
+    pub header_views: Vec<(String, String)>,
 }
 
 /// A call that was deflected (302) — shown transiently in the UI.
@@ -72,6 +75,10 @@ pub struct CallHistoryEntry {
     pub peer: String,
     pub duration: String,   // "HH:MM:SS" | "missed" | "no answer"
     pub duration_secs: u64, // 0 for missed/no answer
+    /// Inbound-header views captured for the call (label, value). `#[serde(default)]`
+    /// keeps entries written before this field loadable.
+    #[serde(default)]
+    pub headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -120,6 +127,8 @@ pub struct CallHistoryState {
     pub search_mode: bool,
     /// Set while a `d`/`D` deletion is waiting for confirmation.
     pub delete_confirm: Option<HistoryDelete>,
+    /// Whether the per-entry detail view is open (Enter on an entry).
+    pub detail: bool,
 }
 
 impl CallHistoryState {
@@ -254,6 +263,8 @@ pub struct App {
     pub switch_confirm: bool,
     /// Whether the Help modal is open.
     pub help_show: bool,
+    /// Whether the call-details overlay is open.
+    pub details_show: bool,
     /// Which button is highlighted in the active confirm popup (`true` = the
     /// destructive action). Reset to `false` (safe) each time a popup opens.
     pub confirm_yes: bool,
@@ -302,6 +313,7 @@ impl App {
             quit_confirm: false,
             switch_confirm: false,
             help_show: false,
+            details_show: false,
             confirm_yes: false,
             switch_to: false,
             dial: DialState {
@@ -327,6 +339,7 @@ impl App {
                 search_query: String::new(),
                 search_mode: false,
                 delete_confirm: None,
+                detail: false,
             },
             log: LogState {
                 path: log_path,
@@ -443,6 +456,7 @@ impl App {
         self.log.search_mode = false;
         self.log.search_query.clear();
         self.help_show = false;
+        self.details_show = false;
         self.call_history.show = false;
         self.call_history.delete_confirm = None;
         self.contacts_state.show = false;
@@ -516,6 +530,7 @@ mod tests {
         holds: Arc<std::sync::atomic::AtomicUsize>,
         selects: Arc<std::sync::atomic::AtomicUsize>,
         hangups: Arc<std::sync::atomic::AtomicUsize>,
+        inbound: Vec<(String, String)>,
     }
     impl Phone for RecordingPhone {
         fn register(&self, _: &str, _: u32) {}
@@ -544,6 +559,9 @@ mod tests {
         fn attended_transfer_start(&self, _: &str) {}
         fn attended_transfer_exec(&self) {}
         fn attended_transfer_abort(&self) {}
+        fn inbound_headers(&self, _: &str) -> Vec<(String, String)> {
+            self.inbound.clone()
+        }
         fn add_header(&self, key: &str, value: &str) {
             self.log.lock().unwrap().push(format!("add {key}={value}"));
         }
@@ -621,6 +639,7 @@ mod tests {
             peer_display_name: None,
             state,
             started_at: Some(Instant::now()),
+            header_views: Vec::new(),
         }
     }
 
@@ -982,5 +1001,35 @@ mod tests {
         assert_eq!(app.calls[0].state, CallState::Established, "not held");
         assert_eq!(app.selected_call, 1);
         assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn incoming_call_renders_configured_header_views() {
+        let phone = RecordingPhone {
+            inbound: vec![("X-Call-Sid".into(), "abc123".into())],
+            ..Default::default()
+        };
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.profile.header_display = vec![
+            ("Debug".into(), "http://dbg/${X-Call-Sid}".into()),
+            // References a header absent on this call → skipped.
+            ("Ticket".into(), "id=${X-Missing}".into()),
+        ];
+
+        app.handle_call_incoming("c1".into(), "sip:a@b".into(), None);
+
+        let call = app.calls.iter().find(|c| c.id == "c1").unwrap();
+        assert_eq!(
+            call.header_views,
+            vec![("Debug".to_string(), "http://dbg/abc123".to_string())]
+        );
+    }
+
+    #[test]
+    fn call_history_entry_without_headers_defaults_empty() {
+        let json =
+            r#"{"ts":"t","dir":"incoming","peer":"p","duration":"missed","duration_secs":0}"#;
+        let e: CallHistoryEntry = serde_json::from_str(json).unwrap();
+        assert!(e.headers.is_empty());
     }
 }
