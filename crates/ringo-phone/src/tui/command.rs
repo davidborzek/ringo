@@ -327,8 +327,16 @@ impl App {
 /// no letters, not already a SIP URI — the separators are removed. A SIP
 /// username / extension name (contains letters) or an explicit `sip:`/`sips:`
 /// URI is left untouched so real user parts like `john.doe` survive.
+///
+/// A leading `tel:` / `callto:` click-to-dial scheme (from contacts or pasted
+/// links) is stripped first, then the remainder is treated as a normal target.
 pub(super) fn sanitize_dial_target(input: &str) -> String {
     let trimmed = input.trim();
+    let trimmed = trimmed
+        .strip_prefix("tel:")
+        .or_else(|| trimmed.strip_prefix("callto:"))
+        .map(str::trim)
+        .unwrap_or(trimmed);
     if trimmed.starts_with("sip:")
         || trimmed.starts_with("sips:")
         || trimmed.contains('@')
@@ -377,6 +385,13 @@ mod tests {
         assert_eq!(sanitize_dial_target("+49 123 4567"), "+491234567");
         assert_eq!(sanitize_dial_target("*100#"), "*100#");
         assert_eq!(sanitize_dial_target("100"), "100");
+    }
+
+    #[test]
+    fn strips_click_to_dial_schemes() {
+        assert_eq!(sanitize_dial_target("tel:+49-30-1234567"), "+49301234567");
+        assert_eq!(sanitize_dial_target("callto:0123 456"), "0123456");
+        assert_eq!(sanitize_dial_target("tel:100"), "100");
     }
 
     #[test]
