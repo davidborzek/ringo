@@ -118,6 +118,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
         );
     } else if app.help_show {
         render_help(f, app);
+    } else if app.details_show {
+        render_details(f, app);
     } else if app.call_history.show {
         super::call_history::render(f, app, centered_rect(area, 80, 80));
         if let Some(kind) = app.call_history.delete_confirm {
@@ -325,6 +327,7 @@ fn render_help(f: &mut Frame, app: &App) {
         row("m", "mute"),
         row("t / T", "blind / attended transfer"),
         row("Tab", "switch active call"),
+        row("i", "call details"),
         row("l", "logs"),
         row("c", "call history"),
         row("f", "contacts"),
@@ -347,6 +350,43 @@ fn render_help(f: &mut Frame, app: &App) {
         )),
     ];
     f.render_widget(Paragraph::new(lines), content);
+}
+
+/// Call-details overlay: peer + the configured inbound-header views.
+fn render_details(f: &mut Frame, app: &App) {
+    let content = render_modal(f, &app.theme, 60, 60, "Call details", &[("Esc", "close")]);
+    let accent = Style::default().fg(app.theme.accent.get());
+    let subtle = Style::default().fg(app.theme.subtle.get());
+    let mut lines = Vec::new();
+    if let Some(call) = app.calls.get(app.selected_call) {
+        lines.push(Line::from(vec![
+            Span::styled("  Peer  ", subtle),
+            Span::styled(call.peer.clone(), Style::default()),
+        ]));
+        if let Some(dn) = &call.peer_display_name {
+            lines.push(Line::from(vec![
+                Span::styled("  Name  ", subtle),
+                Span::styled(dn.clone(), Style::default()),
+            ]));
+        }
+        lines.push(Line::from(""));
+        if call.header_views.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "  No header views for this call.",
+                subtle,
+            )));
+        } else {
+            for (label, value) in &call.header_views {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {label}  "), accent),
+                    Span::styled(value.clone(), Style::default()),
+                ]));
+            }
+        }
+    } else {
+        lines.push(Line::from(Span::styled("  No active call.", subtle)));
+    }
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), content);
 }
 
 // ─── Status Bar ──────────────────────────────────────────────────────────────
@@ -482,6 +522,9 @@ fn normal_hints(app: &App) -> Vec<Hint<'static>> {
                 }
                 if app.has_any_call() {
                     h.push(("b", "hangup"));
+                }
+                if app.has_any_call() {
+                    h.push(("i", "details"));
                 }
                 if app.in_active_call() {
                     h.push(("h", "hold"));

@@ -46,7 +46,7 @@ impl HeaderTemplate {
 /// Expand `${name}` placeholders in `s`. `sub(name)` returns `Some(value)` for
 /// a recognized placeholder or `None` to leave it verbatim. `$$` is a literal
 /// `$`; a `$` not followed by `{` or `$` is also left verbatim.
-fn expand(s: &str, mut sub: impl FnMut(&str) -> Option<String>) -> String {
+pub(crate) fn expand(s: &str, mut sub: impl FnMut(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(idx) = rest.find('$') {
@@ -78,6 +78,33 @@ fn expand(s: &str, mut sub: impl FnMut(&str) -> Option<String>) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Render an inbound-header view template against a call's received headers.
+///
+/// `${Header-Name}` is substituted with the header's value (case-insensitive
+/// match); a referenced-but-absent header expands to empty. Returns `None` when
+/// the template references placeholders but none of them are present on this
+/// call, so irrelevant views are skipped rather than shown blank. A template
+/// with no placeholders (static text) always renders.
+pub(crate) fn render_header_view(template: &str, headers: &[(String, String)]) -> Option<String> {
+    let mut saw_placeholder = false;
+    let mut matched = false;
+    let rendered = expand(template, |name| {
+        saw_placeholder = true;
+        match headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)) {
+            Some((_, v)) => {
+                matched = true;
+                Some(v.clone())
+            }
+            None => Some(String::new()),
+        }
+    });
+    if saw_placeholder && !matched {
+        None
+    } else {
+        Some(rendered)
+    }
 }
 
 /// Per-call values shared across all templates rendered for the same INVITE.
@@ -115,6 +142,35 @@ mod tests {
     fn static_template_is_not_dynamic() {
         assert!(!HeaderTemplate::new("plain").is_dynamic());
         assert!(!HeaderTemplate::new("with$dollar but no token").is_dynamic());
+    }
+
+    #[test]
+    fn header_view_substitutes_case_insensitively() {
+        let h = vec![("X-Call-Sid".to_string(), "abc123".to_string())];
+        assert_eq!(
+            render_header_view("http://dbg/${x-call-sid}", &h).as_deref(),
+            Some("http://dbg/abc123")
+        );
+    }
+
+    #[test]
+    fn header_view_skips_when_referenced_header_absent() {
+        let h = vec![("X-Other".to_string(), "1".to_string())];
+        assert_eq!(render_header_view("id=${X-Call-Sid}", &h), None);
+    }
+
+    #[test]
+    fn header_view_static_text_always_renders() {
+        assert_eq!(
+            render_header_view("just text", &[]).as_deref(),
+            Some("just text")
+        );
+    }
+
+    #[test]
+    fn header_view_absent_placeholder_expands_empty_when_another_matches() {
+        let h = vec![("A".to_string(), "1".to_string())];
+        assert_eq!(render_header_view("${A}/${B}", &h).as_deref(), Some("1/"));
     }
 
     #[test]

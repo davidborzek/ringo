@@ -36,6 +36,7 @@ enum Action {
     Cancel,
     OpenHeaders,
     OpenCodecs,
+    OpenHeaderViews,
     OpenEditor,
     Save,
 }
@@ -43,6 +44,7 @@ enum Action {
 struct FormState {
     fields: Vec<Field>,
     custom_headers: Vec<(String, String)>,
+    header_display: Vec<(String, String)>,
     audio_codecs: Vec<String>,
     active_tab: Tab,
     /// Focus position *within the active tab's fields* (not an index into `fields`).
@@ -56,6 +58,7 @@ impl FormState {
         Self {
             fields: build_fields(profile, is_new),
             custom_headers: profile.custom_headers.clone(),
+            header_display: profile.header_display.clone(),
             audio_codecs: profile.audio_codecs.clone(),
             active_tab: Tab::Account,
             focused: 0,
@@ -132,6 +135,7 @@ impl FormState {
                 if let FieldKind::SubMenu { .. } = &self.fields[self.focused_index()].kind {
                     return match self.fields[self.focused_index()].id {
                         FieldId::AudioCodecs => Action::OpenCodecs,
+                        FieldId::HeaderViews => Action::OpenHeaderViews,
                         _ => Action::OpenHeaders,
                     };
                 }
@@ -157,6 +161,18 @@ impl FormState {
         if let Some(f) = self.fields.iter_mut().find(|f| f.id == FieldId::SipHeaders) {
             if let FieldKind::SubMenu { count } = &mut f.kind {
                 *count = self.custom_headers.len();
+            }
+        }
+    }
+
+    fn update_header_views_count(&mut self) {
+        if let Some(f) = self
+            .fields
+            .iter_mut()
+            .find(|f| f.id == FieldId::HeaderViews)
+        {
+            if let FieldKind::SubMenu { count } = &mut f.kind {
+                *count = self.header_display.len();
             }
         }
     }
@@ -224,6 +240,7 @@ impl FormState {
                 }
             },
             custom_headers: self.custom_headers.clone(),
+            header_display: self.header_display.clone(),
             metadata: prev_profile.metadata.clone(),
         };
         (name, profile)
@@ -624,6 +641,11 @@ fn build_fields(profile: &Profile, include_name: bool) -> Vec<Field> {
             .group(Tab::Features)
             .desc("Hold the current call when placing another or switching lines."),
     );
+    f.push(
+        Field::submenu(HeaderViews, "Recv. headers", profile.header_display.len())
+            .group(Tab::Features)
+            .desc("Views shown for incoming calls; template may use ${Header-Name}."),
+    );
 
     // ── Forwarding ───────────────────────────────────────────────────────────
     f.push(
@@ -684,8 +706,22 @@ pub fn run_form(
                     }
                 }
                 Action::OpenHeaders => {
-                    headers::run_headers_submenu(terminal, &mut state.custom_headers, theme)?;
+                    headers::run_headers_submenu(
+                        terminal,
+                        &mut state.custom_headers,
+                        theme,
+                        "SIP Headers",
+                    )?;
                     state.update_header_count();
+                }
+                Action::OpenHeaderViews => {
+                    headers::run_headers_submenu(
+                        terminal,
+                        &mut state.header_display,
+                        theme,
+                        "Header views (label = template)",
+                    )?;
+                    state.update_header_views_count();
                 }
                 Action::OpenCodecs => {
                     codecs::run_codecs_submenu(terminal, &mut state.audio_codecs, theme)?;

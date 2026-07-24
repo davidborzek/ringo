@@ -21,6 +21,12 @@ pub struct Profile {
     pub notes: Option<String>,
     #[serde(default, deserialize_with = "deserialize_custom_headers")]
     pub custom_headers: Vec<(String, String)>,
+    /// Inbound-header views for incoming calls: `(label, template)` pairs. The
+    /// template may reference received SIP headers via `${Header-Name}`, e.g.
+    /// `("Debug", "http://debugtool/${X-Call-Sid}")`. Opt-in — empty shows
+    /// nothing. Views whose referenced headers are absent on a call are skipped.
+    #[serde(default, deserialize_with = "deserialize_custom_headers")]
+    pub header_display: Vec<(String, String)>,
     #[serde(default = "default_true")]
     pub notify: bool,
     #[serde(default = "default_true")]
@@ -66,6 +72,7 @@ impl Default for Profile {
             regint: None,
             notes: None,
             custom_headers: Vec::new(),
+            header_display: Vec::new(),
             notify: false,
             mwi: false,
             auto_hold: true,

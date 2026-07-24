@@ -35,6 +35,7 @@ impl super::app::App {
             }),
         );
 
+        let header_views = self.render_header_views(&call_id);
         self.calls.push(Call {
             id: call_id,
             peer: number,
@@ -42,7 +43,26 @@ impl super::app::App {
             direction: CallDirection::Incoming,
             state: CallState::Ringing,
             started_at: None,
+            header_views,
         });
+    }
+
+    /// Render the profile's inbound-header view templates against the INVITE
+    /// headers of `call_id` (drains them from the backend store). Views whose
+    /// referenced headers aren't present on this call are dropped.
+    fn render_header_views(&self, call_id: &str) -> Vec<(String, String)> {
+        let headers = self.phone.inbound_headers(call_id);
+        if self.profile.header_display.is_empty() {
+            return Vec::new();
+        }
+        self.profile
+            .header_display
+            .iter()
+            .filter_map(|(label, template)| {
+                crate::header::render_header_view(template, &headers)
+                    .map(|value| (label.clone(), value))
+            })
+            .collect()
     }
 
     pub(super) fn handle_call_outgoing(&mut self, call_id: String, number: String) {
@@ -67,6 +87,7 @@ impl super::app::App {
             direction: CallDirection::Outgoing,
             state: CallState::Ringing,
             started_at: None,
+            header_views: Vec::new(),
         });
         // Make the new outgoing call the active/selected one, keeping
         // selected_call in sync with baresip's current (tail) call — hold(),

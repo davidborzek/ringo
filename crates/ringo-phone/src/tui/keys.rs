@@ -126,6 +126,14 @@ impl super::app::App {
                     self.help_show = open;
                     return;
                 }
+                KeyCode::Char('i')
+                    if key.modifiers == KeyModifiers::NONE && self.has_any_call() =>
+                {
+                    let open = !self.details_show;
+                    self.close_overlays();
+                    self.details_show = open;
+                    return;
+                }
                 _ => {}
             }
         }
@@ -161,6 +169,17 @@ impl super::app::App {
                 KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')
             ) {
                 self.help_show = false;
+            }
+            return;
+        }
+
+        // Call-details overlay — Esc / i / q close it.
+        if self.details_show {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('i') | KeyCode::Char('q')
+            ) {
+                self.details_show = false;
             }
             return;
         }

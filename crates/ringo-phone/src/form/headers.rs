@@ -15,6 +15,7 @@ pub(crate) fn run_headers_submenu(
     terminal: &mut Term,
     headers: &mut Vec<(String, String)>,
     theme: &Theme,
+    title: &str,
 ) -> Result<()> {
     let mut entries: Vec<(TextField, TextField)> = headers
         .iter()
@@ -37,7 +38,7 @@ pub(crate) fn run_headers_submenu(
             frame.render_widget(Clear, form_area);
             let block = Block::default()
                 .borders(Borders::ALL)
-                .title(" SIP Headers ")
+                .title(format!(" {title} "))
                 .title_alignment(Alignment::Center);
             let inner = block.inner(form_area);
             frame.render_widget(block, form_area);

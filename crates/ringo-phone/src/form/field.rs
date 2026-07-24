@@ -150,6 +150,7 @@ pub(crate) enum FieldId {
     Mwi,
     AutoHold,
     SipHeaders,
+    HeaderViews,
     Deflect,
     DeflectTarget,
 }
