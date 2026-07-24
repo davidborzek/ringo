@@ -279,6 +279,10 @@ pub struct App {
     /// templates (e.g. containing `$uuid`) are re-rendered per call by
     /// [`Self::dial`].
     pub custom_headers: Vec<(String, HeaderTemplate)>,
+    /// The custom headers rendered for the pending outbound call, captured in
+    /// [`Self::dial`] and consumed when the CallOutgoing event arrives so the
+    /// call-details view can show what was actually sent.
+    pub pending_outbound_headers: Vec<(String, String)>,
     pub deflected: Option<DeflectedInfo>,
 }
 
@@ -382,6 +386,7 @@ impl App {
                 },
             },
             custom_headers,
+            pending_outbound_headers: Vec::new(),
             deflected: None,
         }
     }
@@ -396,7 +401,8 @@ impl App {
         if target.is_empty() {
             return;
         }
-        self.refresh_dynamic_headers();
+        let ctx = HeaderContext::for_call();
+        self.pending_outbound_headers = self.refresh_dynamic_headers(&ctx);
         // Auto-hold the current call before placing another (profile `auto_hold`,
         // on by default). ringo doesn't load baresip's menu module, so nothing
         // holds it automatically; without this the first party stays connected in
@@ -416,10 +422,9 @@ impl App {
         self.phone.dial(&target);
     }
 
-    fn refresh_dynamic_headers(&self) {
+    fn refresh_dynamic_headers(&self, ctx: &HeaderContext) -> Vec<(String, String)> {
         use std::collections::HashSet;
 
-        let ctx = HeaderContext::for_call();
         // `uarmheader` removes *all* headers with a given name, so once any
         // template for a key is dynamic we must re-add every header for that
         // key — including static ones (e.g. duplicate History-Info entries) —
@@ -436,9 +441,14 @@ impl App {
         }
         for (key, tpl) in &self.custom_headers {
             if dynamic_keys.contains(key.as_str()) {
-                self.phone.add_header(key, &tpl.render(&ctx));
+                self.phone.add_header(key, &tpl.render(ctx));
             }
         }
+        // The full rendered header set sent on this call, for the details view.
+        self.custom_headers
+            .iter()
+            .map(|(key, tpl)| (key.clone(), tpl.render(ctx)))
+            .collect()
     }
 
     pub fn notify(&self, summary: &str, body: &str) {
@@ -604,7 +614,7 @@ mod tests {
             phone.clone(),
         );
 
-        app.refresh_dynamic_headers();
+        app.refresh_dynamic_headers(&HeaderContext::for_call());
 
         let log = phone.log.lock().unwrap().clone();
         assert_eq!(
@@ -626,7 +636,7 @@ mod tests {
         let phone = RecordingPhone::default();
         let app = app_with_headers(vec![("X-Static", "keep-me")], phone.clone());
 
-        app.refresh_dynamic_headers();
+        app.refresh_dynamic_headers(&HeaderContext::for_call());
 
         assert!(phone.log.lock().unwrap().is_empty());
     }
@@ -1031,5 +1041,21 @@ mod tests {
             r#"{"ts":"t","dir":"incoming","peer":"p","duration":"missed","duration_secs":0}"#;
         let e: CallHistoryEntry = serde_json::from_str(json).unwrap();
         assert!(e.headers.is_empty());
+    }
+
+    #[test]
+    fn outgoing_call_renders_views_from_sent_headers() {
+        let mut app = app_with_headers(vec![("X-Call-Sid", "sid-42")], RecordingPhone::default());
+        app.profile.header_display = vec![("Debug".into(), "http://dbg/${X-Call-Sid}".into())];
+
+        // dial() captures the rendered outbound headers; the event attaches views.
+        app.dial("123");
+        app.handle_call_outgoing("c9".into(), "sip:x@y".into());
+
+        let call = app.calls.iter().find(|c| c.id == "c9").unwrap();
+        assert_eq!(
+            call.header_views,
+            vec![("Debug".to_string(), "http://dbg/sid-42".to_string())]
+        );
     }
 }
