@@ -11,6 +11,12 @@ pub trait Phone: Send {
     fn mute(&self);
     fn send_dtmf(&self, digit: char);
     fn switch_line(&self, line: usize);
+    /// Make the call with SIP `call_id` the UA's current call (baresip
+    /// `call_set_current`), so subsequent hold/resume/hangup/mute target it.
+    /// No-op if the id isn't found. Default: no-op (mocks).
+    fn select_call(&self, call_id: &str) {
+        let _ = call_id;
+    }
     fn transfer(&self, uri: &str);
     fn attended_transfer_start(&self, uri: &str);
     fn attended_transfer_exec(&self);
