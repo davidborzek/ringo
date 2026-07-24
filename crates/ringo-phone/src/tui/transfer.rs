@@ -32,8 +32,9 @@ impl super::app::App {
                             .transfer(&super::command::normalize_sip_uri(&uri, &aor));
                     }
                     TransferMode::AttendedInput(uri) => {
-                        // attended_transfer_start puts the current call on hold
-                        // (SIP re-INVITE); mirror that in the UI state.
+                        // attended_transfer_start always holds the current call
+                        // (SIP re-INVITE), independent of the `auto_hold` setting —
+                        // a consultative transfer requires it. Mirror it in the UI.
                         let idx = self.selected_call;
                         if let Some(c) = self.calls.get_mut(idx) {
                             c.state = CallState::OnHold;

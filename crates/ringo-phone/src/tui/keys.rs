@@ -219,10 +219,10 @@ impl super::app::App {
                 self.phone.accept();
             }
             KeyCode::Char('b') if !ctrl && self.has_any_call() => {
-                self.phone.hangup();
+                self.hangup_selected();
             }
             KeyCode::Delete if self.has_any_call() => {
-                self.phone.hangup();
+                self.hangup_selected();
             }
             KeyCode::Char('h') if !ctrl && self.in_active_call() => {
                 self.phone.hold();

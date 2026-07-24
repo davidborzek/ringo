@@ -377,21 +377,29 @@ impl App {
     /// call gets fresh placeholder values. The target is sanitized so
     /// human-formatted numbers (e.g. `0123-4567890`) dial correctly.
     pub fn dial(&mut self, target: &str) {
+        let target = super::command::sanitize_dial_target(target);
+        // Nothing dialable after stripping separators (e.g. "---") — don't place
+        // an empty call.
+        if target.is_empty() {
+            return;
+        }
         self.refresh_dynamic_headers();
-        // Auto-hold the current call before placing another. ringo doesn't load
-        // baresip's menu module, so nothing holds it automatically; without this
-        // the first party stays connected in parallel with the new call. hold()
-        // acts on the UA's current (tail) call, which — before the new call is
-        // dialed — is the active call shown as selected.
-        if self
-            .calls
-            .get(self.selected_call)
-            .is_some_and(|c| c.state == CallState::Established)
+        // Auto-hold the current call before placing another (profile `auto_hold`,
+        // on by default). ringo doesn't load baresip's menu module, so nothing
+        // holds it automatically; without this the first party stays connected in
+        // parallel with the new call. Make it baresip's current call first, then
+        // hold() targets it.
+        if self.profile.auto_hold
+            && self
+                .calls
+                .get(self.selected_call)
+                .is_some_and(|c| c.state == CallState::Established)
         {
+            let id = self.calls[self.selected_call].id.clone();
+            self.phone.select_call(&id);
             self.phone.hold();
             self.calls[self.selected_call].state = CallState::OnHold;
         }
-        let target = super::command::sanitize_dial_target(target);
         self.phone.dial(&target);
     }
 
@@ -506,11 +514,16 @@ mod tests {
         log: Arc<Mutex<Vec<String>>>,
         resumes: Arc<std::sync::atomic::AtomicUsize>,
         holds: Arc<std::sync::atomic::AtomicUsize>,
+        selects: Arc<std::sync::atomic::AtomicUsize>,
+        hangups: Arc<std::sync::atomic::AtomicUsize>,
     }
     impl Phone for RecordingPhone {
         fn register(&self, _: &str, _: u32) {}
         fn dial(&self, _: &str) {}
-        fn hangup(&self) {}
+        fn hangup(&self) {
+            self.hangups
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         fn hangup_all(&self) {}
         fn accept(&self) {}
         fn hold(&self) {
@@ -523,6 +536,10 @@ mod tests {
         fn mute(&self) {}
         fn send_dtmf(&self, _: char) {}
         fn switch_line(&self, _: usize) {}
+        fn select_call(&self, _: &str) {
+            self.selects
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         fn transfer(&self, _: &str) {}
         fn attended_transfer_start(&self, _: &str) {}
         fn attended_transfer_exec(&self) {}
@@ -796,6 +813,131 @@ mod tests {
             CallState::OnHold,
             "the still-held call is not resumed"
         );
+        assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn switch_line_holds_current_and_resumes_next() {
+        let phone = RecordingPhone::default();
+        let holds = phone.holds.clone();
+        let resumes = phone.resumes.clone();
+        let selects = phone.selects.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.calls.push(mk_call(
+            "A",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.calls
+            .push(mk_call("B", CallDirection::Outgoing, CallState::OnHold));
+        app.selected_call = 0;
+
+        app.switch_line();
+
+        assert_eq!(app.selected_call, 1);
+        assert_eq!(app.calls[0].state, CallState::OnHold, "current is held");
+        assert_eq!(app.calls[1].state, CallState::Established, "next resumes");
+        assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // The target calls are made current by id (not line number).
+        assert!(selects.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+    }
+
+    #[test]
+    fn hangup_selected_selects_then_hangs_up() {
+        let phone = RecordingPhone::default();
+        let selects = phone.selects.clone();
+        let hangups = phone.hangups.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.calls
+            .push(mk_call("A", CallDirection::Outgoing, CallState::OnHold));
+        app.calls.push(mk_call(
+            "B",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        // Select the held call, not baresip's current (tail) one.
+        app.selected_call = 0;
+
+        app.hangup_selected();
+
+        // The selected call is made current before hanging up, so the hangup
+        // targets it rather than the tail.
+        assert_eq!(selects.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(hangups.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn empty_dial_target_is_ignored() {
+        let phone = RecordingPhone::default();
+        let holds = phone.holds.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.calls.push(mk_call(
+            "A",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.selected_call = 0;
+
+        // Sanitizes to "" → no dial, and the active call is NOT auto-held.
+        app.dial("()- .");
+        assert_eq!(app.calls[0].state, CallState::Established);
+        assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        // A real number does auto-hold the active call.
+        app.dial("0123-4567");
+        assert_eq!(app.calls[0].state, CallState::OnHold);
+        assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn dial_with_auto_hold_disabled_keeps_current_active() {
+        let phone = RecordingPhone::default();
+        let holds = phone.holds.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.profile.auto_hold = false;
+        app.calls.push(mk_call(
+            "A",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.selected_call = 0;
+
+        app.dial("0123-4567");
+
+        assert_eq!(
+            app.calls[0].state,
+            CallState::Established,
+            "auto_hold off → the current call is not held"
+        );
+        assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn switch_line_with_auto_hold_disabled_only_changes_focus() {
+        let phone = RecordingPhone::default();
+        let holds = phone.holds.clone();
+        let resumes = phone.resumes.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.profile.auto_hold = false;
+        app.calls.push(mk_call(
+            "A",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.calls.push(mk_call(
+            "B",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.selected_call = 0;
+
+        app.switch_line();
+
+        assert_eq!(app.selected_call, 1, "focus moves");
+        assert_eq!(app.calls[0].state, CallState::Established, "no auto-hold");
+        assert_eq!(app.calls[1].state, CallState::Established);
+        assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }
