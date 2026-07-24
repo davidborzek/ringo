@@ -28,8 +28,12 @@ impl super::app::App {
                 }
                 if !self.dial.input.is_empty() {
                     let target = self.dial.input.clone();
-                    self.dial(&target);
-                    crate::history::push(&mut self.dial.history, target);
+                    // Skip targets that sanitize to nothing (e.g. "---") so they
+                    // neither dial nor pollute history.
+                    if !super::command::sanitize_dial_target(&target).is_empty() {
+                        self.dial(&target);
+                        crate::history::push(&mut self.dial.history, target);
+                    }
                     self.dial_clear();
                 }
                 self.dial.mode = InputMode::Normal;
@@ -253,10 +257,21 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
                 Style::default().fg(app.theme.transfer.get()),
             ),
         ]),
-        TransferMode::AttendedPending => Line::from(vec![Span::styled(
-            "  Attended: call ringing…",
-            Style::default().fg(app.theme.attention.get()),
-        )]),
+        TransferMode::AttendedPending => {
+            let ready = app
+                .calls
+                .get(app.selected_call)
+                .is_some_and(|c| c.state == super::app::CallState::Established);
+            let text = if ready {
+                "  Attended: connected — X to complete, Esc to abort"
+            } else {
+                "  Attended: calling… — Esc to abort"
+            };
+            Line::from(vec![Span::styled(
+                text,
+                Style::default().fg(app.theme.attention.get()),
+            )])
+        }
         TransferMode::None => match app.dial.mode {
             InputMode::Normal => {
                 if app.in_active_call() {
