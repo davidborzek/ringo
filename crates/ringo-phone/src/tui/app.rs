@@ -940,4 +940,47 @@ mod tests {
         assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 0);
         assert_eq!(resumes.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
+
+    #[test]
+    fn accepting_second_call_holds_the_active_one() {
+        let phone = RecordingPhone::default();
+        let holds = phone.holds.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.calls.push(mk_call(
+            "A",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.calls
+            .push(mk_call("B", CallDirection::Incoming, CallState::Ringing));
+        app.selected_call = 0;
+
+        app.accept_incoming();
+
+        assert_eq!(app.calls[0].state, CallState::OnHold, "active call is held");
+        assert_eq!(app.selected_call, 1, "the answered call becomes active");
+        assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn accepting_second_call_with_auto_hold_disabled_keeps_active() {
+        let phone = RecordingPhone::default();
+        let holds = phone.holds.clone();
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.profile.auto_hold = false;
+        app.calls.push(mk_call(
+            "A",
+            CallDirection::Outgoing,
+            CallState::Established,
+        ));
+        app.calls
+            .push(mk_call("B", CallDirection::Incoming, CallState::Ringing));
+        app.selected_call = 0;
+
+        app.accept_incoming();
+
+        assert_eq!(app.calls[0].state, CallState::Established, "not held");
+        assert_eq!(app.selected_call, 1);
+        assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
 }

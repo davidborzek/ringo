@@ -216,7 +216,7 @@ impl super::app::App {
                 self.command.error = None;
             }
             KeyCode::Char('a') if !ctrl && self.has_incoming_ringing() => {
-                self.phone.accept();
+                self.accept_incoming();
             }
             KeyCode::Char('b') if !ctrl && self.has_any_call() => {
                 self.hangup_selected();
