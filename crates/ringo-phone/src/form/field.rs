@@ -148,6 +148,7 @@ pub(crate) enum FieldId {
     Notes,
     Notify,
     Mwi,
+    AutoHold,
     SipHeaders,
     Deflect,
     DeflectTarget,
