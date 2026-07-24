@@ -35,6 +35,7 @@ impl super::app::App {
             }),
         );
 
+        let header_views = self.render_header_views(&call_id);
         self.calls.push(Call {
             id: call_id,
             peer: number,
@@ -42,7 +43,31 @@ impl super::app::App {
             direction: CallDirection::Incoming,
             state: CallState::Ringing,
             started_at: None,
+            header_views,
         });
+    }
+
+    /// Render the profile's header-view templates against `headers`. Views whose
+    /// referenced headers aren't present are dropped.
+    fn render_header_views_from(&self, headers: &[(String, String)]) -> Vec<(String, String)> {
+        if self.profile.header_display.is_empty() {
+            return Vec::new();
+        }
+        self.profile
+            .header_display
+            .iter()
+            .filter_map(|(label, template)| {
+                crate::header::render_header_view(template, headers)
+                    .map(|value| (label.clone(), value))
+            })
+            .collect()
+    }
+
+    /// Views for an incoming call, rendered against its INVITE headers (drained
+    /// from the backend store).
+    fn render_header_views(&self, call_id: &str) -> Vec<(String, String)> {
+        let headers = self.phone.inbound_headers(call_id);
+        self.render_header_views_from(&headers)
     }
 
     pub(super) fn handle_call_outgoing(&mut self, call_id: String, number: String) {
@@ -60,6 +85,9 @@ impl super::app::App {
             }),
         );
 
+        // Views from the custom headers ringo sent on this call (captured in dial).
+        let sent = std::mem::take(&mut self.pending_outbound_headers);
+        let header_views = self.render_header_views_from(&sent);
         self.calls.push(Call {
             id: call_id,
             peer: number,
@@ -67,6 +95,7 @@ impl super::app::App {
             direction: CallDirection::Outgoing,
             state: CallState::Ringing,
             started_at: None,
+            header_views,
         });
         // Make the new outgoing call the active/selected one, keeping
         // selected_call in sync with baresip's current (tail) call — hold(),

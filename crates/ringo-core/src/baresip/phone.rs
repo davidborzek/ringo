@@ -385,6 +385,9 @@ impl Phone for BaresipPhone {
     fn received_dtmf(&self) -> String {
         super::events::received_dtmf(self.ua)
     }
+    fn inbound_headers(&self, call_id: &str) -> Vec<(String, String)> {
+        super::events::inbound_headers(self.ua, call_id)
+    }
 }
 
 /// Opaque handle — drop ends the backend session + cleanup.

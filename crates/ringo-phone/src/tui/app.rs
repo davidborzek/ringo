@@ -35,6 +35,9 @@ pub struct Call {
     pub peer_display_name: Option<String>,
     pub state: CallState,
     pub started_at: Option<Instant>,
+    /// Rendered inbound-header views (label, value) from the profile's
+    /// `header_display` templates; empty unless configured / for outgoing calls.
+    pub header_views: Vec<(String, String)>,
 }
 
 /// A call that was deflected (302) — shown transiently in the UI.
@@ -72,6 +75,10 @@ pub struct CallHistoryEntry {
     pub peer: String,
     pub duration: String,   // "HH:MM:SS" | "missed" | "no answer"
     pub duration_secs: u64, // 0 for missed/no answer
+    /// Inbound-header views captured for the call (label, value). `#[serde(default)]`
+    /// keeps entries written before this field loadable.
+    #[serde(default)]
+    pub headers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -120,6 +127,8 @@ pub struct CallHistoryState {
     pub search_mode: bool,
     /// Set while a `d`/`D` deletion is waiting for confirmation.
     pub delete_confirm: Option<HistoryDelete>,
+    /// Whether the per-entry detail view is open (Enter on an entry).
+    pub detail: bool,
 }
 
 impl CallHistoryState {
@@ -254,6 +263,8 @@ pub struct App {
     pub switch_confirm: bool,
     /// Whether the Help modal is open.
     pub help_show: bool,
+    /// Whether the call-details overlay is open.
+    pub details_show: bool,
     /// Which button is highlighted in the active confirm popup (`true` = the
     /// destructive action). Reset to `false` (safe) each time a popup opens.
     pub confirm_yes: bool,
@@ -268,6 +279,10 @@ pub struct App {
     /// templates (e.g. containing `$uuid`) are re-rendered per call by
     /// [`Self::dial`].
     pub custom_headers: Vec<(String, HeaderTemplate)>,
+    /// The custom headers rendered for the pending outbound call, captured in
+    /// [`Self::dial`] and consumed when the CallOutgoing event arrives so the
+    /// call-details view can show what was actually sent.
+    pub pending_outbound_headers: Vec<(String, String)>,
     pub deflected: Option<DeflectedInfo>,
 }
 
@@ -302,6 +317,7 @@ impl App {
             quit_confirm: false,
             switch_confirm: false,
             help_show: false,
+            details_show: false,
             confirm_yes: false,
             switch_to: false,
             dial: DialState {
@@ -327,6 +343,7 @@ impl App {
                 search_query: String::new(),
                 search_mode: false,
                 delete_confirm: None,
+                detail: false,
             },
             log: LogState {
                 path: log_path,
@@ -369,6 +386,7 @@ impl App {
                 },
             },
             custom_headers,
+            pending_outbound_headers: Vec::new(),
             deflected: None,
         }
     }
@@ -383,7 +401,8 @@ impl App {
         if target.is_empty() {
             return;
         }
-        self.refresh_dynamic_headers();
+        let ctx = HeaderContext::for_call();
+        self.pending_outbound_headers = self.refresh_dynamic_headers(&ctx);
         // Auto-hold the current call before placing another (profile `auto_hold`,
         // on by default). ringo doesn't load baresip's menu module, so nothing
         // holds it automatically; without this the first party stays connected in
@@ -403,10 +422,9 @@ impl App {
         self.phone.dial(&target);
     }
 
-    fn refresh_dynamic_headers(&self) {
+    fn refresh_dynamic_headers(&self, ctx: &HeaderContext) -> Vec<(String, String)> {
         use std::collections::HashSet;
 
-        let ctx = HeaderContext::for_call();
         // `uarmheader` removes *all* headers with a given name, so once any
         // template for a key is dynamic we must re-add every header for that
         // key — including static ones (e.g. duplicate History-Info entries) —
@@ -423,9 +441,14 @@ impl App {
         }
         for (key, tpl) in &self.custom_headers {
             if dynamic_keys.contains(key.as_str()) {
-                self.phone.add_header(key, &tpl.render(&ctx));
+                self.phone.add_header(key, &tpl.render(ctx));
             }
         }
+        // The full rendered header set sent on this call, for the details view.
+        self.custom_headers
+            .iter()
+            .map(|(key, tpl)| (key.clone(), tpl.render(ctx)))
+            .collect()
     }
 
     pub fn notify(&self, summary: &str, body: &str) {
@@ -443,6 +466,7 @@ impl App {
         self.log.search_mode = false;
         self.log.search_query.clear();
         self.help_show = false;
+        self.details_show = false;
         self.call_history.show = false;
         self.call_history.delete_confirm = None;
         self.contacts_state.show = false;
@@ -516,6 +540,7 @@ mod tests {
         holds: Arc<std::sync::atomic::AtomicUsize>,
         selects: Arc<std::sync::atomic::AtomicUsize>,
         hangups: Arc<std::sync::atomic::AtomicUsize>,
+        inbound: Vec<(String, String)>,
     }
     impl Phone for RecordingPhone {
         fn register(&self, _: &str, _: u32) {}
@@ -544,6 +569,9 @@ mod tests {
         fn attended_transfer_start(&self, _: &str) {}
         fn attended_transfer_exec(&self) {}
         fn attended_transfer_abort(&self) {}
+        fn inbound_headers(&self, _: &str) -> Vec<(String, String)> {
+            self.inbound.clone()
+        }
         fn add_header(&self, key: &str, value: &str) {
             self.log.lock().unwrap().push(format!("add {key}={value}"));
         }
@@ -586,7 +614,7 @@ mod tests {
             phone.clone(),
         );
 
-        app.refresh_dynamic_headers();
+        app.refresh_dynamic_headers(&HeaderContext::for_call());
 
         let log = phone.log.lock().unwrap().clone();
         assert_eq!(
@@ -608,7 +636,7 @@ mod tests {
         let phone = RecordingPhone::default();
         let app = app_with_headers(vec![("X-Static", "keep-me")], phone.clone());
 
-        app.refresh_dynamic_headers();
+        app.refresh_dynamic_headers(&HeaderContext::for_call());
 
         assert!(phone.log.lock().unwrap().is_empty());
     }
@@ -621,6 +649,7 @@ mod tests {
             peer_display_name: None,
             state,
             started_at: Some(Instant::now()),
+            header_views: Vec::new(),
         }
     }
 
@@ -982,5 +1011,73 @@ mod tests {
         assert_eq!(app.calls[0].state, CallState::Established, "not held");
         assert_eq!(app.selected_call, 1);
         assert_eq!(holds.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn incoming_call_renders_configured_header_views() {
+        let phone = RecordingPhone {
+            inbound: vec![("X-Call-Sid".into(), "abc123".into())],
+            ..Default::default()
+        };
+        let mut app = app_with_headers(Vec::new(), phone);
+        app.profile.header_display = vec![
+            ("Debug".into(), "http://dbg/${X-Call-Sid}".into()),
+            // References a header absent on this call → skipped.
+            ("Ticket".into(), "id=${X-Missing}".into()),
+        ];
+
+        app.handle_call_incoming("c1".into(), "sip:a@b".into(), None);
+
+        let call = app.calls.iter().find(|c| c.id == "c1").unwrap();
+        assert_eq!(
+            call.header_views,
+            vec![("Debug".to_string(), "http://dbg/abc123".to_string())]
+        );
+    }
+
+    #[test]
+    fn call_history_entry_without_headers_defaults_empty() {
+        let json =
+            r#"{"ts":"t","dir":"incoming","peer":"p","duration":"missed","duration_secs":0}"#;
+        let e: CallHistoryEntry = serde_json::from_str(json).unwrap();
+        assert!(e.headers.is_empty());
+    }
+
+    #[test]
+    fn outgoing_call_renders_views_from_sent_headers() {
+        let mut app = app_with_headers(vec![("X-Call-Sid", "sid-42")], RecordingPhone::default());
+        app.profile.header_display = vec![("Debug".into(), "http://dbg/${X-Call-Sid}".into())];
+
+        // dial() captures the rendered outbound headers; the event attaches views.
+        app.dial("123");
+        app.handle_call_outgoing("c9".into(), "sip:x@y".into());
+
+        let call = app.calls.iter().find(|c| c.id == "c9").unwrap();
+        assert_eq!(
+            call.header_views,
+            vec![("Debug".to_string(), "http://dbg/sid-42".to_string())]
+        );
+    }
+
+    #[test]
+    fn info_command_opens_details_when_in_call() {
+        let mut app = app_with_headers(Vec::new(), RecordingPhone::default());
+        app.calls.push(mk_call(
+            "A",
+            CallDirection::Incoming,
+            CallState::Established,
+        ));
+        app.command.input = "info".into();
+        app.execute_command();
+        assert!(app.details_show);
+    }
+
+    #[test]
+    fn info_command_errors_without_call() {
+        let mut app = app_with_headers(Vec::new(), RecordingPhone::default());
+        app.command.input = "info".into();
+        app.execute_command();
+        assert!(!app.details_show);
+        assert!(app.command.error.is_some());
     }
 }

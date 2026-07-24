@@ -1,10 +1,10 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
 use super::app::{Call, CallDirection, CallHistoryEntry};
@@ -56,6 +56,7 @@ impl super::app::App {
             peer: call.peer.clone(),
             duration,
             duration_secs,
+            headers: call.header_views.clone(),
         };
         if let Ok(mut line) = serde_json::to_string(&entry) {
             line.push('\n');
@@ -85,6 +86,7 @@ impl super::app::App {
         self.call_history.search_mode = false;
         self.call_history.selected = 0;
         self.call_history.delete_confirm = None;
+        self.call_history.detail = false;
     }
 
     pub(super) fn clear_call_history(&mut self) {
@@ -99,6 +101,17 @@ impl super::app::App {
 
     pub(super) fn handle_call_history_key(&mut self, key: crossterm::event::KeyEvent) {
         use super::app::HistoryDelete;
+
+        // Detail view — Esc / i / q close it.
+        if self.call_history.detail {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('i') | KeyCode::Char('q')
+            ) {
+                self.call_history.detail = false;
+            }
+            return;
+        }
 
         // Delete confirmation captures all input until y (confirm) or anything
         // else (cancel).
@@ -232,6 +245,13 @@ impl super::app::App {
                 self.call_history.delete_confirm = Some(HistoryDelete::All);
                 self.confirm_yes = false;
             }
+            // i → show details (peer + captured headers) for the selected entry
+            KeyCode::Char('i')
+                if key.modifiers == KeyModifiers::NONE
+                    && indices.get(self.call_history.selected).is_some() =>
+            {
+                self.call_history.detail = true;
+            }
             _ => {}
         }
     }
@@ -263,6 +283,11 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     let indices = app.call_history.filtered_indices(&app.contacts);
     let total = app.call_history.entries.len();
     let filtered_len = indices.len();
+
+    if app.call_history.detail {
+        render_history_detail(f, app, area, &indices);
+        return;
+    }
 
     let sel = if filtered_len > 0 {
         app.call_history.selected.min(filtered_len - 1)
@@ -315,6 +340,7 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
         ("↑↓", "nav"),
         ("PgUp/PgDn", "page"),
         ("Enter", "redial"),
+        ("i", "details"),
         ("/", "search"),
         ("d", "del"),
         ("D", "clear"),
@@ -413,6 +439,59 @@ fn call_history_item<'a>(
     }
 }
 
+/// Per-entry detail overlay: call metadata + the captured inbound-header views.
+fn render_history_detail(f: &mut Frame, app: &super::app::App, area: Rect, indices: &[usize]) {
+    let accent = Style::default().fg(app.theme.accent.get());
+    let subtle = Style::default().fg(app.theme.subtle.get());
+    let sel = app
+        .call_history
+        .selected
+        .min(indices.len().saturating_sub(1));
+    let entry = indices
+        .get(sel)
+        .and_then(|&i| app.call_history.entries.get(i));
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Call details ")
+        .title_alignment(Alignment::Center)
+        .border_style(subtle);
+    let inner = block.inner(area);
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+
+    let mut lines = Vec::new();
+    if let Some(e) = entry {
+        let field = |k: &str, v: &str| {
+            Line::from(vec![
+                Span::styled(format!("  {k:<10}"), subtle),
+                Span::styled(v.to_string(), Style::default()),
+            ])
+        };
+        lines.push(field("When", &e.ts));
+        lines.push(field("Direction", &e.dir));
+        lines.push(field("Peer", &e.peer));
+        lines.push(field("Duration", &e.duration));
+        lines.push(Line::from(""));
+        if e.headers.is_empty() {
+            lines.push(Line::from(Span::styled("  No headers captured.", subtle)));
+        } else {
+            for (label, value) in &e.headers {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {label}  "), accent),
+                    Span::styled(value.clone(), Style::default()),
+                ]));
+            }
+        }
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("  Esc / i  back", subtle)));
+    } else {
+        lines.push(Line::from(Span::styled("  No entry.", subtle)));
+    }
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::app::{CallHistoryEntry, CallHistoryState};
@@ -426,6 +505,7 @@ mod tests {
                 peer: p.to_string(),
                 duration: "00:01:00".into(),
                 duration_secs: 60,
+                headers: Vec::new(),
             })
             .collect();
         CallHistoryState {
@@ -436,6 +516,7 @@ mod tests {
             search_query: query.to_string(),
             search_mode: false,
             delete_confirm: None,
+            detail: false,
         }
     }
 
