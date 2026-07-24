@@ -47,6 +47,14 @@ pub trait Phone: Send {
         String::new()
     }
 
+    /// All SIP headers received on the INVITE of the call with `call_id`, in
+    /// order, consuming them from the store. Empty if none / unknown call.
+    /// Default: empty (mocks).
+    fn inbound_headers(&self, call_id: &str) -> Vec<(String, String)> {
+        let _ = call_id;
+        Vec::new()
+    }
+
     /// Arm a custom SIP response for the next inbound INVITE(s): answer with
     /// `scode`/`reason` and the extra `headers` (each a full header line like
     /// `Contact: <sip:…>`, no trailing CRLF) instead of accepting the call.
