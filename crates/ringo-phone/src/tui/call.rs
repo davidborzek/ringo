@@ -149,20 +149,21 @@ impl super::app::App {
             self.transfer_mode = super::app::TransferMode::None;
         }
         // Auto-resume: closing the active (non-held) call promotes the call that
-        // becomes baresip's new current (tail) call. If that call is on hold,
-        // resume it — ringo doesn't load baresip's `menu` module, so nothing does
-        // this automatically. Works for any call count: the selected_call fixup
-        // above already points at the new current call, and `resume()` targets
-        // the UA tail (the closed call is mem_deref'd before this runs). When the
-        // closed call was itself on hold, the active call keeps the selection and
-        // isn't on hold, so nothing is resumed. Skipped for a completed transfer,
-        // whose other leg is being torn down too.
+        // becomes the new current one. If it's on hold, resume it — ringo doesn't
+        // load baresip's `menu` module, so nothing does this automatically. The
+        // selected_call fixup above already points at the new current call; we
+        // make it baresip's current (by id) and resume it. Works for any call
+        // count. When the closed call was itself on hold, the active call keeps
+        // the selection and isn't on hold, so nothing is resumed. Skipped for a
+        // completed transfer, whose other leg is being torn down too.
         if !completed_transfer
             && self
                 .calls
                 .get(self.selected_call)
                 .is_some_and(|c| c.state == CallState::OnHold)
         {
+            let id = self.calls[self.selected_call].id.clone();
+            self.phone.select_call(&id);
             self.phone.resume();
             self.calls[self.selected_call].state = CallState::Established;
             // stale: re-polled for the newly-active call next tick
@@ -220,40 +221,51 @@ impl super::app::App {
         self.dial.dtmf.push(digit);
     }
 
-    /// Switch to the next call line, automatically holding the current and resuming the next.
+    /// Switch to the next call line. With `auto_hold` on (default) the current
+    /// call is held and the next resumed; with it off, switching only changes
+    /// focus and leaves both calls as they are.
     pub(super) fn switch_line(&mut self) {
         if self.calls.len() < 2 {
             return;
         }
         let cur = self.selected_call;
-        if self
-            .calls
-            .get(cur)
-            .map(|c| c.state == CallState::Established)
-            .unwrap_or(false)
+        // Hold the current call — make it baresip's current first, then hold()
+        // targets it.
+        if self.profile.auto_hold
+            && self
+                .calls
+                .get(cur)
+                .is_some_and(|c| c.state == CallState::Established)
         {
+            let id = self.calls[cur].id.clone();
+            self.phone.select_call(&id);
             self.phone.hold();
-            if let Some(c) = self.calls.get_mut(cur) {
-                c.state = CallState::OnHold;
-            }
+            self.calls[cur].state = CallState::OnHold;
         }
         let next = (cur + 1) % self.calls.len();
         self.selected_call = next;
         // stale: re-polled for the newly-active call next tick
         self.media = None;
         self.codec = None;
-        self.phone.switch_line(next + 1);
-        if self
-            .calls
-            .get(next)
-            .map(|c| c.state == CallState::OnHold)
-            .unwrap_or(false)
-        {
+        // Select the next call by its SIP call-id — robust to baresip reusing
+        // line numbers after a call is removed (the old index+1 mapping wasn't).
+        let next_id = self.calls[next].id.clone();
+        self.phone.select_call(&next_id);
+        if self.profile.auto_hold && self.calls[next].state == CallState::OnHold {
             self.phone.resume();
-            if let Some(c) = self.calls.get_mut(next) {
-                c.state = CallState::Established;
-            }
+            self.calls[next].state = CallState::Established;
         }
+    }
+
+    /// Hang up the selected call (not necessarily baresip's current call) by
+    /// making it current first, then hanging up. Falls back to the current call
+    /// if the selection is somehow out of range.
+    pub(super) fn hangup_selected(&mut self) {
+        if let Some(c) = self.calls.get(self.selected_call) {
+            let id = c.id.clone();
+            self.phone.select_call(&id);
+        }
+        self.phone.hangup();
     }
 }
 
