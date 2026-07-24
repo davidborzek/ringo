@@ -1058,4 +1058,26 @@ mod tests {
             vec![("Debug".to_string(), "http://dbg/sid-42".to_string())]
         );
     }
+
+    #[test]
+    fn info_command_opens_details_when_in_call() {
+        let mut app = app_with_headers(Vec::new(), RecordingPhone::default());
+        app.calls.push(mk_call(
+            "A",
+            CallDirection::Incoming,
+            CallState::Established,
+        ));
+        app.command.input = "info".into();
+        app.execute_command();
+        assert!(app.details_show);
+    }
+
+    #[test]
+    fn info_command_errors_without_call() {
+        let mut app = app_with_headers(Vec::new(), RecordingPhone::default());
+        app.command.input = "info".into();
+        app.execute_command();
+        assert!(!app.details_show);
+        assert!(app.command.error.is_some());
+    }
 }

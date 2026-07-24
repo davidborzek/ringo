@@ -341,7 +341,7 @@ fn render_help(f: &mut Frame, app: &App) {
             Style::default(),
         )),
         Line::from(Span::styled(
-            "  dtmf <digits>  transfer <uri>  log  history",
+            "  dtmf <digits>  transfer <uri>  info  log  history",
             Style::default(),
         )),
         Line::from(Span::styled(

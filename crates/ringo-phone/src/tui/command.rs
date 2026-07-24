@@ -3,8 +3,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use super::app::App;
 
 pub const COMMANDS: &[&str] = &[
-    "accept", "contacts", "dial", "dtmf", "edit", "hangup", "help", "history", "hold", "log",
-    "mute", "quit", "resume", "switch", "transfer", "xfer",
+    "accept", "contacts", "dial", "dtmf", "edit", "hangup", "help", "history", "hold", "info",
+    "log", "mute", "quit", "resume", "switch", "transfer", "xfer",
 ];
 
 impl App {
@@ -58,6 +58,15 @@ impl App {
                 let open = !self.help_show;
                 self.close_overlays();
                 self.help_show = open;
+            }
+            "info" | "i" => {
+                if self.has_any_call() {
+                    let open = !self.details_show;
+                    self.close_overlays();
+                    self.details_show = open;
+                } else {
+                    self.command.error = Some("No active call".into());
+                }
             }
             "edit" => {
                 if !self.has_any_call() {
