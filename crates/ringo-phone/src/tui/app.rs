@@ -375,7 +375,7 @@ impl App {
 
     /// Place an outbound call, re-rendering dynamic custom headers so each
     /// call gets fresh placeholder values. The target is sanitized so
-    /// human-formatted numbers (e.g. `0211-63554610`) dial correctly.
+    /// human-formatted numbers (e.g. `0123-4567890`) dial correctly.
     pub fn dial(&mut self, target: &str) {
         self.refresh_dynamic_headers();
         // Auto-hold the current call before placing another. ringo doesn't load
@@ -682,7 +682,7 @@ mod tests {
         ));
         app.selected_call = 0;
 
-        app.dial("021163554610");
+        app.dial("01234567890");
 
         assert_eq!(
             app.calls[0].state,

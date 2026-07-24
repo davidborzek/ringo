@@ -321,7 +321,7 @@ impl App {
 /// Strip human-readable phone-number formatting from a dial target.
 ///
 /// German-style numbers are commonly written with separators, e.g.
-/// `0211-63554610` or `(0211) 6355 4610`. Those separators are not valid in the
+/// `0123-4567890` or `(0123) 4567 890`. Those separators are not valid in the
 /// user part of a SIP request-URI, so a PBX can't route them. When the target
 /// is a plain phone number — digits (optionally `+`/`*`/`#`) plus separators,
 /// no letters, not already a SIP URI — the separators are removed. A SIP
@@ -366,15 +366,15 @@ mod tests {
 
     #[test]
     fn strips_separators_from_phone_numbers() {
-        assert_eq!(sanitize_dial_target("0211-63554610"), "021163554610");
-        assert_eq!(sanitize_dial_target("(0211) 6355 4610"), "021163554610");
-        assert_eq!(sanitize_dial_target("0211.6355.4610"), "021163554610");
-        assert_eq!(sanitize_dial_target("  0211-6355  "), "02116355");
+        assert_eq!(sanitize_dial_target("0123-4567890"), "01234567890");
+        assert_eq!(sanitize_dial_target("(0123) 4567 890"), "01234567890");
+        assert_eq!(sanitize_dial_target("0123.4567.890"), "01234567890");
+        assert_eq!(sanitize_dial_target("  0123-4567  "), "01234567");
     }
 
     #[test]
     fn keeps_dialable_symbols() {
-        assert_eq!(sanitize_dial_target("+49 211 6355"), "+492116355");
+        assert_eq!(sanitize_dial_target("+49 123 4567"), "+491234567");
         assert_eq!(sanitize_dial_target("*100#"), "*100#");
         assert_eq!(sanitize_dial_target("100"), "100");
     }
@@ -386,16 +386,16 @@ mod tests {
         assert_eq!(sanitize_dial_target("alice-bob"), "alice-bob");
         assert_eq!(sanitize_dial_target("user@host"), "user@host");
         assert_eq!(
-            sanitize_dial_target("sip:0211-63554610@pbx"),
-            "sip:0211-63554610@pbx"
+            sanitize_dial_target("sip:0123-4567890@pbx"),
+            "sip:0123-4567890@pbx"
         );
     }
 
     #[test]
     fn normalize_strips_then_builds_uri() {
         assert_eq!(
-            normalize_sip_uri("0211-63554610", "me@pbx.example"),
-            "sip:021163554610@pbx.example"
+            normalize_sip_uri("0123-4567890", "me@pbx.example"),
+            "sip:01234567890@pbx.example"
         );
     }
 
@@ -409,6 +409,6 @@ mod tests {
 
     #[test]
     fn normalize_without_domain_returns_sanitized_input() {
-        assert_eq!(normalize_sip_uri("0211-6355", ""), "02116355");
+        assert_eq!(normalize_sip_uri("0123-4567", ""), "01234567");
     }
 }
