@@ -267,6 +267,39 @@ impl super::app::App {
         }
         self.phone.hangup();
     }
+
+    /// Answer the ringing incoming call. When another call is active it is held
+    /// first (respecting the `auto_hold` profile setting) so answering the second
+    /// call doesn't leave both connected. `accept()`/`hold()` act on the UA's
+    /// current (tail) call, so each target is made current by id in turn.
+    pub(super) fn accept_incoming(&mut self) {
+        let Some(incoming) = self
+            .calls
+            .iter()
+            .position(|c| c.direction == CallDirection::Incoming && c.state == CallState::Ringing)
+        else {
+            return;
+        };
+        if self.profile.auto_hold {
+            if let Some(active) = self
+                .calls
+                .iter()
+                .position(|c| c.state == CallState::Established)
+            {
+                let id = self.calls[active].id.clone();
+                self.phone.select_call(&id);
+                self.phone.hold();
+                self.calls[active].state = CallState::OnHold;
+            }
+        }
+        let incoming_id = self.calls[incoming].id.clone();
+        self.phone.select_call(&incoming_id);
+        self.phone.accept();
+        self.selected_call = incoming;
+        // stale: re-polled for the newly-active call next tick
+        self.media = None;
+        self.codec = None;
+    }
 }
 
 pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {

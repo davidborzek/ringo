@@ -105,7 +105,7 @@ impl App {
             }
             "a" | "accept" => {
                 if self.has_incoming_ringing() {
-                    self.phone.accept();
+                    self.accept_incoming();
                     Ok("Accepted".into())
                 } else {
                     Err("No incoming call".into())
