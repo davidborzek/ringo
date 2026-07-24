@@ -1653,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-agent"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "anyhow",
  "libc",
@@ -1665,7 +1665,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-core"
-version = "0.13.1"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "bindgen",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-flow"
-version = "0.12.1"
+version = "0.12.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -1704,7 +1704,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-phone"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "cargo-husky",
