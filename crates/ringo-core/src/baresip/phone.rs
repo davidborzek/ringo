@@ -177,6 +177,26 @@ impl Phone for BaresipPhone {
         });
     }
 
+    fn select_call(&self, call_id: &str) {
+        let ua = self.ua;
+        let id = call_id.to_string();
+        on_re_thread(move || unsafe {
+            let calls = ua_calls(ua as *mut Ua);
+            if calls.is_null() {
+                return;
+            }
+            let mut le = (*calls).head;
+            while !le.is_null() {
+                let call = (*le).data as *mut Call;
+                if !call.is_null() && super::events::call_id_str(call) == id {
+                    call_set_current(calls as *mut List, call);
+                    return;
+                }
+                le = (*le).next;
+            }
+        });
+    }
+
     fn transfer(&self, uri: &str) {
         let ua = self.ua;
         let uri_c = match CString::new(uri) {
