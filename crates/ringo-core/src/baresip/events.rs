@@ -91,6 +91,16 @@ pub(crate) fn clear_dtmf(ua: usize) {
         .remove(&ua);
 }
 
+/// Take (read + remove) the stored INVITE headers for `(ua, call_id)`.
+/// Empty if none were captured (e.g. no such call).
+pub(crate) fn inbound_headers(ua: usize, call_id: &str) -> Vec<(String, String)> {
+    inbound_headers_store()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&(ua, call_id.to_string()))
+        .unwrap_or_default()
+}
+
 /// Answer an inbound INVITE `msg` directly with `scode`/`reason` + extra
 /// `headers`, the way baresip rejects pre-call INVITEs (`sip_treplyf`,
 /// fire-and-forget — `stp`/`mbp` NULL, no transaction to free). Must run on the
