@@ -25,6 +25,11 @@ pub struct Profile {
     pub notify: bool,
     #[serde(default = "default_true")]
     pub mwi: bool,
+    /// Automatically put the current call on hold when placing another call or
+    /// switching lines (like baresip `call_hold_other_calls`). Default on; set
+    /// to `false` to keep multiple calls active in parallel.
+    #[serde(default = "default_true")]
+    pub auto_hold: bool,
     /// Register as a baresip `catchall` UA so incoming INVITEs to identities
     /// other than the registration username are accepted instead of rejected
     /// with `404 (UA not found)`. On by default; ringo-phone runs a single UA.
@@ -63,6 +68,7 @@ impl Default for Profile {
             custom_headers: Vec::new(),
             notify: false,
             mwi: false,
+            auto_hold: true,
             catchall: true,
             deflect: false,
             deflect_target: None,
@@ -294,6 +300,12 @@ mod tests {
         "#,
         );
         assert_eq!(p.custom_headers, vec![("X-Foo".into(), "bar".into())]);
+    }
+
+    #[test]
+    fn auto_hold_defaults_to_true_when_missing() {
+        // Profiles written before the setting existed must default to on.
+        assert!(parse("").auto_hold);
     }
 
     #[test]

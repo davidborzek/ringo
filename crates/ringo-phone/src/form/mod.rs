@@ -23,7 +23,10 @@ pub use popups::{run_confirm, run_rename, run_restart_confirm};
 
 type Term = Terminal<CrosstermBackend<crate::tui::TermWriter>>;
 
-const LABEL_W: u16 = 15;
+/// Lower bound for the (responsive) label column, and the value column's
+/// minimum so a long label can't crowd values off the row.
+const MIN_LABEL_W: u16 = 6;
+const MIN_VALUE_W: u16 = 12;
 const SEP_W: u16 = 2;
 
 // ─── FormState ───────────────────────────────────────────────────────────────
@@ -207,6 +210,7 @@ impl FormState {
             audio_codecs: self.audio_codecs.clone(),
             notify: get_toggle(self.field(Notify)),
             mwi: get_toggle(self.field(Mwi)),
+            auto_hold: get_toggle(self.field(AutoHold)),
             catchall: prev_profile.catchall,
             deflect: get_toggle(self.field(Deflect)),
             deflect_target: opt(get_text(self.field(DeflectTarget))),
@@ -360,8 +364,9 @@ impl FormState {
         let field_focus = self.focused.min(indices.len().saturating_sub(1));
         let scroll = (field_focus + 1).saturating_sub(visible);
 
-        let value_x = area.x + LABEL_W + SEP_W;
-        let value_w = area.width.saturating_sub(LABEL_W + SEP_W) as usize;
+        let label_w = self.label_width(area.width);
+        let value_x = area.x + label_w + SEP_W;
+        let value_w = area.width.saturating_sub(label_w + SEP_W) as usize;
         let mut cursor_pos = None;
 
         for (pos, &fi) in indices.iter().enumerate() {
@@ -386,10 +391,10 @@ impl FormState {
             } else {
                 field.label.to_string()
             };
-            let label_text = format!("{:>width$}  ", labeled, width = LABEL_W as usize);
+            let label_text = format!("{:>width$}  ", labeled, width = label_w as usize);
             frame.render_widget(
                 Paragraph::new(label_text.as_str()).style(label_style),
-                Rect::new(area.x, y, LABEL_W + SEP_W, 1),
+                Rect::new(area.x, y, label_w + SEP_W, 1),
             );
 
             let value_area = Rect::new(value_x, y, value_w as u16, 1);
@@ -398,6 +403,20 @@ impl FormState {
             }
         }
         cursor_pos
+    }
+
+    /// Width of the label column: the widest field label (plus the "* " required
+    /// marker) so labels are never truncated, clamped to always leave at least
+    /// [`MIN_VALUE_W`] for values and never below [`MIN_LABEL_W`].
+    fn label_width(&self, avail: u16) -> u16 {
+        let widest = self
+            .fields
+            .iter()
+            .map(|f| f.label.chars().count() + if f.required { 2 } else { 0 })
+            .max()
+            .unwrap_or(0) as u16;
+        let max_label = avail.saturating_sub(SEP_W + MIN_VALUE_W).max(MIN_LABEL_W);
+        widest.clamp(MIN_LABEL_W, max_label)
     }
 
     fn render_buttons(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
@@ -600,6 +619,11 @@ fn build_fields(profile: &Profile, include_name: bool) -> Vec<Field> {
             .group(Tab::Features)
             .desc("Subscribe to message-waiting (voicemail) indication."),
     );
+    f.push(
+        Field::toggle(AutoHold, "Auto-hold", profile.auto_hold)
+            .group(Tab::Features)
+            .desc("Hold the current call when placing another or switching lines."),
+    );
 
     // ── Forwarding ───────────────────────────────────────────────────────────
     f.push(
@@ -723,4 +747,33 @@ fn open_editor(terminal: &mut Term, path: &Path) -> Result<()> {
     status
         .map(|_| ())
         .map_err(|e| anyhow::anyhow!("Failed to open editor '{}': {}", editor, e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn widest(form: &FormState) -> u16 {
+        form.fields
+            .iter()
+            .map(|f| f.label.chars().count() + if f.required { 2 } else { 0 })
+            .max()
+            .unwrap() as u16
+    }
+
+    #[test]
+    fn label_width_fits_widest_label_on_wide_terminals() {
+        let form = FormState::new(&crate::profile::Profile::default(), true);
+        // Plenty of width → column exactly fits the widest label, no truncation.
+        assert_eq!(form.label_width(200), widest(&form));
+    }
+
+    #[test]
+    fn label_width_clamps_to_leave_room_for_values() {
+        let form = FormState::new(&crate::profile::Profile::default(), true);
+        let avail = 24u16;
+        let w = form.label_width(avail);
+        assert!(w >= MIN_LABEL_W);
+        assert!(w <= avail.saturating_sub(SEP_W + MIN_VALUE_W).max(MIN_LABEL_W));
+    }
 }
