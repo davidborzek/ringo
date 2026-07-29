@@ -7,7 +7,16 @@ pub struct Profile {
     pub display_name: Option<String>,
     pub username: String,
     pub auth_user: Option<String>,
+    #[serde(default)]
     pub password: String,
+    /// Read the SIP password from this file instead of `password` (a single
+    /// trailing newline is stripped). Overrides `password`.
+    #[serde(default)]
+    pub password_file: Option<String>,
+    /// Run this command (via `sh -c`); its stdout is the SIP password (a single
+    /// trailing newline is stripped). Overrides `password_file` and `password`.
+    #[serde(default)]
+    pub password_cmd: Option<String>,
     pub domain: String,
     pub transport: Option<String>,
     pub outbound: Option<String>,
@@ -63,6 +72,8 @@ impl Default for Profile {
             username: String::new(),
             auth_user: None,
             password: String::new(),
+            password_file: None,
+            password_cmd: None,
             domain: String::new(),
             transport: None,
             outbound: None,
@@ -130,6 +141,61 @@ impl Profile {
     pub fn aor(&self) -> String {
         format!("sip:{}@{}", self.username, self.domain)
     }
+
+    /// Resolve the effective SIP password.
+    ///
+    /// Precedence: `password_cmd` (its stdout), then `password_file` (its
+    /// contents), then the inline `password`. A single trailing newline (CRLF
+    /// or LF) from a file or command is stripped; other characters are
+    /// preserved. The command runs via `sh -c`.
+    pub fn resolve_password(&self) -> Result<String> {
+        if let Some(cmd) = self
+            .password_cmd
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let out = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(cmd)
+                .output()
+                .with_context(|| format!("running password_cmd `{cmd}`"))?;
+            if !out.status.success() {
+                anyhow::bail!("password_cmd `{cmd}` failed with {}", out.status);
+            }
+            return Ok(strip_one_newline(&String::from_utf8_lossy(&out.stdout)));
+        }
+        if let Some(file) = self
+            .password_file
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let path = expand_tilde(file);
+            let raw = fs::read_to_string(&path)
+                .with_context(|| format!("reading password_file `{}`", path.display()))?;
+            return Ok(strip_one_newline(&raw));
+        }
+        Ok(self.password.clone())
+    }
+}
+
+/// Strip a single trailing newline (`\n` or `\r\n`), leaving other content
+/// untouched — secret files and command output usually end in exactly one.
+fn strip_one_newline(s: &str) -> String {
+    let s = s.strip_suffix('\n').unwrap_or(s);
+    let s = s.strip_suffix('\r').unwrap_or(s);
+    s.to_string()
+}
+
+/// Expand a leading `~/` to `$HOME`; other paths are returned unchanged.
+fn expand_tilde(p: &str) -> PathBuf {
+    if let Some(rest) = p.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(p)
 }
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
@@ -377,5 +443,44 @@ mod tests {
         );
         let reloaded: Profile = toml::from_str(&serialized).expect("re-parse");
         assert_eq!(reloaded.custom_headers, original.custom_headers);
+    }
+
+    #[test]
+    fn resolve_password_uses_inline_by_default() {
+        // BASE sets password = "p".
+        assert_eq!(parse("").resolve_password().unwrap(), "p");
+    }
+
+    #[test]
+    fn resolve_password_file_overrides_inline_and_strips_newline() {
+        let path = std::env::temp_dir().join(format!("ringo-pw-file-{}", std::process::id()));
+        fs::write(&path, "filesecret\n").unwrap();
+        let p = parse(&format!("password_file = '{}'", path.display()));
+        assert_eq!(p.resolve_password().unwrap(), "filesecret");
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn resolve_password_cmd_takes_precedence_over_file_and_inline() {
+        let p = parse("password_cmd = \"printf cmdsecret\"\npassword_file = '/does/not/exist'");
+        assert_eq!(p.resolve_password().unwrap(), "cmdsecret");
+    }
+
+    #[test]
+    fn resolve_password_cmd_failure_is_an_error() {
+        assert!(
+            parse("password_cmd = \"exit 3\"")
+                .resolve_password()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn resolve_password_missing_file_is_an_error() {
+        assert!(
+            parse("password_file = '/does/not/exist'")
+                .resolve_password()
+                .is_err()
+        );
     }
 }

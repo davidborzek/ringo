@@ -17,6 +17,22 @@ notify       = true                    # desktop notifications (default: true)
 mwi          = true                    # message-waiting indicator (default: true)
 ```
 
+## Password from a file or command
+
+Instead of the inline `password`, ringo can resolve it at launch — handy for
+secret managers and for keeping the password out of the profile file:
+
+```toml
+password_file = "~/.secrets/sip"     # read the password from this file
+# or:
+password_cmd  = "pass show sip/work" # run a command; its stdout is the password
+```
+
+Precedence is `password_cmd` > `password_file` > `password`. A single trailing
+newline is stripped, and a leading `~/` in `password_file` expands to your home
+directory. The command runs via `sh -c`; a non-zero exit or an unreadable file
+fails the launch. Both fields are also editable in the profile form.
+
 ## Custom SIP headers
 
 Add headers to every outgoing INVITE. Order is preserved and duplicate keys are
