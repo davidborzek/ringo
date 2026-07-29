@@ -82,6 +82,8 @@ impl TextField {
 
 pub(crate) const TRANSPORTS: &[&str] = &["default", "udp", "tcp", "tls"];
 pub(crate) const ENCRYPTIONS: &[&str] = &["none", "dtls_srtp", "srtp", "srtp-mand", "zrtp"];
+/// Where the SIP password comes from; indices match `extract()` routing.
+pub(crate) const PASSWORD_SOURCES: &[&str] = &["Inline", "File", "Command"];
 
 pub(crate) enum FieldKind {
     Text {
@@ -136,7 +138,10 @@ pub(crate) enum FieldId {
     ProfileName,
     DisplayName,
     Username,
+    PasswordSource,
     Password,
+    PasswordFile,
+    PasswordCmd,
     Domain,
     Transport,
     AuthUser,

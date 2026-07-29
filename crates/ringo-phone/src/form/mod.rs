@@ -67,12 +67,33 @@ impl FormState {
         }
     }
 
+    /// The selected password source (index into `PASSWORD_SOURCES`).
+    fn password_source(&self) -> usize {
+        get_select(self.field(FieldId::PasswordSource))
+    }
+
+    /// Only the value field matching the selected password source is shown; the
+    /// other two stay in `self.fields` (values preserved) but are hidden, so the
+    /// Account tab always shows exactly one password value row.
+    fn password_field_visible(id: FieldId, source: usize) -> bool {
+        use FieldId::*;
+        match id {
+            Password => source == 0,
+            PasswordFile => source == 1,
+            PasswordCmd => source == 2,
+            _ => true,
+        }
+    }
+
     /// Indices into `self.fields` for the fields on the active tab, in order.
     fn tab_indices(&self) -> Vec<usize> {
+        let source = self.password_source();
         self.fields
             .iter()
             .enumerate()
-            .filter(|(_, f)| f.group == self.active_tab)
+            .filter(|(_, f)| {
+                f.group == self.active_tab && Self::password_field_visible(f.id, source)
+            })
             .map(|(i, _)| i)
             .collect()
     }
@@ -203,11 +224,26 @@ impl FormState {
 
         let transport_idx = get_select(self.field(Transport));
         let enc_idx = get_select(self.field(Encryption));
+        let password_source = self.password_source();
 
         let profile = Profile {
             display_name: opt(get_text(self.field(DisplayName))),
             username: get_text(self.field(Username)),
-            password: get_text(self.field(Password)),
+            password: if password_source == 0 {
+                get_text(self.field(Password))
+            } else {
+                String::new()
+            },
+            password_file: if password_source == 1 {
+                opt(get_text(self.field(PasswordFile)))
+            } else {
+                None
+            },
+            password_cmd: if password_source == 2 {
+                opt(get_text(self.field(PasswordCmd)))
+            } else {
+                None
+            },
             domain: get_text(self.field(Domain)),
             transport: if transport_idx == 0 {
                 None
@@ -525,10 +561,57 @@ fn build_fields(profile: &Profile, include_name: bool) -> Vec<Field> {
             .group(Tab::Account)
             .desc("SIP user / phone number used to register."),
     );
+    let password_source = if profile
+        .password_cmd
+        .as_deref()
+        .is_some_and(|s| !s.is_empty())
+    {
+        2
+    } else if profile
+        .password_file
+        .as_deref()
+        .is_some_and(|s| !s.is_empty())
+    {
+        1
+    } else {
+        0
+    };
+    f.push(
+        Field::select(
+            PasswordSource,
+            "Password source",
+            PASSWORD_SOURCES,
+            password_source,
+        )
+        .group(Tab::Account)
+        .desc("Where the password comes from: typed inline, a file, or a command."),
+    );
     f.push(
         Field::text(Password, "Password", &profile.password, true, false)
             .group(Tab::Account)
-            .desc("Password for the SIP account."),
+            .desc("Password typed inline (stored in the profile file)."),
+    );
+    f.push(
+        Field::text(
+            PasswordFile,
+            "Password file",
+            profile.password_file.as_deref().unwrap_or(""),
+            false,
+            false,
+        )
+        .group(Tab::Account)
+        .desc("Read the password from this file; a leading ~/ is expanded."),
+    );
+    f.push(
+        Field::text(
+            PasswordCmd,
+            "Password command",
+            profile.password_cmd.as_deref().unwrap_or(""),
+            false,
+            false,
+        )
+        .group(Tab::Account)
+        .desc("Run this command (via sh -c); its stdout is the password."),
     );
     f.push(
         Field::text(Domain, "Domain", &profile.domain, false, true)
@@ -811,5 +894,47 @@ mod tests {
         let w = form.label_width(avail);
         assert!(w >= MIN_LABEL_W);
         assert!(w <= avail.saturating_sub(SEP_W + MIN_VALUE_W).max(MIN_LABEL_W));
+    }
+
+    #[test]
+    fn password_source_shows_only_the_matching_value_field() {
+        let p = crate::profile::Profile {
+            password_file: Some("/secret".into()),
+            ..Default::default()
+        };
+        let form = FormState::new(&p, true);
+        assert_eq!(form.password_source(), 1); // File
+        let ids: Vec<FieldId> = form
+            .tab_indices()
+            .iter()
+            .map(|&i| form.fields[i].id)
+            .collect();
+        assert!(ids.contains(&FieldId::PasswordFile));
+        assert!(!ids.contains(&FieldId::Password));
+        assert!(!ids.contains(&FieldId::PasswordCmd));
+    }
+
+    #[test]
+    fn extract_keeps_only_the_selected_password_source() {
+        // Inline source: only the inline password survives.
+        let inline = crate::profile::Profile {
+            password: "secret".into(),
+            ..Default::default()
+        };
+        let (_, out) = FormState::new(&inline, false).extract(&inline);
+        assert_eq!(out.password, "secret");
+        assert_eq!(out.password_file, None);
+        assert_eq!(out.password_cmd, None);
+
+        // File source: the inline password is dropped, the file path kept.
+        let file = crate::profile::Profile {
+            password: "secret".into(),
+            password_file: Some("/f".into()),
+            ..Default::default()
+        };
+        let (_, out) = FormState::new(&file, false).extract(&file);
+        assert_eq!(out.password_file.as_deref(), Some("/f"));
+        assert_eq!(out.password, "");
+        assert_eq!(out.password_cmd, None);
     }
 }
