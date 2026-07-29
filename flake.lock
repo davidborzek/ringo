@@ -1,0 +1,63 @@
+{
+  "nodes": {
+    "baresip": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1781677352,
+        "narHash": "sha256-eEDiv/yBKWVvKTAeelqVSAQp2xHhXRJVkK2x0FZ9tOE=",
+        "owner": "baresip",
+        "repo": "baresip",
+        "rev": "c06e3678cab6e7b5cfb504101cb82f862f2efb15",
+        "type": "github"
+      },
+      "original": {
+        "owner": "baresip",
+        "repo": "baresip",
+        "rev": "c06e3678cab6e7b5cfb504101cb82f862f2efb15",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1785090369,
+        "narHash": "sha256-m0pDuRJG7EDo9ri+4Ksu83VsI+PlxNC9lNBfydejce4=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "624af665418d3c65d544145b4d34ad696439570e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "re": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1781677338,
+        "narHash": "sha256-0g3L+2PYLjnc2MyFhPX6exy+84oohP24As34oMBzO9k=",
+        "owner": "baresip",
+        "repo": "re",
+        "rev": "e11a4c584bdb0cb30dde9d4f3e8a7a5717506855",
+        "type": "github"
+      },
+      "original": {
+        "owner": "baresip",
+        "repo": "re",
+        "rev": "e11a4c584bdb0cb30dde9d4f3e8a7a5717506855",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "baresip": "baresip",
+        "nixpkgs": "nixpkgs",
+        "re": "re"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

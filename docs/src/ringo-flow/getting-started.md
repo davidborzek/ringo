@@ -38,6 +38,15 @@ cargo install --git https://github.com/davidborzek/ringo ringo-flow
 cargo run -p ringo-flow -- run scenario.rhai
 ```
 
+**Nix (flake):**
+
+```sh
+nix profile install github:davidborzek/ringo#ringo-flow
+```
+
+To run scheduled monitors as a systemd service, use the
+[NixOS module](nixos.md).
+
 > Homebrew 6.0+ requires third-party taps to be trusted before use. If `brew
 > install` prompts you to trust the tap, accept it — or trust it up front:
 >

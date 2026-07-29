@@ -10,6 +10,9 @@ live view of how your telephony actually behaves.
 ringo-flow serve monitor.toml
 ```
 
+> On NixOS, run this as a hardened systemd service with the
+> [`services.ringo-flow` module](nixos.md).
+
 ## Configuration
 
 The monitor reads a `monitor.toml`:

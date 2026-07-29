@@ -32,6 +32,15 @@ cargo install ringo-phone
 cargo install --git https://github.com/davidborzek/ringo ringo-phone
 ```
 
+**Nix (flake):**
+
+```sh
+nix profile install github:davidborzek/ringo#ringo-phone
+```
+
+Or manage ringo and its SIP profiles declaratively with the
+[Home-Manager module](home-manager.md).
+
 > Homebrew 6.0+ requires third-party taps to be trusted before use. If `brew
 > install` prompts you to trust the tap, accept it — or trust it up front:
 >

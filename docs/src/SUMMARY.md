@@ -11,6 +11,7 @@
 - [Remote control](ringo-phone/remote-control.md)
 - [Configuration](ringo-phone/configuration.md)
 - [Integrations](ringo-phone/integrations.md)
+- [Home-Manager](ringo-phone/home-manager.md)
 
 # ringo-flow
 
@@ -24,6 +25,7 @@
 - [HTTP & webhooks](ringo-flow/http-and-webhooks.md)
 - [Running in CI](ringo-flow/running-in-ci.md)
 - [Monitoring](ringo-flow/monitoring.md)
+- [NixOS module](ringo-flow/nixos.md)
 - [API reference](ringo-flow/api/index.md)
   - [Scenario structure](ringo-flow/api/scenario-structure.md)
   - [Flow and timing](ringo-flow/api/flow-and-timing.md)
