@@ -87,6 +87,7 @@
             pkgs.pkg-config # locates opus/spandsp/libpulse
             pkgs.perl # openssl-sys vendored build
             pkgs.rustPlatform.bindgenHook # sets LIBCLANG_PATH + clang headers for bindgen
+            pkgs.installShellFiles # ship shell completions
           ];
 
           # Dynamically linked libs — placed in buildInputs so the nix
@@ -120,6 +121,15 @@
           # The test suites are not part of the install artifact and some need a
           # SIP peer / audio device; build the binary only.
           doCheck = false;
+
+          # Generate + install shell completions from the built binary
+          # (clap's COMPLETE=<shell> emits the script). Skipped on cross builds.
+          postInstall = lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
+            installShellCompletion --cmd ${bin} \
+              --fish <(COMPLETE=fish $out/bin/${bin}) \
+              --bash <(COMPLETE=bash $out/bin/${bin}) \
+              --zsh <(COMPLETE=zsh $out/bin/${bin})
+          '';
 
           meta = {
             inherit (cargoToml.package) description;
