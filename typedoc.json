@@ -1,0 +1,11 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["docs/src/ringo-flow/ringo-flow.d.ts"],
+  "plugin": ["typedoc-plugin-markdown"],
+  "out": "docs/src/ringo-flow/js-api",
+  "name": "ringo-flow JS API",
+  "readme": "none",
+  "disableSources": true,
+  "hideBreadcrumbs": true,
+  "hidePageHeader": true
+}

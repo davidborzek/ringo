@@ -106,7 +106,11 @@ pub fn run<H, F>(
     filters: Filters,
 ) -> Result<()>
 where
-    H: ScriptHost + Send + 'static,
+    // `H` is built inside `spawn_blocking` (by `F`) and used only on that one
+    // blocking thread — it never crosses a thread boundary, so it needn't be
+    // `Send` (only the build closure `F` does). This lets a `!Send` host like the
+    // QuickJS one work without an `unsafe impl Send`.
+    H: ScriptHost + 'static,
     F: FnOnce(Arc<Ctx>) -> Result<H> + Send + 'static,
 {
     let rt = tokio::runtime::Builder::new_multi_thread()

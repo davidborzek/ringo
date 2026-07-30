@@ -55,6 +55,39 @@ scenario("answered call", #{ tags: ["smoke"] }, |ctx| {
 });
 ```
 
+### In the JS frontend
+
+`ringo-flow run scenario.js` runs the same structure in JavaScript, with
+the same `setup` / `scenario` / `teardown`. `setup()`'s return value is likewise
+passed to each body (and `teardown`) as `ctx`. But the idiomatic — and fully typed —
+way is to keep fixtures in **closure-scoped variables**: declare them once up top,
+assign them in `setup()`, and read them everywhere. With a single `@type` annotation
+per fixture, every body gets completion and type-checking, no per-scenario typing:
+
+```js
+// @ts-check
+/** @type {Agent} */ let caller;
+/** @type {Agent} */ let callee;
+
+setup(() => {
+  caller = agent("caller", { username: env("A_USER"), domain: env("SIP_DOMAIN"), password: env("A_PASS") });
+  callee = agent("callee", { username: env("B_USER"), domain: env("SIP_DOMAIN"), password: env("B_PASS") });
+});
+
+teardown(() => caller.hangup());
+
+scenario("answered call", async () => {
+  caller.dial(callee);
+  await until(() => expect(callee.state).equals(State.Ringing), "15s");
+  callee.accept();
+});
+```
+
+Drop a [`ringo-flow.d.ts`](ringo-flow.d.ts) next to your script (or point
+`jsconfig.json` at it) for the `Agent` type and full editor support; regenerate it
+with `ringo-flow definitions --lang js`. Only the blocking waiters
+(`until`/`verifyAudio`) are Promises you `await` — instant verbs stay synchronous.
+
 ## Selecting, tagging and skipping
 
 The [`scenario(name, #{ … }, body)`](api/scenario-structure.md#scenario) options

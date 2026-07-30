@@ -18,8 +18,14 @@ use axum::{Router, routing::any};
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::oneshot;
+use std::time::Duration;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+
+/// A request bridged to another thread for a responder that can't be `Send`
+/// (e.g. a QuickJS closure on the scenario thread): the request plus a one-shot
+/// to send the response back on.
+pub type BridgedRequest = (MockRequest, oneshot::Sender<MockResponse>);
 
 /// Largest request body the mock will buffer (webhooks are small JSON payloads).
 const MAX_BODY: usize = 1 << 20; // 1 MiB
@@ -54,6 +60,11 @@ pub enum Responder {
     /// A responder closure. On `Err`, the failure is logged to the scenario (never
     /// exposed over HTTP); the caller gets a bare `500`.
     Dynamic(Box<dyn Fn(MockRequest) -> Result<MockResponse, String> + Send + Sync>),
+    /// A responder that runs on another thread: the handler sends the request over
+    /// the channel and awaits the response (with a timeout). Used by frontends
+    /// whose closures aren't `Send` (e.g. QuickJS on the scenario thread); the
+    /// receiver side calls the script closure and replies on the one-shot.
+    Bridged(mpsc::Sender<BridgedRequest>),
 }
 
 /// How a route matches a request path: an exact path, or an (anchored) regex.
@@ -348,6 +359,39 @@ async fn serve(State(state): State<Handler>, req: Request<Body>) -> Response<Bod
                     body: String::new(),
                 }
             }),
+            // Bridged: hand the request to the owning thread (e.g. the QuickJS
+            // scenario thread) and await its reply with a timeout, so a script
+            // that's blocked can't hang the mock forever.
+            Responder::Bridged(tx) => {
+                let (resp_tx, resp_rx) = oneshot::channel();
+                if tx.send((mreq, resp_tx)).await.is_err() {
+                    MockResponse {
+                        status: 503,
+                        content_type: Some("text/plain".into()),
+                        headers: Vec::new(),
+                        body: "mock responder unavailable".into(),
+                    }
+                } else {
+                    match tokio::time::timeout(Duration::from_secs(10), resp_rx).await {
+                        Ok(Ok(resp)) => resp,
+                        _ => {
+                            if let Some(ctx) = state.ctx.upgrade() {
+                                ctx.emit(&Event::MockError {
+                                    method: &method,
+                                    path: &path,
+                                    error: "bridged responder timed out or closed",
+                                });
+                            }
+                            MockResponse {
+                                status: 504,
+                                content_type: Some("text/plain".into()),
+                                headers: Vec::new(),
+                                body: "mock responder timeout".into(),
+                            }
+                        }
+                    }
+                }
+            }
         },
         None => MockResponse {
             status: 404,

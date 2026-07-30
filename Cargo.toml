@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ringo-core", "crates/ringo-agent", "crates/ringo-phone", "crates/ringo-flow"]
+members = ["crates/ringo-core", "crates/ringo-agent", "crates/ringo-phone", "crates/ringo-flow", "crates/ringo-flow/macros"]
 
 # Shared metadata inherited by the member crates via `<field>.workspace = true`.
 # Each crate carries its own `version` (independent per-crate releasing via
