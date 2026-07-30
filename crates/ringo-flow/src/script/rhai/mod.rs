@@ -111,7 +111,7 @@ pub fn run(
     // Shared env from `--env-file` (later files win); a per-file `<scenario>.env`
     // is layered on top in each build closure, so `env(...)` resolves
     // per-file → shared → process.
-    let shared_env = load_env_files(env_files)?;
+    let shared_env = crate::script::dotenv::load_env_files(env_files)?;
 
     // One build closure per file (same closure type → homogeneous Vec). It runs
     // on the blocking thread: read + compile the file (syntax errors surface as
@@ -132,7 +132,7 @@ pub fn run(
             let label = path.display().to_string();
             let build = move |ctx: Arc<Ctx>| -> Result<host::RhaiHost> {
                 if let Some(sibling) = &sibling {
-                    merge_dotenv(sibling, &mut env)?;
+                    crate::script::dotenv::merge_dotenv(sibling, &mut env)?;
                 }
                 // Mutable so `load_env(...)` can add more at run time; `env(...)`
                 // reads it under the lock.
@@ -194,41 +194,6 @@ fn collect_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-/// Load and merge several `--env-file`s into one map (later files win).
-fn load_env_files(paths: &[PathBuf]) -> Result<HashMap<String, String>> {
-    let mut env = HashMap::new();
-    for p in paths {
-        merge_dotenv(p, &mut env)?;
-    }
-    Ok(env)
-}
-
-/// Parse a dotenv file (`KEY=VALUE` per line; `#` comments and blank lines
-/// ignored; optional `export ` prefix; optional surrounding quotes) and merge it
-/// into `env`, overwriting existing keys.
-fn merge_dotenv(path: &Path, env: &mut HashMap<String, String>) -> Result<()> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("read env file {}", path.display()))?;
-    for (i, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let line = line.strip_prefix("export ").unwrap_or(line);
-        let (key, value) = line
-            .split_once('=')
-            .with_context(|| format!("{}:{}: expected KEY=VALUE", path.display(), i + 1))?;
-        let value = value.trim();
-        let value = value
-            .strip_prefix('"')
-            .and_then(|v| v.strip_suffix('"'))
-            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
-            .unwrap_or(value);
-        env.insert(key.trim().to_string(), value.to_string());
-    }
-    Ok(())
-}
-
 /// How deep `collect_dir` recurses, to bound work and break symlink cycles.
 const MAX_DIR_DEPTH: usize = 32;
 
@@ -274,30 +239,6 @@ pub fn check(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::merge_dotenv;
-
-    #[test]
-    fn dotenv_parses_comments_quotes_export_and_overrides() {
-        let path = std::env::temp_dir().join("ringo_flow_dotenv_test.env");
-        std::fs::write(
-            &path,
-            "# a comment\n\
-             \n\
-             RF_USER=alice\n\
-             export RF_PASS=\"s e cret\"\n\
-             RF_DOM='example.com'\n\
-             RF_USER=bob\n", // later line overrides
-        )
-        .unwrap();
-        let mut env = std::collections::HashMap::new();
-        env.insert("KEEP".into(), "yes".into());
-        merge_dotenv(&path, &mut env).unwrap();
-        assert_eq!(env["RF_USER"], "bob"); // last wins
-        assert_eq!(env["RF_PASS"], "s e cret"); // export + double quotes stripped
-        assert_eq!(env["RF_DOM"], "example.com"); // single quotes stripped
-        assert_eq!(env["KEEP"], "yes"); // pre-existing keys kept
-    }
-
     #[test]
     fn imports_resolve_relative_to_the_importing_file() {
         use super::RelativeFileResolver;

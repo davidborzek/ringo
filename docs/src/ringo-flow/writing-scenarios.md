@@ -55,6 +55,84 @@ scenario("answered call", #{ tags: ["smoke"] }, |ctx| {
 });
 ```
 
+### In the JS frontend
+
+`ringo-flow run scenario.js` runs the same structure in JavaScript, with
+the same `setup` / `scenario` / `teardown`. `setup()`'s return value is likewise
+passed to each body (and `teardown`) as `ctx`. But the idiomatic — and fully typed —
+way is to keep fixtures in **closure-scoped variables**: declare them once up top,
+assign them in `setup()`, and read them everywhere. With a single `@type` annotation
+per fixture, every body gets completion and type-checking, no per-scenario typing:
+
+```js
+// @ts-check
+/** @type {Agent} */ let caller;
+/** @type {Agent} */ let callee;
+
+setup(() => {
+  caller = new Agent("caller", { username: env("A_USER"), domain: env("SIP_DOMAIN"), password: env("A_PASS") });
+  callee = new Agent("callee", { username: env("B_USER"), domain: env("SIP_DOMAIN"), password: env("B_PASS") });
+});
+
+teardown(() => caller.hangup());
+
+scenario("answered call", async () => {
+  caller.dial(callee);
+  await until(() => expect(callee.state).equals(State.Ringing), "15s");
+  callee.accept();
+});
+```
+
+Drop a [`ringo-flow.d.ts`](ringo-flow.d.ts) next to your script (or point
+`jsconfig.json` at it) for the `Agent` type and full editor support; regenerate it
+with `ringo-flow definitions --lang js`. Only the blocking waiters
+(`until`/`verifyAudio`) are Promises you `await` — instant verbs stay synchronous.
+
+## Writing scenarios in TypeScript
+
+Scenarios execute as JavaScript, but you can author them in real TypeScript, get full
+type-checking against the generated `.d.ts`, and transpile to JS for `ringo-flow run`.
+The `.d.ts` declares the whole DSL as **ambient globals** (`scenario`, `new Agent(...)`,
+`expect`, …), so a `.ts` scenario needs no imports for them.
+
+1. Generate the type definitions and point a `tsconfig.json` at them:
+
+   ```sh
+   ringo-flow definitions --lang js ringo-flow.d.ts   # writes the .d.ts next to your scenarios
+   ```
+   ```jsonc
+   // tsconfig.json
+   {
+     "compilerOptions": { "strict": true, "noEmit": true, "lib": ["ES2020"], "types": [] },
+     "files": ["ringo-flow.d.ts", "scenario.ts"]
+   }
+   ```
+
+2. Write `scenario.ts`. The globals and the `Agent`/`MockServer` classes are typed, so
+   `tsc` (or your editor) catches a wrong matcher, an unknown config key or a bad
+   argument *before* baresip ever starts:
+
+   ```ts
+   scenario("answered call", async () => {
+     const caller = new Agent("caller", { username: env("A_USER"), domain: env("SIP_DOMAIN") });
+     caller.register();
+     await until(() => expect(caller.registered).toBeTruthy(), "10s");
+   });
+   ```
+
+3. Type-check, transpile with Bun, and run the emitted JS:
+
+   ```sh
+   tsc --noEmit                                 # optional: fail on a type error
+   bun build scenario.ts --outfile scenario.js  # strip types → plain JS
+   ringo-flow run scenario.js
+   ```
+
+`bun build` strips the type annotations and leaves the ambient globals untouched, so
+the runtime executes a plain `.js`. Relative `import`s of helper `.ts` files are bundled
+into the one output — or keep them as separate `.js` and let `ringo-flow` resolve the
+`import`s at run time.
+
 ## Selecting, tagging and skipping
 
 The [`scenario(name, #{ … }, body)`](api/scenario-structure.md#scenario) options

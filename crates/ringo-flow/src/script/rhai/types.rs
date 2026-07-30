@@ -345,16 +345,16 @@ impl Assertion {
         self.chain(self.inner.matches(pattern))
     }
     pub(super) fn greater_than(&mut self, n: i64) -> Check {
-        self.chain(self.inner.greater_than(n))
+        self.chain(self.inner.greater_than(n as f64))
     }
     pub(super) fn at_least(&mut self, n: i64) -> Check {
-        self.chain(self.inner.at_least(n))
+        self.chain(self.inner.at_least(n as f64))
     }
     pub(super) fn less_than(&mut self, n: i64) -> Check {
-        self.chain(self.inner.less_than(n))
+        self.chain(self.inner.less_than(n as f64))
     }
     pub(super) fn at_most(&mut self, n: i64) -> Check {
-        self.chain(self.inner.at_most(n))
+        self.chain(self.inner.at_most(n as f64))
     }
 }
 

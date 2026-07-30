@@ -1,6 +1,10 @@
 /target
 .claude
 
+# TypeDoc / npm tooling for the JS API docs (devDeps only; run `npm run docs:js`)
+/node_modules
+/package-lock.json
+
 # call recordings written by `ringo-flow run --save-audio`
 ringo-audio-*.wav
 
@@ -15,6 +19,7 @@ dump-*.wav
 
 # mdBook build output / assembled docs site
 docs/*/book/
+docs/book/
 /site/
 
 # local docs preview (built by hand for `mdbook`/http.server)

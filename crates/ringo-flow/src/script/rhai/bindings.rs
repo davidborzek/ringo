@@ -1384,7 +1384,8 @@ fn register_globals(
          /// resolved relative to the scenario file. Later loads override earlier keys.",
         move |path: &str| -> Result<(), Box<EvalAltResult>> {
             let p = base_dir.join(path);
-            super::merge_dotenv(&p, &mut e.lock().unwrap()).map_err(|err| err.to_string())?;
+            crate::script::dotenv::merge_dotenv(&p, &mut e.lock().unwrap())
+                .map_err(|err| err.to_string())?;
             Ok(())
         }
     );

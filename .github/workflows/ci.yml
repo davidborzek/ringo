@@ -24,6 +24,21 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all --check
 
+  check-js:
+    name: Type-check JS examples
+    runs-on: ubuntu-latest
+    # Validates the generated .d.ts against the committed example scenarios
+    # (jsconfig sets checkJs + strict): catches dangling/invalid TS that the
+    # Rust-side drift test can't. tsc ships with the typedoc devDep — no extra dep.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # No committed package-lock.json (it's gitignored), so no `cache: npm` / `npm ci`.
+      - run: npm install --no-save
+      - run: npm run check:js
+
   test:
     name: Test (Linux)
     runs-on: ubuntu-latest

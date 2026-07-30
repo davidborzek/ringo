@@ -1,0 +1,14 @@
+{
+  "name": "ringo-docs",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Doc tooling: generate the ringo-flow JS API mdBook pages from the hand-written .d.ts via TypeDoc.",
+  "scripts": {
+    "docs:js": "typedoc && node scripts/gen-js-api-summary.mjs",
+    "check:js": "tsc --noEmit -p crates/ringo-flow/examples/js/jsconfig.json"
+  },
+  "devDependencies": {
+    "typedoc": "^0.28",
+    "typedoc-plugin-markdown": "^4.4"
+  }
+}

@@ -117,25 +117,38 @@ enum Commands {
         /// `RINGO_FLOW_INSECURE_HTTP`). Prefer mounting the CA — see the README.
         #[arg(long)]
         insecure_http: bool,
+        /// Scripting frontend; inferred from the file extension (`.js` → js) unless set.
+        #[arg(long, value_enum)]
+        lang: Option<script::Lang>,
     },
     /// Syntax-check a scenario without running it (no baresip)
     Check {
-        /// Path to the .rhai scenario
+        /// Path to the scenario file
         #[arg(value_hint = ValueHint::FilePath)]
         file: PathBuf,
+        /// Scripting frontend; inferred from the file extension (`.js` → js) unless set.
+        #[arg(long, value_enum)]
+        lang: Option<script::Lang>,
     },
-    /// Write a Rhai definition file (.d.rhai) for editor completion/hover
+    /// Write an editor definition file for completion/hover: rhai's `.d.rhai` or,
+    /// with `--lang js`, the TypeScript `.d.ts`.
     Definitions {
-        /// Output path
-        #[arg(default_value = "docs/src/ringo-flow/ringo-flow.d.rhai", value_hint = ValueHint::FilePath)]
-        out: PathBuf,
+        /// Output path (defaults to the docs copy for the chosen language)
+        #[arg(value_hint = ValueHint::FilePath)]
+        out: Option<PathBuf>,
+        /// Scripting frontend (`rhai` default, or `js`)
+        #[arg(long, value_enum, default_value_t = script::Lang::Rhai)]
+        lang: script::Lang,
     },
-    /// Generate the scenario API reference: one Markdown page per section into the
-    /// given directory (the mdBook `src/api`).
+    /// Generate the scenario API reference (mdBook): rhai writes one page per
+    /// section into a directory; `--lang js` writes a single page to a file.
     Docs {
-        /// Output directory for the generated API pages
-        #[arg(default_value = "docs/src/ringo-flow/api", value_hint = ValueHint::DirPath)]
-        out: PathBuf,
+        /// Output path (defaults to the docs location for the chosen language)
+        #[arg(value_hint = ValueHint::AnyPath)]
+        out: Option<PathBuf>,
+        /// Scripting frontend (`rhai` default, or `js`)
+        #[arg(long, value_enum, default_value_t = script::Lang::Rhai)]
+        lang: script::Lang,
     },
     /// Run as a monitor: scheduled scenario runs + Prometheus metrics over HTTP
     #[cfg(feature = "server")]
@@ -226,6 +239,7 @@ fn main() -> Result<()> {
             quiet,
             no_color,
             insecure_http,
+            lang,
         } => {
             // Logging is produced by the per-agent worker processes (baresip runs
             // there, not in this parent). They inherit the destination via env and
@@ -265,13 +279,32 @@ fn main() -> Result<()> {
                 tags: tag,
                 exclude_tags: exclude_tag,
             };
-            let result = script::run(&paths, output, overrides, filters, &env_file);
+            let lang = lang.unwrap_or_else(|| script::detect_lang(&paths));
+            let result = script::run(lang, &paths, output, overrides, filters, &env_file);
             ringo_core::shutdown();
             result
         }
-        Commands::Check { file } => script::check(&file),
-        Commands::Definitions { out } => script::write_definitions(&out),
-        Commands::Docs { out } => script::write_book_api(&out),
+        Commands::Check { file, lang } => {
+            let lang = lang.unwrap_or_else(|| script::detect_lang(std::slice::from_ref(&file)));
+            script::check(lang, &file)
+        }
+        Commands::Definitions { out, lang } => {
+            let out = out.unwrap_or_else(|| {
+                let name = match lang {
+                    script::Lang::Rhai => "ringo-flow.d.rhai",
+                    script::Lang::Js => "ringo-flow.d.ts",
+                };
+                PathBuf::from("docs/src/ringo-flow").join(name)
+            });
+            script::write_definitions(lang, &out)
+        }
+        Commands::Docs { out, lang } => {
+            let out = out.unwrap_or_else(|| match lang {
+                script::Lang::Rhai => PathBuf::from("docs/src/ringo-flow/api"),
+                script::Lang::Js => PathBuf::from("docs/src/ringo-flow/js-api"),
+            });
+            script::write_book_api(lang, &out)
+        }
         #[cfg(feature = "server")]
         Commands::Serve {
             config,
