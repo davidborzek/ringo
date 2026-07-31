@@ -17,3 +17,4 @@ rust-version = "1.85"
 [workspace.dependencies]
 ringo-core = { path = "crates/ringo-core", version = "0.14.0" }
 ringo-agent = { path = "crates/ringo-agent", version = "0.2.2" }
+ringo-flow-macros = { path = "crates/ringo-flow/macros", version = "0.1.0" }
