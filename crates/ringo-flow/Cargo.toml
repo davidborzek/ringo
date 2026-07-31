@@ -39,7 +39,7 @@ futures-executor = "0.3"
 # Compile-time TS metadata: the `#[global]`/`#[export]`/`#[derive(Interface|Enum)]`
 # attributes submit the API model into `inventory`, the `js definitions` command renders
 # the `.d.ts` from it.
-ringo-flow-macros = { path = "macros" }
+ringo-flow-macros.workspace = true
 inventory = "0.3"
 # `serve` mode only (the `server` feature):
 toml = { version = "1", optional = true }
