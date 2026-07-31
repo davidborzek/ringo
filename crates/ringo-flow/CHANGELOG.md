@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.12.2...ringo-flow-v0.13.0) - 2026-07-31
+
+### Features
+
+- *(ringo-flow)* QuickJS (JS/TS) scenario frontend ([#73](https://github.com/davidborzek/ringo/pull/73))
+
 ## [0.12.0](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.11.1...ringo-flow-v0.12.0) - 2026-07-17
 
 ### Bug Fixes
