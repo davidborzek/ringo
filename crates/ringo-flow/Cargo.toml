@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 ringo-core.workspace = true
+indexmap = "2"
 ringo-agent.workspace = true
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
@@ -27,6 +28,19 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "charset", "blocking"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query"] }
 rhai = { version = "1", features = ["sync", "metadata", "internals"] }
+# JS frontend (QuickJS). `futures` enables the AsyncRuntime/AsyncContext so the
+# blocking waiters (until/verifyAudio) become JS Promises and `Promise.all`
+# runs them concurrently; `loader` enables ES-module `import` of helper files;
+# classes/properties/macro back the embedding.
+rquickjs = { version = "0.12", features = ["classes", "properties", "macro", "futures", "loader"] }
+# Drives the QuickJS async event loop on the (non-tokio) scenario thread, so the
+# engine's existing sync `block_on` verbs keep working without a nested-runtime panic.
+futures-executor = "0.3"
+# Compile-time TS metadata: the `#[global]`/`#[export]`/`#[derive(Interface|Enum)]`
+# attributes submit the API model into `inventory`, the `js definitions` command renders
+# the `.d.ts` from it.
+ringo-flow-macros = { path = "macros" }
+inventory = "0.3"
 # `serve` mode only (the `server` feature):
 toml = { version = "1", optional = true }
 croner = { version = "3", optional = true }

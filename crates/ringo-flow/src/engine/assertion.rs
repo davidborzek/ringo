@@ -13,6 +13,7 @@ pub enum Value {
     Unit,
     Bool(bool),
     Int(i64),
+    Float(f64),
     Str(String),
     State(CallState),
     /// An array (e.g. `res.json("items")`).
@@ -28,6 +29,7 @@ impl Value {
             Value::Unit => "()".to_string(),
             Value::Bool(b) => b.to_string(),
             Value::Int(i) => i.to_string(),
+            Value::Float(f) => f.to_string(),
             Value::Str(s) => s.clone(),
             Value::State(s) => s.to_string(),
             Value::List(items) => {
@@ -58,11 +60,16 @@ impl Value {
             Value::State(_) => 4,
             Value::List(_) => 5,
             Value::Map(_) => 6,
+            Value::Float(_) => 7,
         }
     }
-    fn as_int(&self) -> Result<i64, String> {
+    /// As an `f64` for numeric matchers (`at_least`/`at_most`/…), accepting both
+    /// `Int` and `Float` so `quality.mos` (a float) and integer counts compare
+    /// uniformly.
+    fn as_number(&self) -> Result<f64, String> {
         match self {
-            Value::Int(i) => Ok(*i),
+            Value::Int(i) => Ok(*i as f64),
+            Value::Float(f) => Ok(*f),
             other => Err(format!(
                 "expected a number to compare, but was {}",
                 other.display()
@@ -95,6 +102,10 @@ pub struct Assertion {
     /// Optional label set via `.describe(...)`, prefixed to the log line.
     desc: Option<String>,
     ctx: Arc<Ctx>,
+    /// When set (an adapter's `.not`), [`finish`](Self::finish) inverts the pass/fail
+    /// and prefixes the reported expectation with "not", so the emitted log line and the
+    /// outcome both reflect the negation.
+    negated: bool,
 }
 
 impl Assertion {
@@ -105,6 +116,7 @@ impl Assertion {
             // (`assert(caller.state)` → "Caller state"); `describe(...)` overrides.
             desc: super::ctx::take_pending_label(),
             ctx,
+            negated: false,
         }
     }
     /// The value under assertion (so an adapter can expose `.value()`).
@@ -115,9 +127,20 @@ impl Assertion {
     pub fn describe(&mut self, label: &str) {
         self.desc = Some(label.to_string());
     }
+    /// Invert the next matcher (an adapter's `.not`): flips its pass/fail and prefixes
+    /// the reported expectation with "not". The adapter resets it after the matcher.
+    pub fn set_negated(&mut self, negated: bool) {
+        self.negated = negated;
+    }
 
-    /// Report `expect` vs the actual value and turn a failure into an error.
+    /// Report `expect` vs the actual value and turn a failure into an error. Honours
+    /// [`negated`](Self::negated): the pass/fail and the reported expectation both flip.
     fn finish(&self, expect: String, pass: bool) -> Result<(), String> {
+        let (expect, pass) = if self.negated {
+            (format!("not {expect}"), !pass)
+        } else {
+            (expect, pass)
+        };
         let actual = self.actual.display();
         self.ctx
             .report_assertion(self.desc.clone(), expect.clone(), actual.clone(), pass);
@@ -175,20 +198,20 @@ impl Assertion {
         let pass = re.is_match(&self.actual.display());
         self.finish(format!("matches {pattern:?}"), pass)
     }
-    pub fn greater_than(&self, n: i64) -> Result<(), String> {
-        let pass = self.actual.as_int()? > n;
+    pub fn greater_than(&self, n: f64) -> Result<(), String> {
+        let pass = self.actual.as_number()? > n;
         self.finish(format!("greater than {n}"), pass)
     }
-    pub fn at_least(&self, n: i64) -> Result<(), String> {
-        let pass = self.actual.as_int()? >= n;
+    pub fn at_least(&self, n: f64) -> Result<(), String> {
+        let pass = self.actual.as_number()? >= n;
         self.finish(format!("at least {n}"), pass)
     }
-    pub fn less_than(&self, n: i64) -> Result<(), String> {
-        let pass = self.actual.as_int()? < n;
+    pub fn less_than(&self, n: f64) -> Result<(), String> {
+        let pass = self.actual.as_number()? < n;
         self.finish(format!("less than {n}"), pass)
     }
-    pub fn at_most(&self, n: i64) -> Result<(), String> {
-        let pass = self.actual.as_int()? <= n;
+    pub fn at_most(&self, n: f64) -> Result<(), String> {
+        let pass = self.actual.as_number()? <= n;
         self.finish(format!("at most {n}"), pass)
     }
 }

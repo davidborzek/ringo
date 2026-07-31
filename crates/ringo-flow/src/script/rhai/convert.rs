@@ -20,6 +20,8 @@ pub(super) fn to_value(d: &Dynamic) -> Value {
         Value::Bool(b)
     } else if let Ok(i) = d.as_int() {
         Value::Int(i)
+    } else if let Ok(f) = d.as_float() {
+        Value::Float(f)
     } else if let Some(arr) = d.clone().try_cast::<Array>() {
         Value::List(arr.iter().map(to_value).collect())
     } else if let Some(map) = d.clone().try_cast::<Map>() {
@@ -41,6 +43,7 @@ pub(super) fn to_dynamic(v: &Value) -> Dynamic {
         Value::Unit => Dynamic::UNIT,
         Value::Bool(b) => (*b).into(),
         Value::Int(i) => (*i).into(),
+        Value::Float(f) => (*f).into(),
         Value::Str(s) => s.clone().into(),
         Value::State(c) => Dynamic::from(*c),
         Value::List(items) => Dynamic::from_array(items.iter().map(to_dynamic).collect()),
