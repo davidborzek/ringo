@@ -6,25 +6,37 @@ one your system under test calls back.
 
 ## Call an API
 
-[`http(method, url)`](api/http.md#http) makes a request and returns a response you
-can assert on:
+[`http(method, url)`](js-api/functions/http.md) performs the request off-thread
+and resolves with a response you can assert on:
 
-```rust
-let res = http("GET", env("API_URL") + "/calls/last");
-res.expect_status(200);
-assert(res.json("from")).equals("+49301234567");
+```js
+const res = await http("GET", env("API_URL") + "/calls/last");
+res.expectStatus(200);
+expect(res.json("from")).toBe("+49301234567");
 ```
 
-[`res.json("a.b.0.c")`](api/http.md#json) walks a dotted JSON path;
-[`res.status`](api/http.md#status) / [`res.body`](api/http.md#body) /
-[`res.header(name)`](api/http.md#header) are there too. For requests with headers
-or a body, pass an options map — see [HTTP](api/http.md):
+[`res.json("a.b.0.c")`](js-api/interfaces/HttpResponse.md#json) walks a dotted
+JSON path and returns a native JS value;
+[`res.status`](js-api/interfaces/HttpResponse.md#status) /
+[`res.body`](js-api/interfaces/HttpResponse.md#body) /
+[`res.header(name)`](js-api/interfaces/HttpResponse.md#header) are there too. For
+requests with headers or a body, pass an options object — an object `body` is
+JSON-encoded for you:
 
-```rust
-http("POST", env("API_URL") + "/calls", #{
-    headers: #{ "Content-Type": "application/json" },
-    body: #{ to: "+49301234567" },
+```js
+await http("POST", env("API_URL") + "/calls", {
+  headers: { "Content-Type": "application/json" },
+  body: { to: "+49301234567" },
 });
+```
+
+Since each request is a Promise, `Promise.all` fires several at once:
+
+```js
+const [a, b] = await Promise.all([
+  http("GET", env("API_URL") + "/calls/1"),
+  http("GET", env("API_URL") + "/calls/2"),
+]);
 ```
 
 ## Mock a webhook (webhook-driven call control)
@@ -33,45 +45,54 @@ Some telephony APIs call *your* webhook for a call and expect you to answer with
 the actions to perform. Stand up a built-in mock server, point the API at it, and
 assert on what it received.
 
-[`mock_server()`](api/http-mock-server.md#mock_server) starts the server;
-[`on(...)`](api/http-mock-server.md#on) answers a route dynamically,
-[`json_response`](api/http-mock-server.md#json_response) builds the body, and
-[`last_request`](api/http-mock-server.md#last_request) /
-[`request_count`](api/http-mock-server.md#request_count) inspect what arrived:
+[`new MockServer()`](js-api/classes/MockServer.md) starts the server;
+[`respond(...)`](js-api/classes/MockServer.md#respond) answers a route (statically
+or from a per-request closure),
+[`jsonResponse`](js-api/functions/jsonResponse.md) builds the body, and
+[`lastRequest`](js-api/classes/MockServer.md#lastrequest) /
+[`requestCount`](js-api/classes/MockServer.md#requestcount) inspect what arrived:
 
-```rust
-let hooks = mock_server();
+```js
+const hooks = new MockServer();
 
 // Answer the webhook with the call actions to perform.
-hooks.on("POST", "/voice", |req| {
-    if req.json("event") == "incoming_call" {
-        json_response(#{ actions: [ #{ type: "answer" } ] })
-    } else {
-        json_response(#{ actions: [ #{ type: "hangup" } ] })
-    }
+hooks.respond("POST", "/voice", (req) => {
+  const event = JSON.parse(req.body).event;
+  return event === "incoming_call"
+    ? jsonResponse({ actions: [{ type: "answer" }] })
+    : jsonResponse({ actions: [{ type: "hangup" }] });
 });
 
 // Tell the system under test where to send its webhooks.
-http("PUT", env("API_URL") + "/config?webhook=" + hooks.url + "/voice");
+await http("PUT", env("API_URL") + "/config?webhook=" + hooks.url + "/voice");
 
 a.dial(env("API_NUMBER"));
 
 // Wait for the webhook the same way you wait for anything else.
-await_until(|| assert(hooks.request_count("/voice")).equals(1), "10s");
+await until(() => expect(hooks.requestCount("/voice")).toBe(1), "10s");
 
-let req = hooks.last_request("/voice");
-assert(req.json("event")).equals("incoming_call");
+const req = hooks.lastRequest("/voice");
+expect(JSON.parse(req?.body ?? "{}").event).toBe("incoming_call");
 ```
 
 Notes:
 
-- The `on(...)` responder runs on a worker thread, so keep it pure (request →
-  response): no agent verbs inside it.
-- Routes match by exact path or [`regex("/calls/.*")`](api/http-mock-server.md#regex),
-  and by a method or any (`"*"` / omit the method). Re-register a route with
-  [`respond(...)`](api/http-mock-server.md#respond) to stage the next answer between
-  webhooks.
-- The server is stopped automatically at the end of the scenario.
+- The responder closure runs on the **scenario thread**, pumped from `until`, so
+  it may close over scenario state (a counter, a flag) — but it must stay pure
+  request → response: no agent verbs and no `await` inside it. A scenario that
+  never reaches an `until` also never serves a request.
+- The request it receives is `{ method, path, query, headers, body }` — `body` is
+  the raw string, so parse it with `JSON.parse` (unlike the HTTP *response*,
+  which has a `json(path)` helper).
+- Routes match by exact path or
+  [`regex("/calls/.*")`](js-api/functions/regex.md), and by a method or any
+  (`"*"` / omit the method). Re-register a route with `respond(...)` to stage the
+  next answer between webhooks.
+- A static object works where you don't need the request:
+  `hooks.respond("/health", { status: 204 })`, or
+  `hooks.respond("/config", jsonResponse({ ok: true }))`.
+- The server is stopped automatically at the end of the scenario;
+  [`stop()`](js-api/classes/MockServer.md#stop) ends it early.
 
-See the [HTTP mock server](api/http-mock-server.md) and
-[Mock request](api/mock-request.md) reference for everything.
+See the [MockServer](js-api/classes/MockServer.md) and
+[MockRequestInfo](js-api/interfaces/MockRequestInfo.md) reference for everything.

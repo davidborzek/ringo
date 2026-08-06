@@ -36,7 +36,7 @@ when the agent had a measurable call; `registered` is always emitted. Without
 
 ## Credentials and environment
 
-Scenarios read secrets via [`env(...)`](api/environment.md#env). Provide them as
+Scenarios read secrets via [`env(...)`](js-api/functions/env.md). Provide them as
 environment variables, or from a dotenv file:
 
 ```sh
@@ -48,7 +48,7 @@ real credentials in your CI secret store, not in the repo.
 
 ## Selecting what to run
 
-Run a whole directory (all `*.rhai`, recursively) or a subset:
+Run a whole directory (all `*.js`, recursively) or a subset:
 
 ```sh
 ringo-flow run scenarios/                       # everything

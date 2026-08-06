@@ -80,7 +80,7 @@ interface CallQuality {
   readonly rtt: number;
   /** Jitter in milliseconds. */
   readonly jitter: number;
-  /** Fraction of packets lost (0.0–1.0). */
+  /** Receive-side packet loss, in percent (0.0–100.0). */
   readonly packetLoss: number;
 }
 

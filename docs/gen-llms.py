@@ -46,8 +46,12 @@ def main() -> None:
     out.extend(body)
     out.append("\n## Machine-readable\n")
     out.append(
+        f"- [ringo-flow TypeScript definitions]({BASE}ringo-flow/ringo-flow.d.ts): "
+        "the full scenario API as a `.d.ts` (types for editors and agents)"
+    )
+    out.append(
         f"- [ringo-flow Rhai type definitions]({BASE}ringo-flow/ringo-flow.d.rhai): "
-        "the full scenario API as a `.d.rhai` (signatures for the Rhai LSP and agents)"
+        "the same API for the deprecated Rhai frontend (`.d.rhai`)"
     )
     OUT.write_text("\n".join(out) + "\n")
     print(f"wrote {OUT}")

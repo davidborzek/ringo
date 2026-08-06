@@ -608,8 +608,14 @@ fn api_index_body(engine: &Engine) -> Result<String> {
     };
 
     let mut out = String::from(
-        "# API reference\n\n\
-         The complete scenario vocabulary, generated from the engine (so it never \
+        "# API reference (Rhai — deprecated)\n\n\
+         > **The Rhai frontend is deprecated and will be removed in a future \
+         release.** New scenarios should use the JavaScript/TypeScript frontend — \
+         see [Writing scenarios](../writing-scenarios.md) and the \
+         [JS API reference](../js-api/index.md). This page documents the Rhai \
+         vocabulary for existing scenarios; [Rhai frontend](../rhai.md) explains \
+         why and how to migrate.\n\n\
+         The complete Rhai scenario vocabulary, generated from the engine (so it never \
          drifts from the code) — organized by the thing you're working with:\n\n",
     );
     for (slug, title, _) in &sections {
@@ -626,11 +632,12 @@ fn api_index_body(engine: &Engine) -> Result<String> {
         }
     }
     out.push_str(
-        "\nNew to it? Start with [Your first scenario](../your-first-scenario.md), \
-         then [Writing scenarios](../writing-scenarios.md).\n\n\
-         For editors and agents, the whole API is also available as \
-         [Rhai type definitions](../ringo-flow.d.rhai) (`.d.rhai`) — point the Rhai \
-         language server at it for completion and hover.\n",
+        "\nFor editors and agents, the whole Rhai API is also available as \
+         [Rhai type definitions](../ringo-flow.d.rhai) (`.d.rhai`). In practice this \
+         is a reference you read, not tooling you get: the only Rhai language server \
+         is an unreleased experiment that no editor plugin ships, so there is no \
+         type-checking and no inline error reporting — one of the reasons the \
+         frontend is being retired in favour of JS/TS.\n",
     );
     Ok(out)
 }

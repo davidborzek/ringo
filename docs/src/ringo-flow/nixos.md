@@ -19,7 +19,7 @@ NixOS host at the flake and enable it:
             listen = "0.0.0.0:9090";
             openFirewall = true;
             monitors.smoke = {
-              path = "/var/lib/ringo-flow/smoke.rhai";
+              path = "/var/lib/ringo-flow/smoke.js";
               schedule = "*/5 * * * *";      # cron; omit for on-demand only
             };
           };
@@ -58,7 +58,7 @@ Each `monitors.<name>` entry maps 1:1 to a `[[monitor]]` block:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `path` | — | `.rhai` scenario file or directory. |
+| `path` | — | Scenario file (`.js`, or a deprecated `.rhai`) or a directory of scenarios. |
 | `schedule` | `null` | Cron (5- or 6-field); `null` = on-demand only via `POST /run/<name>`. |
 | `timeout` | `null` | Per-monitor timeout override. |
 | `envFile` | `[]` | dotenv files with SIP credentials (see [Secrets](#secrets)). |
@@ -100,7 +100,7 @@ services.ringo-flow = {
   enable = true;
   environmentFile = config.sops.templates."ringo-flow.env".path;
   monitors.smoke = {
-    path = "/var/lib/ringo-flow/smoke.rhai";
+    path = "/var/lib/ringo-flow/smoke.js";
     schedule = "*/5 * * * *";
     envFile = [ config.sops.secrets."ringo-flow/sip.env".path ];
   };

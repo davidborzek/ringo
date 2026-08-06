@@ -63,8 +63,8 @@ struct Cli {
 enum Commands {
     /// Run a scenario file
     Run {
-        /// Scenario files and/or directories (a directory runs its `*.rhai`,
-        /// recursively)
+        /// Scenario files and/or directories (a directory runs its `*.js` — or
+        /// `*.rhai` on the deprecated Rhai frontend — recursively)
         #[arg(required = true, num_args = 1.., value_hint = ValueHint::AnyPath)]
         paths: Vec<PathBuf>,
         /// Override a variable (repeatable): --set key=value
@@ -130,23 +130,24 @@ enum Commands {
         #[arg(long, value_enum)]
         lang: Option<script::Lang>,
     },
-    /// Write an editor definition file for completion/hover: rhai's `.d.rhai` or,
-    /// with `--lang js`, the TypeScript `.d.ts`.
+    /// Write an editor definition file for completion/hover: with `--lang js` the
+    /// TypeScript `.d.ts`, or the deprecated Rhai frontend's `.d.rhai`.
     Definitions {
         /// Output path (defaults to the docs copy for the chosen language)
         #[arg(value_hint = ValueHint::FilePath)]
         out: Option<PathBuf>,
-        /// Scripting frontend (`rhai` default, or `js`)
+        /// Scripting frontend (`js`, or the deprecated `rhai` — currently the default)
         #[arg(long, value_enum, default_value_t = script::Lang::Rhai)]
         lang: script::Lang,
     },
-    /// Generate the scenario API reference (mdBook): rhai writes one page per
-    /// section into a directory; `--lang js` writes a single page to a file.
+    /// Generate the deprecated Rhai frontend's API reference (mdBook), one page per
+    /// section into a directory. The JS API pages are generated from the `.d.ts` by
+    /// TypeDoc (`npm run docs:js`), not here.
     Docs {
         /// Output path (defaults to the docs location for the chosen language)
         #[arg(value_hint = ValueHint::AnyPath)]
         out: Option<PathBuf>,
-        /// Scripting frontend (`rhai` default, or `js`)
+        /// Scripting frontend (only `rhai` is generated here)
         #[arg(long, value_enum, default_value_t = script::Lang::Rhai)]
         lang: script::Lang,
     },

@@ -34,13 +34,13 @@ enabled = true              # set false to not expose /metrics at all (404)
 # A monitor names a scenario file (which may hold a whole suite) plus a schedule.
 [[monitor]]
 name = "smoke"                 # unique — the metric label and /run/<name>
-path = "scenarios/smoke.rhai"  # a file or a directory of *.rhai
+path = "scenarios/smoke.js"  # a file or a directory of *.js
 schedule = "*/5 * * * *"       # cron (5- or 6-field); omit for on-demand only
 env_file = ["ci.env"]          # optional --env-file(s)
 
 [[monitor]]
 name = "quality"
-path = "scenarios/quality.rhai"
+path = "scenarios/quality.js"
 schedule = "0 * * * *"         # hourly
 timeout = "180s"               # per-monitor override
 scenario = "answered"          # optional --scenario name filter within the file

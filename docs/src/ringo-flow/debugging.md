@@ -9,8 +9,8 @@ backend is doing. Both are off by default and write nowhere unless you ask.
 module output — to stderr, or to a file if you pass a path:
 
 ```sh
-ringo-flow run scenario.rhai --log            # → stderr
-ringo-flow run scenario.rhai --log run.log    # → file
+ringo-flow run scenario.js --log            # → stderr
+ringo-flow run scenario.js --log run.log    # → file
 ```
 
 ## SIP tracing
@@ -20,8 +20,8 @@ received), to its own destination — **separate** from `--log`, so you can keep
 the protocol trace clean:
 
 ```sh
-ringo-flow run scenario.rhai --sip-trace            # → stderr (text)
-ringo-flow run scenario.rhai --sip-trace sip.txt    # → text file
+ringo-flow run scenario.js --sip-trace            # → stderr (text)
+ringo-flow run scenario.js --sip-trace sip.txt    # → text file
 ```
 
 Each message is printed as a timestamped block with its direction (`TX →` /
@@ -37,7 +37,7 @@ instead of text — readable by
 VoIP Calls* flow graph:
 
 ```sh
-ringo-flow run scenario.rhai --sip-trace flow.pcap
+ringo-flow run scenario.js --sip-trace flow.pcap
 sngrep -I flow.pcap        # or: wireshark flow.pcap
 ```
 

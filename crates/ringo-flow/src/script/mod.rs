@@ -1,7 +1,8 @@
-//! Scripting frontends over the neutral [`crate::engine`]. Rhai is the production
-//! frontend; `js` is an exploratory QuickJS spike (reached via `--lang js`). A new
-//! language implements [`crate::engine::ScriptHost`] and gets its own submodule
-//! here, reusing the same engine, verbs, assertions and runner.
+//! Scripting frontends over the neutral [`crate::engine`]. The QuickJS-backed `js`
+//! frontend is the primary one; `rhai` is deprecated and kept for existing `.rhai`
+//! scenarios until it is removed. A new language implements
+//! [`crate::engine::ScriptHost`] and gets its own submodule here, reusing the same
+//! engine, verbs, assertions and runner.
 
 pub(crate) mod dotenv;
 pub mod js;
@@ -53,9 +54,10 @@ pub fn check(lang: Lang, file: &Path) -> Result<()> {
     }
 }
 
-/// Which scripting frontend to use. Rhai is the default; `Js` selects the QuickJS
-/// frontend. Usually inferred from the file extension (see [`detect_lang`]); the
-/// `--lang` flag is an explicit override.
+/// Which scripting frontend to use. `Js` is the primary frontend; `Rhai` is
+/// deprecated (kept for existing `.rhai` scenarios) and remains the enum's default so
+/// an extension-less path keeps its old behaviour. Usually inferred from the file
+/// extension (see [`detect_lang`]); the `--lang` flag is an explicit override.
 #[derive(Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum Lang {
     #[default]

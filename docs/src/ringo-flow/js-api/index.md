@@ -2,7 +2,7 @@
 
 ## Namespaces
 
-- [scenario](ringo-flow-JS-API/namespaces/scenario/README.md)
+- [scenario](ringo-flow-JS-API/namespaces/scenario/index.md)
 
 ## Enumerations
 

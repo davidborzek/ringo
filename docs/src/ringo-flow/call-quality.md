@@ -2,14 +2,14 @@
 
 Beyond *was there audio* ([Audio testing](audio.md)), ringo-flow can assert on
 *how good* the audio was — the RTP media metrics each agent reports for its call,
-grouped under `agent.quality`:
+grouped under [`agent.quality`](js-api/classes/Agent.md#quality):
 
 | Field | Meaning | Unit |
 |-------|---------|------|
 | `agent.quality.mos` | Estimated Mean Opinion Score | 1.0 (bad) – 4.5 (excellent) |
 | `agent.quality.rtt` | Round-trip time | milliseconds |
 | `agent.quality.jitter` | Receive-side inter-arrival jitter | milliseconds |
-| `agent.quality.packet_loss` | Receive-side packet loss | percent |
+| `agent.quality.packetLoss` | Receive-side packet loss | percent |
 
 The **MOS** is an estimate from the simplified ITU-T G.107 E-model, derived from
 latency, jitter and loss — a single number to gate call quality on.
@@ -17,43 +17,55 @@ latency, jitter and loss — a single number to gate call quality on.
 ## When the values are available
 
 The metrics come from **RTCP reports**, which the peers exchange only about
-**every ~5 seconds**. So right after the call is established each field is `()`
-(not present) — let the call run a few seconds first:
+**every ~5 seconds**. So right after the call is established `agent.quality` is
+still `undefined` — let the call run a few seconds first:
 
-```rhai
-await_until(|| assert(caller.quality.mos).is_present(), "10s");
+```js
+await until(() => expect(caller.quality).toBeDefined(), "10s");
 ```
+
+The whole object appears at once (the fields arrive together, so there are no
+per-field gaps), which is why the optional chain in `caller.quality?.mos` is only
+needed before the first report.
 
 The values are **snapshotted when the call closes**, so they survive the hangup
 — you can read or assert on them **after** the call, not just during it.
 
 ## Example
 
-```rhai
-scenario("call quality", |ctx| {
-    ctx.caller.dial(ctx.callee);
-    await_until(|| assert(ctx.callee.state).equals(State::Ringing));
-    ctx.callee.accept();
-    await_until(|| assert(ctx.caller.state).equals(State::Established));
+```js
+// @ts-check
+/** @type {Agent} */ let caller;
+/** @type {Agent} */ let callee;
 
-    // Let RTCP accumulate, then wait for the first report:
-    await_until(|| assert(ctx.caller.quality.mos).is_present(), "10s");
+setup(() => {
+  caller = new Agent("caller", { username: env("A_USER"), domain: env("SIP_DOMAIN"), password: env("A_PASS") });
+  callee = new Agent("callee", { username: env("B_USER"), domain: env("SIP_DOMAIN"), password: env("B_PASS") });
+});
 
-    let q = ctx.caller.quality;
-    log(`caller → MOS ${q.mos} · RTT ${q.rtt}ms · jitter ${q.jitter}ms · loss ${q.packet_loss}%`);
+scenario("call quality", async () => {
+  caller.dial(callee);
+  await until(() => expect(callee.state).toBe(State.Ringing));
+  callee.accept();
+  await until(() => expect(caller.state).toBe(State.Established));
 
-    ctx.caller.hangup();
-    await_until(|| assert(ctx.caller.state).equals(State::Idle));
+  // Let RTCP accumulate, then wait for the first report:
+  const q = await until(() => expect(caller.quality).toBeDefined().value(), "10s");
 
-    // The snapshot survives the hangup — assert on the final values:
-    assert(ctx.caller.quality.mos).at_least(4.0);
-    assert(ctx.caller.quality.packet_loss).at_most(1.0);
-    assert(ctx.caller.quality.rtt).at_most(150);
+  log(`caller → MOS ${q.mos} · RTT ${q.rtt}ms · jitter ${q.jitter}ms · loss ${q.packetLoss}%`);
+
+  caller.hangup();
+  await until(() => expect(caller.state).toBe(State.Idle));
+
+  // The snapshot survives the hangup — assert on the final values:
+  expect(caller.quality?.mos).toBeGreaterThanOrEqual(4.0);
+  expect(caller.quality?.packetLoss).toBeLessThanOrEqual(1.0);
+  expect(caller.quality?.rtt).toBeLessThanOrEqual(150);
 });
 ```
 
-> The values are raw floats (e.g. `MOS 4.236…`). To shorten a log line, round in
-> Rhai: `let mos = (caller.quality.mos * 100.0).round() / 100.0;`.
+> The values are raw floats (e.g. `MOS 4.236…`). To shorten a log line, round
+> them: `` log(`MOS ${q.mos.toFixed(2)}`) ``.
 
 ## Exporting metrics
 
