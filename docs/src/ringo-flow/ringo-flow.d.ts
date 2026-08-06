@@ -13,6 +13,10 @@ type MockResponder = MockResponseSpec | ((req: MockRequestInfo) => MockResponseS
 
 declare const enum State { Idle = "idle", Ringing = "ringing", Established = "established" }
 
+declare namespace scenario {
+  function each<T>(table: T[]): ScenarioEachFactory<T>;
+}
+
 interface AgentConfig {
   /** SIP user (registration / auth). Required. */
   username: string;
@@ -120,6 +124,11 @@ interface Peer {
   readonly name?: string;
 }
 
+interface ScenarioEachFactory<T> {
+  (name: string, body: ScenarioEachBody<T>): void;
+  (name: string, opts: ScenarioOptions, body: ScenarioEachBody<T>): void;
+}
+
 interface ScenarioOptions {
   /** Tags for filtering with `--tag` / `--exclude-tag`. */
   tags?: string[];
@@ -130,6 +139,8 @@ interface ScenarioOptions {
 }
 
 type ScenarioBody = (ctx: any) => void | Promise<void>;
+
+type ScenarioEachBody<T> = (ctx: any, param: T) => void | Promise<void>;
 
 declare class Agent {
   constructor(name: string, config: AgentConfig);

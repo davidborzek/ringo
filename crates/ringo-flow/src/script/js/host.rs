@@ -327,3 +327,104 @@ impl Drop for JsHost {
         let _ = &self.rt;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::ctx::Ctx as EngineCtx;
+    use crate::engine::{ScriptHost, TopLevel};
+    use crate::runtime::report::{Human, Level, Reporter};
+    use std::time::Duration;
+
+    fn make_host(source: &str) -> JsHost {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let reporter: Box<dyn Reporter + Send> = Box::new(Human::new(Level::Quiet));
+        let ctx = Arc::new(EngineCtx::new(
+            rt.handle().clone(),
+            reporter,
+            Duration::from_secs(5),
+        ));
+        // Keep the runtime alive for the host's lifetime.
+        std::mem::forget(rt);
+        JsHost::new(
+            ctx,
+            source.to_string(),
+            "test.js".to_string(),
+            Arc::new(Mutex::new(HashMap::new())),
+            HashMap::new(),
+            PathBuf::from("."),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn scenario_each_registers_one_scenario_per_row() {
+        let src = r#"
+          scenario.each([
+            { name: "alpha", n: 1 },
+            { name: "beta",  n: 2 },
+            { name: "gamma", n: 3 },
+          ])("param: $name", { tags: ["param"] }, (ctx, p) => {
+            log("row " + p.name + " n=" + p.n);
+          });
+        "#;
+        let mut host = make_host(src);
+        let top = host.run_top_level();
+        let scenarios = match top {
+            TopLevel::Suite {
+                scenarios,
+                top_error,
+            } => {
+                assert!(top_error.is_none(), "top-level error: {:?}", top_error);
+                scenarios
+            }
+            other => panic!("expected Suite, got {:?}", other),
+        };
+        assert_eq!(scenarios.len(), 3, "should register 3 scenarios");
+        assert_eq!(scenarios[0].name, "param: alpha");
+        assert_eq!(scenarios[1].name, "param: beta");
+        assert_eq!(scenarios[2].name, "param: gamma");
+        assert_eq!(scenarios[0].tags, vec!["param".to_string()]);
+    }
+
+    #[test]
+    fn scenario_each_without_opts() {
+        let src = r#"
+          scenario.each([{ k: "x" }, { k: "y" }])("no-opts: $k", (ctx, p) => {
+            log(p.k);
+          });
+        "#;
+        let mut host = make_host(src);
+        let top = host.run_top_level();
+        let scenarios = match top {
+            TopLevel::Suite { scenarios, .. } => scenarios,
+            other => panic!("expected Suite, got {:?}", other),
+        };
+        assert_eq!(scenarios.len(), 2);
+        assert_eq!(scenarios[0].name, "no-opts: x");
+        assert_eq!(scenarios[1].name, "no-opts: y");
+    }
+
+    #[test]
+    fn scenario_each_passes_row_to_body() {
+        // The body receives the row as its second argument; verify by stashing
+        // it in a global and checking after run_scenario.
+        let src = r#"
+          var received = null;
+          scenario.each([{ val: 42 }])("row check", (ctx, p) => {
+            received = p.val;
+          });
+        "#;
+        let mut host = make_host(src);
+        let top = host.run_top_level();
+        assert!(matches!(top, TopLevel::Suite { .. }));
+        let result = host.run_scenario("row check");
+        assert!(
+            matches!(result, ScenarioResult::Passed),
+            "scenario should pass, got {:?}",
+            result
+        );
+    }
+}

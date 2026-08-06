@@ -78,7 +78,7 @@ teardown(() => caller.hangup());
 
 scenario("answered call", async () => {
   caller.dial(callee);
-  await until(() => expect(callee.state).equals(State.Ringing), "15s");
+  await until(() => expect(callee.state).toBe(State.Ringing), "15s");
   callee.accept();
 });
 ```
@@ -87,6 +87,26 @@ Drop a [`ringo-flow.d.ts`](ringo-flow.d.ts) next to your script (or point
 `jsconfig.json` at it) for the `Agent` type and full editor support; regenerate it
 with `ringo-flow definitions --lang js`. Only the blocking waiters
 (`until`/`verifyAudio`) are Promises you `await` — instant verbs stay synchronous.
+
+### Parametrised scenarios: `scenario.each`
+
+To run the same body over a table of inputs, `scenario.each(table)` returns a
+registration function: it registers one scenario per row and passes the row to the
+body as a second argument. `$key` tokens in the name are replaced with that row's
+field, so each scenario gets a distinct — and individually selectable — name:
+
+```js
+scenario.each([
+  { kind: "internal", target: "201", within: "10s" },
+  { kind: "external", target: "+4921112345", within: "20s" },
+])("dial $kind target reaches ringing", { tags: ["dialplan"] }, async (ctx, p) => {
+  caller.dial(p.target);
+  await until(() => expect(caller.state).toBe(State.Ringing), p.within);
+});
+```
+
+The options object is optional (`scenario.each(table)(name, body)` works too) and
+applies to every row. Rows are registered in table order.
 
 ## Writing scenarios in TypeScript
 

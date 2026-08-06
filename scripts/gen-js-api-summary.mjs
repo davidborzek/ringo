@@ -2,7 +2,7 @@
 // output (run after `typedoc`). mdBook only renders pages listed in SUMMARY.md, so each
 // generated page must be linked here. Edits only the text between the js-api markers.
 import { readdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 const SRC = "docs/src";
 const API = "ringo-flow/js-api";
@@ -19,10 +19,48 @@ const page = (sub) => {
     .map((f) => `  - [${f.replace(/\.md$/, "")}](${API}/${sub}/${f})`);
 };
 
+// A `declare namespace` (e.g. `scenario.each`) is rendered into a nested module tree
+// instead of the flat kind directories above, so walk whatever else TypeDoc emitted.
+// Without this the API README links to a page mdBook never renders.
+const KIND_DIRS = new Set([
+  "classes",
+  "functions",
+  "interfaces",
+  "enumerations",
+  "type-aliases",
+]);
+
+const namespacePages = () => {
+  const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true })
+      .sort((x, y) => x.name.localeCompare(y.name))
+      .flatMap((e) =>
+        e.isDirectory()
+          ? walk(join(dir, e.name))
+          : e.name.endsWith(".md") && e.name !== "README.md"
+            ? [join(dir, e.name)]
+            : [],
+      );
+
+  return readdirSync(join(SRC, API), { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !KIND_DIRS.has(e.name))
+    .sort((x, y) => x.name.localeCompare(y.name))
+    .flatMap((e) => walk(join(SRC, API, e.name)))
+    .map((path) => {
+      // …/namespaces/<ns>/<kind>/<member>.md → label `<ns>.<member>`
+      const parts = path.split("/");
+      const member = parts.at(-1).replace(/\.md$/, "");
+      const ns = parts.at(-3);
+      const href = relative(SRC, path);
+      return `  - [${ns}.${member}](${href})`;
+    });
+};
+
 const lines = [
   `- [JS API reference](${API}/README.md)`,
   ...page("classes"),
   ...page("functions"),
+  ...namespacePages(),
   ...page("interfaces"),
   ...page("enumerations"),
   ...page("type-aliases"),
