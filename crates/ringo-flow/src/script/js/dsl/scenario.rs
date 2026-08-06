@@ -29,6 +29,19 @@ struct ScenarioOptions {
 // `ScenarioBody`'s `ctx` is whatever `setup()` returned (an arbitrary fixture), so it is
 // typed `any`. No rquickjs binding to derive from → declared verbatim.
 declare!("type ScenarioBody = (ctx: any) => void | Promise<void>;");
+// A parametrised scenario body receives the setup context plus the current
+// table row: `(ctx: any, param: T) => void | Promise<void>`.
+declare!("type ScenarioEachBody<T> = (ctx: any, param: T) => void | Promise<void>;");
+// Factory returned by `scenario.each(table)`; calling it registers one scenario
+// per table row, interpolating `$key` tokens in `name` from the row's fields.
+declare!(
+    "interface ScenarioEachFactory<T> {\n  (name: string, body: ScenarioEachBody<T>): void;\n  (name: string, opts: ScenarioOptions, body: ScenarioEachBody<T>): void;\n}"
+);
+// `scenario.each(table)(name, opts?, body)` — parametrised scenario registration.
+// `name` interpolates `$key` tokens from each row; `body` receives `(setupCtx, row)`.
+declare!(
+    "declare namespace scenario {\n  function each<T>(table: T[]): ScenarioEachFactory<T>;\n}"
+);
 
 /// Abort the current scenario as *skipped* (reported, not failed).
 // Thrown as a marker-prefixed string the host classifies.
@@ -157,3 +170,26 @@ pub fn classify_scenario_error(ctx: &JsCtx<'_>, err: JsError, label: &str) -> Sc
         other => ScenarioResult::Failed(format!("in {label}: {other}")),
     }
 }
+
+/// JS source for `scenario.each(table)(name, opts?, body)`. Evaluated after the
+/// `scenario` global is installed, adding an `.each` property to it. Iterates the
+/// table, interpolating `$key` tokens in `name` from each row's fields, and
+/// registers one `scenario(...)` per row whose body receives `(setupCtx, row)`.
+pub(in crate::script::js) const EACH_SHIM: &str = r#"
+  scenario.each = function (table) {
+    if (!Array.isArray(table)) throw new Error("scenario.each: table must be an array");
+    return function (name, opts, body) {
+      if (arguments.length === 2) { body = opts; opts = undefined; }
+      if (typeof name !== "string") throw new Error("scenario.each: name must be a string");
+      if (typeof body !== "function") throw new Error("scenario.each: body must be a function");
+      for (var i = 0; i < table.length; i++) {
+        var row = table[i];
+        var label = name.replace(/\$(\w+)/g, function (_, k) {
+          var v = row[k];
+          return v == null ? "" : String(v);
+        });
+        scenario(label, opts, function (ctx) { return body(ctx, row); });
+      }
+    };
+  };
+"#;

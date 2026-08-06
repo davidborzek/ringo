@@ -27,7 +27,7 @@ pub trait ScriptHost {
 
 /// A registered scenario plus its declared metadata (`tags` / `skip` / `only`),
 /// produced by the top-level pass and used by [`run`] to select and report it.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ScenarioInfo {
     pub name: String,
     pub tags: Vec<String>,
@@ -39,6 +39,7 @@ pub struct ScenarioInfo {
 }
 
 /// Outcome of running a single scenario.
+#[derive(Debug)]
 pub enum ScenarioResult {
     Passed,
     /// Skipped at runtime via `skip(...)` (distinct from a statically-skipped one).
@@ -46,7 +47,7 @@ pub enum ScenarioResult {
     Failed(String),
 }
 
-/// Result of the top-level pass.
+#[derive(Debug)]
 pub enum TopLevel {
     /// No scenarios registered → the top-level code itself was the scenario.
     Single(std::result::Result<(), String>),

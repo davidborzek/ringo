@@ -64,6 +64,7 @@
   - [uuid](ringo-flow/js-api/functions/uuid.md)
   - [verifyAudioConnection](ringo-flow/js-api/functions/verifyAudioConnection.md)
   - [wait](ringo-flow/js-api/functions/wait.md)
+  - [scenario.each](ringo-flow/js-api/ringo-flow-JS-API/namespaces/scenario/functions/each.md)
   - [AgentConfig](ringo-flow/js-api/interfaces/AgentConfig.md)
   - [AgentInfo](ringo-flow/js-api/interfaces/AgentInfo.md)
   - [Assertion](ringo-flow/js-api/interfaces/Assertion.md)
@@ -75,8 +76,10 @@
   - [MockResponseSpec](ringo-flow/js-api/interfaces/MockResponseSpec.md)
   - [PathMatch](ringo-flow/js-api/interfaces/PathMatch.md)
   - [Peer](ringo-flow/js-api/interfaces/Peer.md)
+  - [ScenarioEachFactory](ringo-flow/js-api/interfaces/ScenarioEachFactory.md)
   - [ScenarioOptions](ringo-flow/js-api/interfaces/ScenarioOptions.md)
   - [State](ringo-flow/js-api/enumerations/State.md)
   - [MockResponder](ringo-flow/js-api/type-aliases/MockResponder.md)
   - [ScenarioBody](ringo-flow/js-api/type-aliases/ScenarioBody.md)
+  - [ScenarioEachBody](ringo-flow/js-api/type-aliases/ScenarioEachBody.md)
 <!-- js-api:end -->

@@ -67,6 +67,10 @@ pub fn install(
      -> rquickjs::Result<()> {
         register_scenario(name, a, b)
     });
+    // `scenario.each(table)(name, opts?, body)` — parametrised scenarios. The shim
+    // attaches `.each` to the `scenario` global (set above) by evaluating a small
+    // IIFE that closes over it. Must run after `scenario` is registered.
+    ctx.eval::<(), _>(super::dsl::scenario::EACH_SHIM)?;
     set!("skip", skip_global);
     set!("setup", setup_global);
     set!("teardown", teardown_global);
