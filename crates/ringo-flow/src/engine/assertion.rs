@@ -217,13 +217,14 @@ impl Assertion {
 }
 
 /// Re-run `body` until it succeeds or `timeout` elapses. Assertions are silenced
-/// while polling; the last one is emitted once when it settles. `body` is the
+/// while polling (refcounted, so overlapping `await_until` calls don't clobber
+/// each other); the last one is emitted once when it settles. `body` is the
 /// adapter's bridge to a script closure (returning `Ok` once the assertion holds).
 pub fn await_until<F>(ctx: &Arc<Ctx>, mut body: F, timeout: Duration) -> Result<(), String>
 where
     F: FnMut() -> Result<(), String>,
 {
-    ctx.set_assert_silent(true);
+    ctx.begin_assert_silent();
     let deadline = Instant::now() + timeout;
     let outcome = loop {
         match body() {
@@ -236,7 +237,7 @@ where
             }
         }
     };
-    ctx.set_assert_silent(false);
+    ctx.end_assert_silent();
     ctx.emit_last_assert();
     outcome.map_err(|e| format!("not satisfied within {timeout:?}: {e}"))
 }
