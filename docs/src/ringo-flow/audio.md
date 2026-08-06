@@ -5,34 +5,45 @@ call and **check** what the other side receives — headless, no devices, CI-saf
 
 ## Send audio
 
-[`agent.send_audio(source)`](api/agents.md#send_audio) switches the agent's
-active-call audio source:
+[`agent.sendAudio(source)`](js-api/classes/Agent.md#sendaudio) switches the
+agent's active-call audio source:
 
-```rust
-a.send_audio(tone(440));          // a 440 Hz sine tone
-a.send_audio(file("prompt.wav")); // a WAV file
-a.send_audio(silent());           // stop sending
+```js
+a.sendAudio(tone(440));          // a 440 Hz sine tone
+a.sendAudio(file("prompt.wav")); // a WAV file
+a.sendAudio(silence());          // stop sending
 ```
 
-[`tone`](api/audiospec.md#tone), [`file`](api/audiospec.md#file) and
-[`silent`](api/audiospec.md#silent) build an [`AudioSpec`](api/audiospec.md).
+[`tone`](js-api/functions/tone.md), [`file`](js-api/functions/file.md) and
+[`silence`](js-api/functions/silence.md) build an
+[`AudioSpec`](js-api/interfaces/AudioSpec.md).
 
 ## Verify what's received
 
-[`agent.verify_audio(freq, within)`](api/agents.md#verify_audio) asserts the agent
-is receiving a tone at `freq` Hz within the time window (detected with a Goertzel
-filter):
+[`agent.verifyAudio(freq, within)`](js-api/classes/Agent.md#verifyaudio) asserts
+the agent is receiving a tone at `freq` Hz within the time window (detected with a
+Goertzel filter). It returns a Promise, so `await` it:
 
-```rust
-a.send_audio(tone(440));
-b.verify_audio(440, "5s"); // B hears A's tone within 5s
+```js
+a.sendAudio(tone(440));
+await b.verifyAudio(440, "5s"); // B hears A's tone within 5s
 ```
 
-For a quick two-way check, [`verify_audio_connection(a, b)`](api/agents.md#verify_audio_connection)
-sends a tone each way and asserts both arrive:
+The blocking detection window runs off the scenario thread, so several agents can
+listen at once instead of one after another:
 
-```rust
-verify_audio_connection(a, b);
+```js
+a.sendAudio(tone(440));
+b.sendAudio(tone(480));
+await Promise.all([b.verifyAudio(440, "5s"), a.verifyAudio(480, "5s")]);
+```
+
+For a quick two-way check,
+[`verifyAudioConnection(a, b)`](js-api/functions/verifyAudioConnection.md) sends a
+tone each way and asserts both arrive:
+
+```js
+await verifyAudioConnection(a, b);
 ```
 
 ## Debugging
@@ -40,4 +51,4 @@ verify_audio_connection(a, b);
 Run with `--save-audio` to write each agent's sent/received WAVs to the working
 directory, so you can listen to what actually flowed.
 
-See the [Agents → Methods](api/agents.md) reference for the exact signatures.
+See the [Agent](js-api/classes/Agent.md) reference for the exact signatures.

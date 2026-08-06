@@ -45,5 +45,5 @@ ringo control -t work status --json
 ringo control -t work dial 4711 --json   # {"ok":true,"data":"Dialing 4711","error":null}
 ```
 
-> For full Rhai-scripted telephony test scenarios (multiple agents, assertions,
+> For full scripted telephony test scenarios (multiple agents, assertions,
 > audio verification), see [ringo-flow](../ringo-flow/introduction.md).

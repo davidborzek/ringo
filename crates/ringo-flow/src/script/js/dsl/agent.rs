@@ -89,7 +89,7 @@ struct CallQuality {
     rtt: f64,
     /// Jitter in milliseconds.
     jitter: f64,
-    /// Fraction of packets lost (0.0–1.0).
+    /// Receive-side packet loss, in percent (0.0–100.0).
     #[qjs(rename = "packetLoss")]
     packet_loss: f64,
 }

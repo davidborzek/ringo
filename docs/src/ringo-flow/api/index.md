@@ -1,6 +1,8 @@
-# API reference
+# API reference (Rhai — deprecated)
 
-The complete scenario vocabulary, generated from the engine (so it never drifts from the code) — organized by the thing you're working with:
+> **The Rhai frontend is deprecated and will be removed in a future release.** New scenarios should use the JavaScript/TypeScript frontend — see [Writing scenarios](../writing-scenarios.md) and the [JS API reference](../js-api/index.md). This page documents the Rhai vocabulary for existing scenarios; [Rhai frontend](../rhai.md) explains why and how to migrate.
+
+The complete Rhai scenario vocabulary, generated from the engine (so it never drifts from the code) — organized by the thing you're working with:
 
 - [Scenario structure](scenario-structure.md) — defining and isolating tests: `scenario`, `setup`, `teardown`, `skip`.
 - [Flow and timing](flow-and-timing.md) — `await_until`, `wait`, `parallel`, `default_timeout`.
@@ -16,6 +18,4 @@ The complete scenario vocabulary, generated from the engine (so it never drifts 
 - [Environment](environment.md) — `env`, `load_env` — credentials stay out of scripts.
 - [Utilities](utilities.md) — `log`, `uuid`.
 
-New to it? Start with [Your first scenario](../your-first-scenario.md), then [Writing scenarios](../writing-scenarios.md).
-
-For editors and agents, the whole API is also available as [Rhai type definitions](../ringo-flow.d.rhai) (`.d.rhai`) — point the Rhai language server at it for completion and hover.
+For editors and agents, the whole Rhai API is also available as [Rhai type definitions](../ringo-flow.d.rhai) (`.d.rhai`). In practice this is a reference you read, not tooling you get: the only Rhai language server is an unreleased experiment that no editor plugin ships, so there is no type-checking and no inline error reporting — one of the reasons the frontend is being retired in favour of JS/TS.

@@ -21,8 +21,8 @@ let
     options = {
       path = lib.mkOption {
         type = lib.types.str;
-        example = "/var/lib/ringo-flow/scenarios/register.rhai";
-        description = "Path to the .rhai scenario file or a directory of scenarios.";
+        example = "/var/lib/ringo-flow/scenarios/register.js";
+        description = "Path to the scenario file (.js, or a deprecated .rhai) or a directory of scenarios.";
       };
       schedule = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -144,7 +144,7 @@ in
       example = lib.literalExpression ''
         {
           register = {
-            path = "/var/lib/ringo-flow/register.rhai";
+            path = "/var/lib/ringo-flow/register.js";
             schedule = "*/5 * * * *";
             envFile = [ "/run/secrets/ringo-flow-sip.env" ];
           };

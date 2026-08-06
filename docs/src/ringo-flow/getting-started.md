@@ -35,7 +35,7 @@ cargo install --git https://github.com/davidborzek/ringo ringo-flow
 **From a workspace checkout** (no install):
 
 ```sh
-cargo run -p ringo-flow -- run scenario.rhai
+cargo run -p ringo-flow -- run scenario.js
 ```
 
 **Nix (flake):**
@@ -58,20 +58,52 @@ To run scheduled monitors as a systemd service, use the
 ## Run a scenario
 
 Credentials and the SIP domain come from the environment (via
-[`env(...)`](api/environment.md#env)), so nothing sensitive lives in the script:
+[`env(...)`](js-api/functions/env.md)), so nothing sensitive lives in the script:
 
 ```sh
 SIP_DOMAIN=example.com A_USER=alice A_PASS=… B_USER=bob B_PASS=… \
-  ringo-flow run scenario.rhai
+  ringo-flow run scenario.js
 ```
 
 ```sh
-ringo-flow run scenario.rhai     # one file
-ringo-flow run scenarios/        # a directory (all *.rhai, recursively)
-ringo-flow check scenario.rhai   # syntax-check only (no SIP traffic)
+ringo-flow run scenario.js     # one file
+ringo-flow run scenarios/      # a directory (all *.js, recursively)
+ringo-flow check scenario.js   # syntax-check only (no SIP traffic)
 ```
 
 The exit code is non-zero if any scenario fails.
+
+The frontend follows the file extension, so there is nothing to configure:
+`.js` runs on the JavaScript frontend, `.rhai` on the
+[deprecated Rhai one](rhai.md).
+
+## Editor support
+
+Write the type definitions next to your scenarios once, and any editor with
+TypeScript support checks the whole DSL as you type:
+
+```sh
+ringo-flow definitions --lang js ringo-flow.d.ts
+```
+
+```jsonc
+// jsconfig.json — next to your scenarios
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "strict": true,
+    "noEmit": true,
+    "target": "es2022",
+    "module": "esnext",
+    "types": []
+  },
+  "files": ["ringo-flow.d.ts", "scenario.js"]
+}
+```
+
+Start each scenario with `// @ts-check` to get the same errors on the command
+line via `tsc --noEmit`. For authoring in real TypeScript, see
+[Writing scenarios](writing-scenarios.md#writing-scenarios-in-typescript).
 
 ## Useful flags
 

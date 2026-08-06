@@ -1,68 +1,66 @@
 # Writing scenarios
 
-A scenario is a Rhai script. The top level can be the whole test, or you can
-register several named scenarios as a **suite**.
+A scenario is a JavaScript file (or TypeScript, transpiled — see
+[below](#writing-scenarios-in-typescript)). The top level can be the whole test,
+or you can register several named scenarios as a **suite**.
+
+Each file runs as an ES module, so you can `import` helper files and use
+top-level `await`.
 
 ## Agents and call control
 
-[`agent(name, #{ … })`](api/agents.md#agent) connects a headless baresip instance
-and returns a handle you drive with verbs — [`register`](api/agents.md#register),
-[`dial`](api/agents.md#dial), [`accept`](api/agents.md#accept),
-[`hangup`](api/agents.md#hangup), `hold`, `dtmf`, `transfer`, … See
-[Agents](api/agents.md) for the full set, the config options and the readable
-state ([`registered`](api/agents.md#registered), [`state`](api/agents.md#state), …).
+[`new Agent(name, { … })`](js-api/classes/Agent.md) connects a headless baresip
+instance and returns a handle you drive with verbs —
+[`register`](js-api/classes/Agent.md#register),
+[`dial`](js-api/classes/Agent.md#dial),
+[`accept`](js-api/classes/Agent.md#accept),
+[`hangup`](js-api/classes/Agent.md#hangup), `hold`, `dtmf`, `transfer`, … See
+[Agent](js-api/classes/Agent.md) for the full set, the config options and the
+readable state ([`registered`](js-api/classes/Agent.md#registered),
+[`state`](js-api/classes/Agent.md#state), …).
 
-## `await_until`
+## `until`
 
 SIP is asynchronous, so assertions are polled:
-[`await_until`](api/flow-and-timing.md#await_until) re-runs an
-[`assert(...)`](api/assertions-and-matchers.md#assert) until it holds or a timeout
-elapses. Use it instead of sleeping.
+[`until`](js-api/functions/until.md) re-runs an
+[`expect(...)`](js-api/functions/expect.md) until it holds or a timeout elapses.
+Use it instead of sleeping.
 
-```rust
+```js
 a.dial(b);
-await_until(|| assert(b.state).equals(State::Ringing), "15s");
+await until(() => expect(b.state).toBe(State.Ringing), "15s");
 ```
 
-The matchers — [`equals`](api/assertions-and-matchers.md#equals),
-[`is_true`](api/assertions-and-matchers.md#is_true),
-[`contains`](api/assertions-and-matchers.md#contains), … — are all on the assertion
-handle.
+The matchers — [`toBe`](js-api/interfaces/Assertion.md#tobe),
+[`toBeTruthy`](js-api/interfaces/Assertion.md#tobetruthy),
+[`toContain`](js-api/interfaces/Assertion.md#tocontain), … — are all on the
+assertion handle, and are the Jest names, so they should already be familiar.
+
+`until` resolves with the value the condition returned, which lets you bind a
+verified value in one step:
+
+```js
+const traceId = await until(() => expect(b.header("X-Trace-Id")).toBeDefined().value());
+```
+
+Because `until` yields the event loop while it polls, independent waiters can run
+concurrently:
+
+```js
+await Promise.all([callee.verifyAudio(440, "5s"), caller.verifyAudio(480, "5s")]);
+```
 
 ## Suites: `setup` / `scenario` / `teardown`
 
-[`setup()`](api/scenario-structure.md#setup) runs before each scenario and returns
-the context passed to it; each
-[`scenario(name, body)`](api/scenario-structure.md#scenario) runs in isolation with
-fresh agents; [`teardown()`](api/scenario-structure.md#teardown) runs after each
-(even on failure).
+[`setup()`](js-api/functions/setup.md) runs before each scenario; each
+[`scenario(name, body)`](js-api/functions/scenario.md) runs in isolation with
+fresh agents; [`teardown()`](js-api/functions/teardown.md) runs after each (even
+on failure).
 
-```rust
-setup(|| {
-    let caller = agent("Caller", #{
-        username: env("A_USER"),
-        domain: env("SIP_DOMAIN"),
-        password: env("A_PASS"),
-    });
-    caller.register();
-    await_until(|| assert(caller.registered).is_true(), "10s");
-    #{ caller: caller }
-});
-
-scenario("answered call", #{ tags: ["smoke"] }, |ctx| {
-    ctx.caller.dial("+49301234567");
-    await_until(|| assert(ctx.caller.state).equals(State::Established), "15s");
-});
-```
-
-### In the JS frontend
-
-`ringo-flow run scenario.js` runs the same structure in JavaScript, with
-the same `setup` / `scenario` / `teardown`. `setup()`'s return value is likewise
-passed to each body (and `teardown`) as `ctx`. But the idiomatic — and fully typed —
-way is to keep fixtures in **closure-scoped variables**: declare them once up top,
-assign them in `setup()`, and read them everywhere. With a single `@type` annotation
-per fixture, every body gets completion and type-checking, no per-scenario typing:
+Keep fixtures in **closure-scoped variables**: declare them once up top, assign
+them in `setup()`, and read them everywhere. With a single `@type` annotation per
+fixture, every body gets completion and type-checking, with no per-scenario
+typing:
 
 ```js
 // @ts-check
@@ -76,17 +74,18 @@ setup(() => {
 
 teardown(() => caller.hangup());
 
-scenario("answered call", async () => {
+scenario("answered call", { tags: ["smoke"] }, async () => {
   caller.dial(callee);
   await until(() => expect(callee.state).toBe(State.Ringing), "15s");
   callee.accept();
+  await until(() => expect(caller.state).toBe(State.Established), "10s");
 });
 ```
 
-Drop a [`ringo-flow.d.ts`](ringo-flow.d.ts) next to your script (or point
-`jsconfig.json` at it) for the `Agent` type and full editor support; regenerate it
-with `ringo-flow definitions --lang js`. Only the blocking waiters
-(`until`/`verifyAudio`) are Promises you `await` — instant verbs stay synchronous.
+`setup()`'s return value — if you return one — is passed to each scenario body
+(and to `teardown`) as its first argument, which is handy when a fixture must be
+built per scenario. It is typed `any`, so the closure-variable pattern above is
+the one that keeps full type-checking.
 
 ### Parametrised scenarios: `scenario.each`
 
@@ -108,12 +107,40 @@ scenario.each([
 The options object is optional (`scenario.each(table)(name, body)` works too) and
 applies to every row. Rows are registered in table order.
 
+## Type-checking a plain `.js` scenario
+
+Generate the definitions once and point a `jsconfig.json` at them; with
+`// @ts-check` at the top of each scenario, your editor — and `tsc --noEmit` in
+CI — checks the whole DSL:
+
+```sh
+ringo-flow definitions --lang js ringo-flow.d.ts
+```
+
+```jsonc
+// jsconfig.json
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "strict": true,
+    "noEmit": true,
+    "target": "es2022",
+    "module": "esnext",
+    "types": []
+  },
+  "files": ["ringo-flow.d.ts", "scenario.js"]
+}
+```
+
+The `.d.ts` declares the whole DSL as **ambient globals** (`scenario`,
+`new Agent(...)`, `expect`, …), so a scenario needs no imports for them. A wrong
+matcher, an unknown agent-config key or a forgotten `await` is reported before
+baresip ever starts.
+
 ## Writing scenarios in TypeScript
 
-Scenarios execute as JavaScript, but you can author them in real TypeScript, get full
-type-checking against the generated `.d.ts`, and transpile to JS for `ringo-flow run`.
-The `.d.ts` declares the whole DSL as **ambient globals** (`scenario`, `new Agent(...)`,
-`expect`, …), so a `.ts` scenario needs no imports for them.
+Scenarios execute as JavaScript, but you can author them in real TypeScript and
+transpile to JS for `ringo-flow run`.
 
 1. Generate the type definitions and point a `tsconfig.json` at them:
 
@@ -123,7 +150,13 @@ The `.d.ts` declares the whole DSL as **ambient globals** (`scenario`, `new Agen
    ```jsonc
    // tsconfig.json
    {
-     "compilerOptions": { "strict": true, "noEmit": true, "lib": ["ES2020"], "types": [] },
+     "compilerOptions": {
+       "strict": true,
+       "noEmit": true,
+       "target": "es2022",
+       "module": "esnext",
+       "types": []
+     },
      "files": ["ringo-flow.d.ts", "scenario.ts"]
    }
    ```
@@ -155,18 +188,20 @@ into the one output — or keep them as separate `.js` and let `ringo-flow` reso
 
 ## Selecting, tagging and skipping
 
-The [`scenario(name, #{ … }, body)`](api/scenario-structure.md#scenario) options
+The [`scenario(name, { … }, body)`](js-api/interfaces/ScenarioOptions.md) options
 control which scenarios run:
 
-- **Tags** — `#{ tags: ["smoke"] }`, then `--tag smoke` / `--exclude-tag slow`.
-- **Skip** — `#{ skip: true | "reason" }` disables a scenario statically; or call
-  [`skip("reason")`](api/scenario-structure.md#skip) at runtime (e.g. env-gated).
-- **Focus** — `#{ only: true }` runs only the focused scenario(s), run-wide.
+- **Tags** — `{ tags: ["smoke"] }`, then `--tag smoke` / `--exclude-tag slow`.
+- **Skip** — `{ skip: true }` or `{ skip: "reason" }` disables a scenario
+  statically; or call [`skip("reason")`](js-api/functions/skip.md) at runtime
+  (e.g. env-gated).
+- **Focus** — `{ only: true }` runs only the focused scenario(s), run-wide.
 
 Skipped scenarios are reported but don't fail the run.
 
 ## More
 
-- [Assertions and matchers](api/assertions-and-matchers.md) — the full matcher set.
+- [Assertions and matchers](js-api/interfaces/Assertion.md) — the full matcher set.
 - [Audio testing](audio.md) — send tones/files and assert what's received.
 - [HTTP & webhooks](http-and-webhooks.md) — call and mock a backend API.
+- [Rhai frontend](rhai.md) — the deprecated frontend and how to migrate off it.

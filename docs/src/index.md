@@ -11,10 +11,11 @@ Two tools that share one engine:
 - [**ringo-phone**](ringo-phone/introduction.md) — a terminal softphone: manage SIP
   accounts and place calls without leaving the keyboard.
 - [**ringo-flow**](ringo-flow/introduction.md) — a telephony scenario test runner:
-  write call flows as Rhai scripts and run them headlessly in CI.
+  write call flows as JavaScript or TypeScript and run them headlessly in CI.
 
 The [source is on GitHub](https://github.com/davidborzek/ringo).
 
 <sub>For tooling/agents: [llms.txt](llms.txt) indexes the docs, and the ringo-flow
-scenario API is available as [Rhai type definitions](ringo-flow/ringo-flow.d.rhai)
-(`.d.rhai`).</sub>
+scenario API is available as [TypeScript definitions](ringo-flow/ringo-flow.d.ts)
+(`.d.ts`). The deprecated Rhai frontend also ships
+[`.d.rhai` definitions](ringo-flow/ringo-flow.d.rhai).</sub>

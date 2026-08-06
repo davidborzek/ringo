@@ -22,7 +22,7 @@ Mean Opinion Score (1.0–5.0); higher is better.
 
 > `readonly` **packetLoss**: `number`
 
-Fraction of packets lost (0.0–1.0).
+Receive-side packet loss, in percent (0.0–100.0).
 
 ***
 

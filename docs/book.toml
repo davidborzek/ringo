@@ -24,7 +24,7 @@ enable = true
 enable = true
 level = 0
 
-# Code blocks use `rust` only for highlighting (the scripts are Rhai), so drop the
-# "Run" button that would send them to the Rust Playground.
+# Some code blocks use `rust` only for highlighting (the deprecated Rhai scripts),
+# so drop the "Run" button that would send them to the Rust Playground.
 [output.html.playground]
 runnable = false

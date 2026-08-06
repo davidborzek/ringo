@@ -5,44 +5,45 @@
 
 **ringo-flow** is a declarative telephony scenario test runner for
 [baresip](https://github.com/baresip/baresip). You write a scenario as a small
-[Rhai](https://rhai.rs) script — bring up SIP agents, place and answer calls,
+JavaScript or TypeScript file — bring up SIP agents, place and answer calls,
 assert on call state, DTMF, audio and HTTP — and run it headlessly, e.g. in CI.
 
-```rust
-let dom = env("SIP_DOMAIN");
+```js
+// @ts-check
+const domain = env("SIP_DOMAIN");
 
-let a = agent("A", #{
-    username: env("A_USER"),
-    domain: dom,
-    password: env("A_PASS"),
-});
-let b = agent("B", #{
-    username: env("B_USER"),
-    domain: dom,
-    password: env("B_PASS"),
-});
+const a = new Agent("A", { username: env("A_USER"), domain, password: env("A_PASS") });
+const b = new Agent("B", { username: env("B_USER"), domain, password: env("B_PASS") });
 
 a.register();
 b.register();
-await_until(|| assert(b.registered).is_true(), "10s");
+await until(() => expect(b.registered).toBeTruthy(), "10s");
 
 a.dial(b);
-await_until(|| assert(b.state).equals(State::Ringing), "15s");
+await until(() => expect(b.state).toBe(State.Ringing), "15s");
 b.accept();
-await_until(|| assert(a.state).equals(State::Established));
+await until(() => expect(a.state).toBe(State.Established));
 a.hangup();
 ```
 
 ## Highlights
 
 - **Headless** — virtual audio, no devices needed; runs on a build server.
+- **Typed, in your editor** — the generated [`ringo-flow.d.ts`](ringo-flow.d.ts)
+  types the whole DSL, so agent config keys, matchers and argument types are
+  checked as you type. Author in plain `.js` with `// @ts-check`, or in real
+  TypeScript.
 - **Suites** — `setup` / `scenario` / `teardown`, each scenario isolated with
-  fresh agents. Select with `--scenario`, tag with `--tag` / `--exclude-tag`,
-  disable with `skip`, focus with `only`.
+  fresh agents. Parametrise with `scenario.each`, select with `--scenario`, tag
+  with `--tag` / `--exclude-tag`, disable with `skip`, focus with `only`.
 - **Audio** — send tones / files and assert what the other side receives
   (Goertzel tone detection).
 - **HTTP** — call backend APIs mid-scenario, and stand up a built-in mock server
   to test webhook-driven call control.
+
+> Scenarios used to be written in [Rhai](https://rhai.rs). That frontend still
+> runs `.rhai` files but is **deprecated and will be removed** — see
+> [Rhai frontend](rhai.md) for the reasons and a migration table.
 
 ## Next steps
 
@@ -51,7 +52,7 @@ a.hangup();
 - [Writing scenarios](writing-scenarios.md) — suites, selection, and the patterns.
 - [Audio testing](audio.md) and [HTTP & webhooks](http-and-webhooks.md) — the
   feature guides.
-- The **API** section (in the sidebar) — every verb, getter and matcher,
-  generated from the engine.
+- The **JS API reference** (in the sidebar) — every class, verb and matcher,
+  generated from the type definitions.
 
 The Rust library API is on [docs.rs](https://docs.rs/ringo-flow).

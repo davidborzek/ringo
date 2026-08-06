@@ -11,9 +11,9 @@
 > and is still pre-1.0 (`0.x`); verbs, getters, output and behaviour may change in
 > **breaking** ways between releases. Pin an exact version if you depend on it.
 
-ringo-flow runs automated **call tests**. A scenario is a [Rhai](https://rhai.rs)
-script that brings up one or more SIP **agents** (each a headless baresip
-instance), drives them — register, dial, accept, transfer, send DTMF, play and
+ringo-flow runs automated **call tests**. A scenario is a JavaScript (or
+TypeScript) file that brings up one or more SIP **agents** (each a headless
+baresip instance), drives them — register, dial, accept, transfer, send DTMF, play and
 verify audio, call webhooks — and **asserts** the outcome. Assertions are
 event-driven: they wait for the expected state instead of sleeping, and the run
 exits non-zero on the first failure. No sound hardware needed; it's built on the
@@ -22,7 +22,7 @@ shared [`ringo-core`](../ringo-core) engine.
 📖 **Full documentation: https://davidborzek.github.io/ringo/ringo-flow/introduction.html**
 — a guide (your first scenario, writing scenarios, audio testing, HTTP &
 webhooks, running in CI) and the generated
-[**scenario API reference**](https://davidborzek.github.io/ringo/ringo-flow/api/scenario-structure.html).
+[**scenario API reference**](https://davidborzek.github.io/ringo/ringo-flow/js-api/).
 
 ## Requirements
 
@@ -42,26 +42,27 @@ cargo install --git https://github.com/davidborzek/ringo ringo-flow
 
 ## Getting started
 
-```rhai
-// scenario.rhai
-let a = agent("A", #{ username: env("A_USER"), domain: env("SIP_DOMAIN"), password: env("A_PASS") });
-let b = agent("B", #{ username: env("B_USER"), domain: env("SIP_DOMAIN"), password: env("B_PASS") });
+```js
+// scenario.js
+// @ts-check
+const a = new Agent("A", { username: env("A_USER"), domain: env("SIP_DOMAIN"), password: env("A_PASS") });
+const b = new Agent("B", { username: env("B_USER"), domain: env("SIP_DOMAIN"), password: env("B_PASS") });
 
 a.register();
-await_until(|| assert(a.registered).is_true());
+await until(() => expect(a.registered).toBeTruthy());
 
 a.dial(b);
-await_until(|| assert(b.state).equals(State::Ringing));
+await until(() => expect(b.state).toBe(State.Ringing));
 b.accept();
-await_until(|| assert(a.state).equals(State::Established));
+await until(() => expect(a.state).toBe(State.Established));
 ```
 
 ```sh
 SIP_DOMAIN=example.com A_USER=alice A_PASS=… B_USER=bob B_PASS=… \
-  ringo-flow run scenario.rhai
+  ringo-flow run scenario.js
 
-ringo-flow run scenarios/        # a directory (all *.rhai, recursively)
-ringo-flow check scenario.rhai   # syntax-check only (no SIP traffic)
+ringo-flow run scenarios/      # a directory (all *.js, recursively)
+ringo-flow check scenario.js   # syntax-check only (no SIP traffic)
 ```
 
 The [**Your first scenario**](https://davidborzek.github.io/ringo/ringo-flow/your-first-scenario.html)
@@ -71,19 +72,33 @@ Runnable examples live in [`examples/`](https://github.com/davidborzek/ringo/tre
 
 ### Editor support
 
-The API is generated from the engine, so it never drifts from the code. Emit a
-Rhai definition file and point the [Rhai language server](https://github.com/rhaiscript/lsp)
-at it for completion, signatures and hover docs:
+The API is generated from the engine, so it never drifts from the code. Emit the
+TypeScript definitions next to your scenarios and any editor with TypeScript
+support type-checks the whole DSL — config keys, matchers, argument types — as you
+type:
 
 ```sh
-ringo-flow definitions ringo-flow.d.rhai
+ringo-flow definitions --lang js ringo-flow.d.ts
 ```
+
+Start a scenario with `// @ts-check` to get the same errors from `tsc --noEmit`,
+or author in real TypeScript and transpile — see
+[Writing scenarios](https://davidborzek.github.io/ringo/ringo-flow/writing-scenarios.html).
+
+### Rhai (deprecated)
+
+Scenarios used to be written in [Rhai](https://rhai.rs). `.rhai` files still run,
+but the frontend is **deprecated and will be removed** — no usable IDE tooling
+(the Rhai LSP is an unreleased experiment, last touched in 2022), missing language
+features and an unfamiliar syntax. See
+[Rhai frontend](https://davidborzek.github.io/ringo/ringo-flow/rhai.html) for the
+reasons and a migration table.
 
 ## Security
 
 Scenario files are **trusted code**, not sandboxed input: a scenario can make
 arbitrary HTTP requests (`http(...)`) and read local files (`file(...)`,
-`load_env(...)`). Only run scenarios you wrote or reviewed — and in CI, where the
+`loadEnv(...)`). Only run scenarios you wrote or reviewed — and in CI, where the
 runner has network reach and real credentials, keep scenario sources and env
 files under the same review controls as the rest of your code.
 
