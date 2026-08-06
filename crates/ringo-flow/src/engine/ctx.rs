@@ -71,7 +71,12 @@ thread_local! {
     /// spam); the last one is stashed and emitted once when it settles. Both are
     /// thread-local so concurrent `parallel` tasks don't corrupt each other's
     /// polling state.
-    static ASSERT_SILENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    ///
+    /// `SILENCE_DEPTH` is a refcount instead of a bool so overlapping `until`
+    /// calls under `Promise.all` (same thread, single-threaded QuickJS) don't
+    /// clobber each other's silencing: each `until` increments on enter and
+    /// decrements on exit; assertions are suppressed while `depth > 0`.
+    static SILENCE_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static LAST_ASSERT: std::cell::RefCell<Option<StashedAssertion>> =
         const { std::cell::RefCell::new(None) };
 }
@@ -505,7 +510,7 @@ impl Ctx {
         actual: String,
         ok: bool,
     ) -> bool {
-        if ASSERT_SILENT.with(|s| s.get()) {
+        if SILENCE_DEPTH.with(|s| s.get()) > 0 {
             LAST_ASSERT.with(|l| *l.borrow_mut() = Some((desc, expect, actual, ok)));
         } else {
             self.emit(&Event::Assertion {
@@ -520,11 +525,23 @@ impl Ctx {
         take_pending_label();
         ok
     }
-    pub fn set_assert_silent(&self, silent: bool) {
-        ASSERT_SILENT.with(|s| s.set(silent));
+    /// Increment the silence refcount. Assertions on this thread are stashed
+    /// (not emitted) until the matching `end_assert_silent`.
+    pub fn begin_assert_silent(&self) {
+        SILENCE_DEPTH.with(|s| s.set(s.get().saturating_add(1)));
+    }
+    /// Decrement the silence refcount. If this drops to zero, emit the stashed
+    /// assertion (the final state of the last `until`'s polling).
+    pub fn end_assert_silent(&self) {
+        SILENCE_DEPTH.with(|s| s.set(s.get().saturating_sub(1)));
     }
     /// Emit the assertion stashed during `await_until` polling (its final state).
+    /// Called after `end_assert_silent`; only emits when no other `until` is
+    /// still polling (depth == 0).
     pub fn emit_last_assert(&self) {
+        if SILENCE_DEPTH.with(|s| s.get()) > 0 {
+            return;
+        }
         if let Some((desc, expect, actual, ok)) = LAST_ASSERT.with(|l| l.borrow_mut().take()) {
             self.emit(&Event::Assertion {
                 label: desc.as_deref(),

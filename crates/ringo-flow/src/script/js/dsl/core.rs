@@ -129,12 +129,12 @@ pub(in crate::script::js) async fn wait_async<'js>(
 }
 
 // The async `until` poll loop. Mirrors the engine's `assertion::await_until`
-// (25ms ticks, global assert-silencing, same timeout message) but yields between
-// ticks instead of sleeping the thread — so concurrent waiters under `Promise.all`
-// overlap. Each tick first drains pending dynamic mock requests (the responder
-// closure can only run on this, the scenario thread). Note: assert-silencing is
-// global, so overlapping two `until`s can cross their silencing — keep
-// `Promise.all` to independent verbs (e.g. `verifyAudio`) where it matters.
+// (25ms ticks, refcounted assert-silencing, same timeout message) but yields
+// between ticks instead of sleeping the thread — so concurrent waiters under
+// `Promise.all` overlap. Each tick first drains pending dynamic mock requests
+// (the responder closure can only run on this, the scenario thread). Silencing
+// is refcounted (begin/end), so overlapping `until`s under `Promise.all` no
+// longer clobber each other's stashed assertions.
 /// Resolves with `cond`'s value once it stops throwing, or rejects on timeout.
 /// `await` it (reads as `await until(...)`); the resolved value lets `.value()` bind a
 /// verified value. While waiting it yields the event loop, so several `until`/
@@ -158,7 +158,7 @@ pub(in crate::script::js) async fn until_async<'js>(
         }
         None => eng.default_timeout(),
     };
-    eng.set_assert_silent(true);
+    eng.begin_assert_silent();
     let deadline = Instant::now() + timeout;
     let outcome: Result<Value, (String, bool)> = loop {
         super::mock::pump_bridged(&cx, &reg);
@@ -184,7 +184,7 @@ pub(in crate::script::js) async fn until_async<'js>(
         // futures-executor driver).
         let _ = eng.rt.spawn(async { tokio::time::sleep(TICK).await }).await;
     };
-    eng.set_assert_silent(false);
+    eng.end_assert_silent();
     eng.emit_last_assert();
     outcome.map_err(|(e, fatal)| {
         let msg = if fatal {
