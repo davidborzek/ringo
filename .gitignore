@@ -5,6 +5,12 @@
 /node_modules
 /package-lock.json
 
+# JS API reference pages — generated from the committed .d.ts by TypeDoc and
+# rebuilt by the docs workflow before `mdbook build`, so they can't go stale and
+# don't clutter PR diffs. Run `npm run docs:js` before previewing the book locally.
+# The SUMMARY.md section listing them *is* committed (CI checks it for drift).
+/docs/src/ringo-flow/js-api/
+
 # call recordings written by `ringo-flow run --save-audio`
 ringo-audio-*.wav
 
