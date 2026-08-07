@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.13.0...ringo-flow-v0.14.0) - 2026-08-07
+
+### Bug Fixes
+
+- *(ringo-flow)* refcount assert silencing across overlapping until()
+
+### Documentation
+
+- *(ringo-flow)* make JS the primary frontend, deprecate Rhai
+
+### Features
+
+- *(ringo-flow)* parametrised scenarios via scenario.each
+
 ## [0.13.0](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.12.2...ringo-flow-v0.13.0) - 2026-07-31
 
 ### Features
