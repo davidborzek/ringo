@@ -49,13 +49,19 @@ jobs:
       - uses: cachix/install-nix-action@v31
 
       # Renovate bumps `branch` in .gitmodules, the gitlink, and the tags in the
-      # flake.nix input URLs — but flake.lock needs Nix to regenerate, which
-      # Renovate does not have. Left alone, every vendored-source PR arrives
-      # permanently red and waits on someone running one command by hand.
+      # flake.nix input URLs, but it cannot regenerate flake.lock. Not for lack
+      # of Nix — its nix manager does shell out to `nix flake update` — but
+      # because it only rewrites an input that pins a commit hash
+      # (`replaceString` *is* that hash). Tag-pinned inputs get `lockedVersion`
+      # and no updates at all; see the note in renovate.json5. So every
+      # vendored-source PR would arrive permanently red, waiting on one command.
       #
-      # The push does not start a new workflow run (GITHUB_TOKEN pushes never
-      # do), so this run keeps going and reports on the pre-relock SHA. The
-      # commit it pushes is checked the next time the PR is touched.
+      # The push re-triggers this workflow as a `pull_request`/`synchronize`,
+      # but because it comes from GITHUB_TOKEN the run lands in an
+      # approval-required state: the PR shows an "Approve workflows to run"
+      # banner instead of green checks. A PAT or GitHub App token would remove
+      # that click, at the cost of a long-lived credential in the repo secrets.
+      # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow
       - name: Relock the flake for Renovate
         if: github.actor == 'renovate[bot]' && github.event.pull_request.head.repo.full_name == github.repository
         env:

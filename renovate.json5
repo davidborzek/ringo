@@ -22,17 +22,33 @@
   "git-submodules": { enabled: true },
 
   // Off, and the reason is worth writing down because the manager looks like it
-  // would solve the flake.lock problem. It rewrites a flake input only when the
-  // input carries a `rev` (its `replaceString` *is* that rev), and for a
-  // rev-pinned input the git-refs datasource offers digest updates — i.e. the
-  // default branch HEAD, not tags. Verified locally: with the inputs pinned by
-  // SHA it proposed baresip 934338e9, which is `main`, over the v4.10.0 tag at
-  // a1542aed. Tag-pinned inputs (what we have) get no `replaceString` at all,
-  // so it cannot touch them. Pinning ref and rev together is rejected by Nix
-  // outright: "contains both a commit hash and a branch/tag name".
+  // would solve the flake.lock problem — it does shell out to `nix flake update`.
+  // The catch is upstream in its extract step, which is explicit about it:
   //
-  // So: tags stay, git-submodules drives the bumps, and .github/workflows/nix.yml
-  // relocks flake.lock on Renovate's PRs.
+  //   // if rev is set, the flake contains a digest and can be updated directly
+  //   // otherwise set lockedVersion so it is updated during lock file maintenance
+  //
+  // Measured against this repo with `renovate --platform=local --dry-run=lookup`:
+  //   - tag-pinned (what we have): re/baresip come back with `lockedVersion` and
+  //     `updates: []` — no digest, no tag, nothing, even with v4.10.0 released.
+  //   - SHA-pinned: it offers digest updates to baresip 934338e9, which is
+  //     `main`, not the v4.10.0 tag at a1542aed. Unreleased C is worse than a
+  //     stale release behind a bindgen wrapper.
+  //   - both at once: Nix refuses — "contains both a commit hash and a
+  //     branch/tag name".
+  //
+  // The custom manager below cannot close the gap either: updateArtifacts is
+  // dispatched per manager, and custom managers export none, so a regex hit in
+  // flake.nix never reaches `nix flake update`. Renovate discussion #36047 is
+  // the open request for tag-aware flake updates; nobody is on it.
+  //
+  // Untested option if this ever becomes annoying: `postUpgradeTasks` is NOT
+  // self-hosted-only — the Mend app runs an undocumented command allow-list, and
+  // whether `nix` is on it can only be read out of Renovate's own log
+  // (search for `allowedCommands`).
+  //
+  // Until then: tags stay, git-submodules drives the bumps, and
+  // .github/workflows/nix.yml relocks flake.lock on Renovate's PRs.
   nix: { enabled: false },
 
   customManagers: [
@@ -87,7 +103,7 @@
       // reviewed by hand and never automerge, so the age gate bought nothing.
       minimumReleaseAge: null,
       prBodyNotes: [
-        "`flake.lock` needs Nix, which Renovate does not have — the Nix workflow relocks it and pushes the commit onto this branch. That push starts no new run, so the checks shown here describe the commit *before* the relock.",
+        "`flake.lock` is relocked by the Nix workflow, which pushes the commit onto this branch — Renovate cannot do it for a tag-pinned input. Because that push comes from `GITHUB_TOKEN`, the resulting run needs **Approve workflows to run** in the merge box before the checks turn green.",
       ],
     },
   ],
