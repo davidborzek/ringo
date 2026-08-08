@@ -29,7 +29,11 @@ jobs:
       - name: Install build dependencies
         # The publish verify-build links the ringo-phone/ringo-flow binaries
         # against opus + spandsp (dynamic, like the release binaries / Homebrew).
-        run: sudo apt-get update && sudo apt-get install -y libopus-dev libspandsp-dev libpulse-dev pkg-config
+        # Retries: a CDN reset mid-download would otherwise fail the step.
+        run: |
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries
+          sudo apt-get update
+          sudo apt-get install -y libopus-dev libspandsp-dev libpulse-dev pkg-config
       - uses: MarcoIeni/release-plz-action@v0.5
         with:
           command: release-pr
@@ -54,7 +58,11 @@ jobs:
       - name: Install build dependencies
         # The publish verify-build links the ringo-phone/ringo-flow binaries
         # against opus + spandsp (dynamic, like the release binaries / Homebrew).
-        run: sudo apt-get update && sudo apt-get install -y libopus-dev libspandsp-dev libpulse-dev pkg-config
+        # Retries: a CDN reset mid-download would otherwise fail the step.
+        run: |
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries
+          sudo apt-get update
+          sudo apt-get install -y libopus-dev libspandsp-dev libpulse-dev pkg-config
       - name: Run release-plz
         id: release-plz
         uses: MarcoIeni/release-plz-action@v0.5
