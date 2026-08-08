@@ -38,7 +38,7 @@ jobs:
     if: inputs.phone_tag != ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Render PKGBUILD
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -58,7 +58,7 @@ jobs:
             -e "s|__SHA_LINUX_ARM__|$(sha "ringo-$ver-aarch64-unknown-linux-gnu.tar.gz")|" \
             .github/aur/ringo-phone-bin.PKGBUILD > out/PKGBUILD
       - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
         with:
           pkgname: ringo-phone-bin
           pkgbuild: out/PKGBUILD
@@ -72,7 +72,7 @@ jobs:
     if: inputs.flow_tag != ''
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Render PKGBUILD
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -92,7 +92,7 @@ jobs:
             -e "s|__SHA_LINUX_ARM__|$(sha "ringo-flow-$ver-aarch64-unknown-linux-gnu.tar.gz")|" \
             .github/aur/ringo-flow-bin.PKGBUILD > out/PKGBUILD
       - name: Publish to AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v2.7.2
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
         with:
           pkgname: ringo-flow-bin
           pkgbuild: out/PKGBUILD

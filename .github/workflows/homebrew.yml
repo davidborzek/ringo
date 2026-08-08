@@ -36,7 +36,7 @@ jobs:
     name: Update Homebrew tap
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Render formulae & push to tap
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}        # to read release assets

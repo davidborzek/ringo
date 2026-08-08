@@ -21,7 +21,7 @@ jobs:
       group: release-plz-pr
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -50,7 +50,7 @@ jobs:
       phone_tag: ${{ steps.tags.outputs.phone_tag }}
       flow_tag: ${{ steps.tags.outputs.flow_tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
