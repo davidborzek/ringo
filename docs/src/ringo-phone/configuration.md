@@ -19,7 +19,10 @@ include = ["theme.toml", "~/.config/ringo/work.toml"]
 - Tables merge per key. An included `[theme]` that sets only `accent` leaves
   your local `subtle` alone. Arrays — `hooks`, `picker.info` — are replaced
   whole, not concatenated.
-- Included files may include further files.
+- Included files may include further files, up to eight levels deep. A file that
+  ends up including itself, directly or through a chain, is reported and skipped
+  rather than followed — but two files pulling in the same third file is fine and
+  applies it both times.
 - A file that is missing or unparseable is logged and skipped; the rest of your
   config still loads.
 

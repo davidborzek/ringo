@@ -189,8 +189,8 @@ fn load_from(path: &Path) -> RingoConfig {
     if !path.exists() {
         return RingoConfig::default();
     }
-    let mut seen = HashSet::new();
-    let Some(table) = read_merged(path, &mut seen, 0) else {
+    let mut chain = HashSet::new();
+    let Some(table) = read_merged(path, &mut chain, 0) else {
         return RingoConfig::default();
     };
     match table.try_into() {
@@ -206,7 +206,12 @@ fn load_from(path: &Path) -> RingoConfig {
 /// listed order, then the including file's own keys go on top. So the file you
 /// edit by hand always wins over a file it pulled in, and a later include wins
 /// over an earlier one.
-fn read_merged(path: &Path, seen: &mut HashSet<PathBuf>, depth: usize) -> Option<toml::Table> {
+///
+/// `chain` holds the files currently being read — the ancestors of this one, not
+/// everything seen so far. That distinction matters: two files legitimately
+/// including the same third file is a diamond, not a cycle, and treating it as
+/// one would silently drop the second application and break the ordering above.
+fn read_merged(path: &Path, chain: &mut HashSet<PathBuf>, depth: usize) -> Option<toml::Table> {
     if depth > MAX_INCLUDE_DEPTH {
         crate::rlog!(
             Warn,
@@ -216,13 +221,34 @@ fn read_merged(path: &Path, seen: &mut HashSet<PathBuf>, depth: usize) -> Option
         );
         return None;
     }
-    // Canonicalize for the cycle check so `a.toml` and `./a.toml` are one file.
+    // Canonicalize so `a.toml` and `./a.toml` count as the same file.
     let key = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    if !seen.insert(key) {
-        crate::rlog!(Warn, "config include cycle at {}, ignoring", path.display());
+    if !chain.insert(key.clone()) {
+        crate::rlog!(
+            Warn,
+            "config include cycle at {}, ignoring it",
+            path.display()
+        );
         return None;
     }
 
+    let table = read_one(path).map(|own| {
+        let mut merged = toml::Table::new();
+        for spec in include_paths(&own, path) {
+            if let Some(t) = read_merged(&spec, chain, depth + 1) {
+                merge(&mut merged, t);
+            }
+        }
+        merge(&mut merged, own);
+        merged
+    });
+
+    chain.remove(&key);
+    table
+}
+
+/// Reads and parses one file, reporting either failure as a warning.
+fn read_one(path: &Path) -> Option<toml::Table> {
     let raw = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -230,22 +256,13 @@ fn read_merged(path: &Path, seen: &mut HashSet<PathBuf>, depth: usize) -> Option
             return None;
         }
     };
-    let own: toml::Table = match toml::from_str(&raw) {
-        Ok(t) => t,
+    match toml::from_str(&raw) {
+        Ok(t) => Some(t),
         Err(e) => {
             crate::rlog!(Warn, "config parse error ({}): {}", path.display(), e);
-            return None;
-        }
-    };
-
-    let mut merged = toml::Table::new();
-    for spec in include_paths(&own, path) {
-        if let Some(t) = read_merged(&spec, seen, depth + 1) {
-            merge(&mut merged, t);
+            None
         }
     }
-    merge(&mut merged, own);
-    Some(merged)
 }
 
 /// The `include` entries of `table`, resolved against the directory holding the
@@ -434,5 +451,46 @@ mod tests {
         ]);
         assert_eq!(cfg.baresip.audio_driver.as_deref(), Some("pulse"));
         assert_eq!(cfg.hooks.len(), 1);
+    }
+
+    #[test]
+    fn a_file_cannot_include_itself() {
+        let cfg = load_files(&[(
+            "ringo.toml",
+            "include = [\"ringo.toml\"]\n[theme]\naccent = \"blue\"\n",
+        )]);
+        assert_eq!(cfg.theme.accent.0, Color::Blue);
+    }
+
+    #[test]
+    fn two_files_may_include_the_same_third_file() {
+        // Two different files include the same third file. This is NOT a cycle.
+        let cfg = load_files(&[
+            ("ringo.toml", "include = [\"a.toml\", \"b.toml\"]\n"),
+            ("a.toml", "include = [\"common.toml\"]\n"),
+            (
+                "b.toml",
+                "include = [\"common.toml\"]\n[theme]\nsubtle = \"blue\"\n",
+            ),
+            ("common.toml", "[theme]\naccent = \"red\"\n"),
+        ]);
+        assert_eq!(cfg.theme.accent.0, Color::Red, "common.toml must apply");
+        assert_eq!(cfg.theme.subtle.0, Color::Blue);
+    }
+
+    #[test]
+    fn a_shared_include_still_follows_the_documented_order() {
+        // a.toml overrides its own include; b.toml comes later and pulls the same
+        // shared file in, so by the documented order b's value must win.
+        let cfg = load_files(&[
+            ("ringo.toml", "include = [\"a.toml\", \"b.toml\"]\n"),
+            (
+                "a.toml",
+                "include = [\"common.toml\"]\n[theme]\naccent = \"green\"\n",
+            ),
+            ("b.toml", "include = [\"common.toml\"]\n"),
+            ("common.toml", "[theme]\naccent = \"red\"\n"),
+        ]);
+        assert_eq!(cfg.theme.accent.0, Color::Red);
     }
 }
