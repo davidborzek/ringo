@@ -70,7 +70,7 @@
       automerge: false,
       minimumReleaseAge: "14 days",
       prBodyNotes: [
-        "`flake.lock` is **not** updated by this PR — run `nix flake update re baresip` on the branch and push before merging.",
+        "`flake.lock` is **not** updated by this PR — run `nix flake update re baresip` on the branch and push. The Nix workflow fails until the locked revs match the submodule pins.",
       ],
     },
   ],
