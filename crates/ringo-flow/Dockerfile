@@ -12,7 +12,10 @@
 
 # ---- stage: compile ringo-flow (static baresip + vendored OpenSSL) ----
 FROM rust:1-bookworm AS rust
-RUN apt-get update \
+# Retries: deb.debian.org resets connections mid-download often enough to fail
+# the layer outright (seen in CI: "read (104: Connection reset by peer)").
+RUN printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         cmake clang libclang-dev llvm-dev pkg-config perl \
         libspandsp-dev libopus-dev \
@@ -34,7 +37,8 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then export CFLAGS="-mno-outline-atomics"; f
 
 # ---- runtime: binary + runtime deps (no libssl — vendored) ----
 FROM debian:bookworm-slim
-RUN apt-get update \
+RUN printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates libspandsp2 libopus0 \
     && rm -rf /var/lib/apt/lists/*

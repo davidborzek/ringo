@@ -1,6 +1,9 @@
 FROM debian:bookworm-slim
-RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+# Retries: deb.debian.org resets connections mid-download often enough to fail a
+# layer. apt output is kept so the next failure names its own cause.
+RUN printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libspandsp2 libopus0 \
-    >/dev/null 2>&1 && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 COPY ringo-flow /usr/local/bin/ringo-flow
 RUN ringo-flow --help

@@ -62,6 +62,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install build dependencies
         run: |
+          # A CDN connection reset mid-download fails the whole step; retry.
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries
           sudo apt-get update
           sudo apt-get install -y cmake clang libclang-dev llvm-dev pkg-config perl \
             libspandsp-dev libopus-dev libpulse-dev
