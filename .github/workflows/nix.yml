@@ -35,19 +35,34 @@ jobs:
       # the Nix path stays independent of the submodule checkout.
       - uses: actions/checkout@v4
 
-      # flake.nix pins re/baresip to the same release tags as .gitmodules, but
-      # nothing forces the two to agree — a submodule bump that skips the flake
-      # (or vice versa) would silently build different C sources than the git
-      # checkout. Compare the gitlink against the locked rev.
-      - name: Vendored sources match the submodule pins
+      # The same two C libraries are pinned in four places: `branch` in
+      # .gitmodules, the tag in the flake.nix input URL, that tag echoed in
+      # flake.lock, and the submodule gitlink resolved against flake.lock's
+      # locked rev. Nothing forces them to agree, and a partial bump is the
+      # realistic failure: Renovate's git-refs datasource and its github-tags
+      # datasource can move at different times, which ships a flake pointing at
+      # a release the cargo build never compiles.
+      #
+      # Runs before Nix is even installed, because `nix flake check` reports
+      # this as "requires lock file changes but they're not allowed", which
+      # names neither the offending input nor the fix.
+      - name: Vendored source pins agree
         run: |
           status=0
+          fail() { echo "::error file=$1::$2"; status=1; }
           for m in re baresip; do
+            submodule=$(git config -f .gitmodules "submodule.vendor/$m.branch")
+            flake=$(sed -n "s|.*url = \"github:baresip/$m/\([^\"]*\)\".*|\1|p" flake.nix)
+            ref=$(jq -r ".nodes.\"$m\".original.ref" flake.lock)
+            rev=$(jq -r ".nodes.\"$m\".locked.rev" flake.lock)
             gitlink=$(git rev-parse "HEAD:crates/ringo-core/vendor/$m")
-            locked=$(jq -r ".nodes.\"$m\".locked.rev" flake.lock)
-            if [ "$gitlink" != "$locked" ]; then
-              echo "::error file=flake.lock::$m: submodule is at $gitlink but flake.lock pins $locked — run \`nix flake update $m\` after bumping the submodule"
-              status=1
+
+            if [ "$flake" != "$submodule" ]; then
+              fail flake.nix "$m: flake.nix wants $flake but .gitmodules pins $submodule — bump both to the same tag"
+            elif [ "$ref" != "$flake" ]; then
+              fail flake.lock "$m: flake.lock still locks $ref while flake.nix wants $flake — run \`nix flake update $m\`"
+            elif [ "$gitlink" != "$rev" ]; then
+              fail flake.lock "$m: submodule checkout is $gitlink but flake.lock resolved $ref to $rev — the submodule was not moved to the tag (\`git -C crates/ringo-core/vendor/$m fetch --tags && git -C crates/ringo-core/vendor/$m checkout $flake\`)"
             fi
           done
           exit $status

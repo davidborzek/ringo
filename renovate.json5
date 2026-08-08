@@ -68,9 +68,17 @@
       matchManagers: ["git-submodules", "custom.regex"],
       groupName: "baresip vendor sources",
       automerge: false,
-      minimumReleaseAge: "14 days",
+      // No age gate here, and that is load-bearing rather than lax. The
+      // submodule side resolves through the git-refs datasource, which carries
+      // no release timestamp, and Renovate >=42 treats a missing timestamp as
+      // "not old enough" — so any minimumReleaseAge pins the submodules
+      // forever while flake.nix (github-tags, timestamped) bumps on schedule.
+      // That asymmetry ships half an update: the flake moves to the new tag,
+      // the C sources the cargo build compiles stay behind. These PRs are
+      // reviewed by hand and never automerge, so the age gate bought nothing.
+      minimumReleaseAge: null,
       prBodyNotes: [
-        "`flake.lock` is **not** updated by this PR — run `nix flake update re baresip` on the branch and push. The Nix workflow fails until the locked revs match the submodule pins.",
+        "`flake.lock` is **not** updated by this PR — run `nix flake update re baresip` on the branch and push. The Nix workflow fails until every pin agrees.",
       ],
     },
   ],
