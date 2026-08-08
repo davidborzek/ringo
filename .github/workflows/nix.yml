@@ -40,7 +40,7 @@ jobs:
       #
       # Checks out the PR head rather than the default merge commit, so the
       # relock below lands on a real branch that can be pushed.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 

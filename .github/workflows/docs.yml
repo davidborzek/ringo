@@ -36,16 +36,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
       # The ringo-flow JS API pages aren't committed — TypeDoc regenerates them from
       # the committed .d.ts on every deploy, so they can't ship stale. Node only; the
       # .d.ts itself comes from the Rust bindings and stays committed (generating it
       # here would mean a full baresip build just to publish docs).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
       # No committed package-lock.json (it's gitignored), so no `cache: npm` / `npm ci`.
       - run: npm install --no-save
       - run: npm run docs:js
@@ -54,7 +54,7 @@ jobs:
           mdbook-version: latest
       - name: Build site
         run: mdbook build docs --dest-dir "$GITHUB_WORKSPACE/site"
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
@@ -65,5 +65,5 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5
         id: deployment
