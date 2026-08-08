@@ -5,15 +5,16 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # libre + libbaresip are git submodules of ringo-core (see .gitmodules).
-    # Flake sources do not carry submodules, so we pin the exact submodule
-    # commits here and copy them into crates/ringo-core/vendor/ before the
-    # build. Keep these revs in sync with `git submodule status`.
+    # Flake sources do not carry submodules, so we pin the same upstream release
+    # tags here and copy them into crates/ringo-core/vendor/ before the build.
+    # Keep these tags in sync with `branch = ` in .gitmodules (and re-run
+    # `nix flake update re baresip` after bumping).
     re = {
-      url = "github:baresip/re/e11a4c584bdb0cb30dde9d4f3e8a7a5717506855";
+      url = "github:baresip/re/v4.9.0";
       flake = false;
     };
     baresip = {
-      url = "github:baresip/baresip/c06e3678cab6e7b5cfb504101cb82f862f2efb15";
+      url = "github:baresip/baresip/v4.9.0";
       flake = false;
     };
   };

@@ -1,0 +1,73 @@
+name: Nix
+
+# The flake is shipped surface — README, docs and the NixOS/home-manager modules
+# all point at it — but nothing in CI ever built it, so `flake.nix` could rot
+# unnoticed until a user hit it. This job builds both packages the way a
+# consumer would.
+#
+# Path-filtered on purpose: the Nix build compiles the same sources as the
+# regular build jobs, so plain Rust changes can't break it in a way `cargo
+# build` misses. What *can* break it is a new system dependency or a change to
+# the packaging itself — and that always shows up in a manifest, a build script,
+# the flake, or the submodule pins.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - flake.nix
+      - flake.lock
+      - nix/**
+      - .gitmodules
+      - Cargo.toml
+      - Cargo.lock
+      - crates/**/Cargo.toml
+      - crates/**/build.rs
+      - .github/workflows/nix.yml
+
+jobs:
+  build:
+    name: nix build
+    runs-on: ubuntu-latest
+    steps:
+      # Deliberately no `submodules:` — the flake copies the vendored C sources
+      # from its own `re`/`baresip` inputs, so this job doubles as proof that
+      # the Nix path stays independent of the submodule checkout.
+      - uses: actions/checkout@v4
+
+      # flake.nix pins re/baresip to the same release tags as .gitmodules, but
+      # nothing forces the two to agree — a submodule bump that skips the flake
+      # (or vice versa) would silently build different C sources than the git
+      # checkout. Compare the gitlink against the locked rev.
+      - name: Vendored sources match the submodule pins
+        run: |
+          status=0
+          for m in re baresip; do
+            gitlink=$(git rev-parse "HEAD:crates/ringo-core/vendor/$m")
+            locked=$(jq -r ".nodes.\"$m\".locked.rev" flake.lock)
+            if [ "$gitlink" != "$locked" ]; then
+              echo "::error file=flake.lock::$m: submodule is at $gitlink but flake.lock pins $locked — run \`nix flake update $m\` after bumping the submodule"
+              status=1
+            fi
+          done
+          exit $status
+
+      # Upstream Nix. DeterminateSystems/nix-installer-action only installs
+      # Determinate Nix since 2026-01-01.
+      - uses: cachix/install-nix-action@v31
+
+      # Evaluates every output — packages and devShells for all three declared
+      # systems, the overlay, the NixOS module — without building them, so a
+      # broken aarch64/darwin branch of mkRingo surfaces on an x86_64 runner.
+      # `--no-update-lock-file` fails on a flake.lock that no longer matches
+      # flake.nix instead of quietly relocking.
+      - run: nix flake check --no-update-lock-file --all-systems
+
+      - run: nix build --print-build-logs --out-link result-phone .#ringo-phone
+      - run: nix build --print-build-logs --out-link result-flow .#ringo-flow
+
+      # Same smoke test the release binaries get: the wrapper links and runs.
+      - name: Smoke test
+        run: |
+          ./result-phone/bin/ringo --help
+          ./result-flow/bin/ringo-flow --help
