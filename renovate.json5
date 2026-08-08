@@ -16,6 +16,13 @@
   // submodule pointers themselves (see below).
   ignorePaths: ["crates/ringo-core/vendor/**"],
 
+  // The Nix workflow pushes the flake.lock relock onto Renovate's own branches.
+  // Without this, Renovate reads that commit as a human editing its PR, stops
+  // touching the branch entirely and posts a "rebasing is not possible" comment
+  // — observed on #82: `branch.isModified(): "true"` / `PR has been edited`.
+  // A stalled PR would then never pick up the next upstream release.
+  gitIgnoredAuthors: ["41898282+github-actions[bot]@users.noreply.github.com"],
+
   // .gitmodules pins re/baresip to upstream release tags via `branch = vX.Y.Z`,
   // which this manager resolves against tags — so we get release bumps, not
   // default-branch HEAD.
@@ -42,12 +49,14 @@
   // flake.nix never reaches `nix flake update`. Renovate discussion #36047 is
   // the open request for tag-aware flake updates; nobody is on it.
   //
-  // Untested option if this ever becomes annoying: `postUpgradeTasks` is NOT
-  // self-hosted-only — the Mend app runs an undocumented command allow-list, and
-  // whether `nix` is on it can only be read out of Renovate's own log
-  // (search for `allowedCommands`).
+  // `postUpgradeTasks` is the obvious escape hatch and it is a dead end here.
+  // Every command must match `allowedCommands`, which the docs call "a
+  // global-only configuration option" — so it cannot be set from this file, and
+  // Mend's own list, read out of the job log for this repo, is exactly:
+  //   ^git add --all$   ^git reset$   ^pwd$
+  // No amount of `installTools: { nix: {} }` gets `nix flake update` past that.
   //
-  // Until then: tags stay, git-submodules drives the bumps, and
+  // So: tags stay, git-submodules drives the bumps, and
   // .github/workflows/nix.yml relocks flake.lock on Renovate's PRs.
   nix: { enabled: false },
 
