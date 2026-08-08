@@ -1,7 +1,8 @@
 # Nord
 # https://www.nordtheme.com
 #
-# Copy the [theme] block into ~/.config/ringo/ringo.toml
+# Drop this file into ~/.config/ringo/ and add to ringo.toml:
+#   include = ["nord.toml"]
 
 [theme]
 accent    = "#88c0d0"   # nord8 (frost)
