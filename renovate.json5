@@ -21,9 +21,18 @@
   // default-branch HEAD.
   "git-submodules": { enabled: true },
 
-  // Off by default and staying off: a `nix flake update` would also move
-  // nixpkgs (which follows `nixos-unstable` — no ref to bump, only a lock
-  // rev). The re/baresip inputs are covered by the regex manager below.
+  // Off, and the reason is worth writing down because the manager looks like it
+  // would solve the flake.lock problem. It rewrites a flake input only when the
+  // input carries a `rev` (its `replaceString` *is* that rev), and for a
+  // rev-pinned input the git-refs datasource offers digest updates — i.e. the
+  // default branch HEAD, not tags. Verified locally: with the inputs pinned by
+  // SHA it proposed baresip 934338e9, which is `main`, over the v4.10.0 tag at
+  // a1542aed. Tag-pinned inputs (what we have) get no `replaceString` at all,
+  // so it cannot touch them. Pinning ref and rev together is rejected by Nix
+  // outright: "contains both a commit hash and a branch/tag name".
+  //
+  // So: tags stay, git-submodules drives the bumps, and .github/workflows/nix.yml
+  // relocks flake.lock on Renovate's PRs.
   nix: { enabled: false },
 
   customManagers: [
