@@ -12,8 +12,8 @@
       },
       "original": {
         "owner": "baresip",
+        "ref": "v4.9.0",
         "repo": "baresip",
-        "rev": "c06e3678cab6e7b5cfb504101cb82f862f2efb15",
         "type": "github"
       }
     },
@@ -45,8 +45,8 @@
       },
       "original": {
         "owner": "baresip",
+        "ref": "v4.9.0",
         "repo": "re",
-        "rev": "e11a4c584bdb0cb30dde9d4f3e8a7a5717506855",
         "type": "github"
       }
     },

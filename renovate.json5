@@ -1,0 +1,77 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    "config:recommended",
+    ":semanticCommits",
+    // Refresh Cargo.lock (transitive deps) once a week, independent of any
+    // direct dependency bump.
+    ":maintainLockFilesWeekly",
+  ],
+
+  // Let a release sit for a few days before we pick it up — filters out the
+  // "published, then yanked/hotfixed an hour later" case.
+  minimumReleaseAge: "3 days",
+
+  // Nothing inside the vendored C checkouts is ours to update — only the
+  // submodule pointers themselves (see below).
+  ignorePaths: ["crates/ringo-core/vendor/**"],
+
+  // .gitmodules pins re/baresip to upstream release tags via `branch = vX.Y.Z`,
+  // which this manager resolves against tags — so we get release bumps, not
+  // default-branch HEAD.
+  "git-submodules": { enabled: true },
+
+  // Off by default and staying off: a `nix flake update` would also move
+  // nixpkgs (which follows `nixos-unstable` — no ref to bump, only a lock
+  // rev). The re/baresip inputs are covered by the regex manager below.
+  nix: { enabled: false },
+
+  customManagers: [
+    {
+      description: "flake.nix pins the same re/baresip release tags as .gitmodules — bump them together",
+      customType: "regex",
+      managerFilePatterns: ["/(^|/)flake\\.nix$/"],
+      matchStrings: ['url = "github:(?<depName>baresip/(?:re|baresip))/(?<currentValue>v[^"]+)"'],
+      datasourceTemplate: "github-tags",
+    },
+  ],
+
+  packageRules: [
+    {
+      description: "Automerge non-major updates once CI passes",
+      matchUpdateTypes: ["minor", "patch", "digest", "pin", "pinDigest", "lockFileMaintenance"],
+      automerge: true,
+    },
+    {
+      description: "Major updates: open a PR for manual review, never automerge",
+      matchUpdateTypes: ["major"],
+      automerge: false,
+    },
+    {
+      description: "One PR for all non-major Rust deps — CI here is expensive (cross-compile + multi-arch Docker)",
+      matchManagers: ["cargo"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "rust dependencies (non-major)",
+    },
+    {
+      description: "One PR for all workflow action bumps",
+      matchManagers: ["github-actions"],
+      groupName: "github actions",
+    },
+    {
+      description: "typedoc-plugin-markdown peer-depends on typedoc — they must move together",
+      matchManagers: ["npm"],
+      groupName: "docs toolchain",
+    },
+    {
+      description: "re + baresip: one PR moving .gitmodules and flake.nix in lockstep; never automerged (C/ABI surface behind ringo-core's bindgen wrapper)",
+      matchManagers: ["git-submodules", "custom.regex"],
+      groupName: "baresip vendor sources",
+      automerge: false,
+      minimumReleaseAge: "14 days",
+      prBodyNotes: [
+        "`flake.lock` is **not** updated by this PR — run `nix flake update re baresip` on the branch and push before merging.",
+      ],
+    },
+  ],
+}

@@ -1,6 +1,15 @@
+# `branch` here is a *tag*, not a branch: it pins the vendored C sources to an
+# upstream release and lets Renovate bump them (the git-submodules manager
+# resolves `branch` against refs, tags included). Trade-off: `git submodule
+# update --remote` no longer works — update manually with
+# `git -C <path> fetch --tags && git -C <path> checkout <tag>`.
+# `git submodule update --init` (what CI and BUILD.md use) is unaffected.
+# Keep these tags in sync with the `re`/`baresip` inputs in flake.nix.
 [submodule "vendor/re"]
 	path = crates/ringo-core/vendor/re
 	url = https://github.com/baresip/re.git
+	branch = v4.9.0
 [submodule "vendor/baresip"]
 	path = crates/ringo-core/vendor/baresip
 	url = https://github.com/baresip/baresip.git
+	branch = v4.9.0
