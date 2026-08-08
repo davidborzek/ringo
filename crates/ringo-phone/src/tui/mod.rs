@@ -29,6 +29,29 @@ use ringo_core::backend::Session;
 pub(crate) type TermWriter = Box<dyn std::io::Write + Send>;
 pub(crate) type Term = Terminal<CrosstermBackend<TermWriter>>;
 
+/// Clear the screen without asking the terminal where the cursor is.
+///
+/// `Terminal::clear` snapshots and restores the cursor (ratatui >= 0.30), and
+/// crossterm implements that query by writing `ESC [ 6 n` to fd 1 and waiting
+/// for the reply on stdin. Under `StdioRedirect` fd 1 is the profile log, so the
+/// query goes into the log, no reply ever arrives, and after two seconds the
+/// call fails with "The cursor position could not be read within a normal
+/// duration" — which is what greeted anyone starting a profile.
+///
+/// The escape sequence does not move the cursor, so nothing needs restoring.
+/// The two swaps reset both buffers, which is the other half of what
+/// `Terminal::clear` does: it forces the next draw to repaint everything
+/// instead of diffing against a buffer describing a screen we just wiped.
+pub(crate) fn clear_screen(terminal: &mut Term) -> io::Result<()> {
+    crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+    )?;
+    terminal.swap_buffers();
+    terminal.swap_buffers();
+    Ok(())
+}
+
 /// Renders the TUI on a private handle to the original stdout terminal while
 /// redirecting the process's stdout+stderr (fd 1/2) into the log file. baresip/
 /// libre print interface info via raw `re_printf` to fd 1, bypassing the log
@@ -235,7 +258,7 @@ pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<
         terminal.backend_mut(),
         crossterm::terminal::EnterAlternateScreen
     )?;
-    terminal.clear()?;
+    clear_screen(&mut terminal)?;
 
     let mut do_restart = false;
     loop {

@@ -143,7 +143,7 @@ pub fn pick_profile(focus: Option<&str>) -> Result<Option<String>> {
     // Clear explicitly: when the phone TUI hands over on a profile switch we stay
     // in the alternate screen (no leave/re-enter to wipe it), so the picker must
     // clear any leftover frame itself.
-    terminal.clear()?;
+    crate::tui::clear_screen(&mut terminal)?;
 
     let result = pick_profile_loop(&mut terminal, focus);
 
@@ -258,7 +258,7 @@ fn open_settings(terminal: &mut crate::tui::Term) -> Result<()> {
 
     enable_raw_mode()?;
     execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-    terminal.clear()?;
+    crate::tui::clear_screen(terminal)?;
 
     status
         .map(|_| ())

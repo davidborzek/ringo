@@ -861,7 +861,7 @@ fn open_editor(terminal: &mut Term, path: &Path) -> Result<()> {
 
     enable_raw_mode()?;
     execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-    terminal.clear()?;
+    crate::tui::clear_screen(terminal)?;
 
     status
         .map(|_| ())
