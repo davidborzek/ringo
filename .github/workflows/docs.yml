@@ -5,15 +5,21 @@ name: docs
 # davidborzek.github.io/ringo/. Add a tool by dropping a docs/src/<tool>/ section
 # and listing it in docs/src/SUMMARY.md; no workflow change needed.
 #
-# Deploys on a release tag (built from that tag's tree), NOT on every main push —
-# so the live site always matches the latest *released* version, not unreleased
-# changes already merged to main. Use workflow_dispatch to redeploy manually
-# (e.g. a docs-only fix between releases).
+# Deploys on release, NOT on every main push — so the live site always matches the
+# latest *released* version, not unreleased changes already merged to main. Use
+# workflow_dispatch to redeploy manually (e.g. a docs-only fix between releases).
+#
+# Release-plz calls this via workflow_call after tagging. It does NOT trigger on the
+# tag push: release-plz tags with the default GITHUB_TOKEN, and GitHub deliberately
+# does not fire workflows for events created by that token (the loop guard). The
+# binary/Docker jobs hang off release-plz's `releases` output for the same reason.
 on:
-  push:
-    tags:
-      - "ringo-phone-v*"
-      - "ringo-flow-v*"
+  workflow_call:
+    inputs:
+      ref:
+        description: Ref to build the site from (defaults to the calling commit)
+        type: string
+        required: false
   workflow_dispatch:
 
 permissions:
@@ -31,6 +37,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      # The ringo-flow JS API pages aren't committed — TypeDoc regenerates them from
+      # the committed .d.ts on every deploy, so they can't ship stale. Node only; the
+      # .d.ts itself comes from the Rust bindings and stays committed (generating it
+      # here would mean a full baresip build just to publish docs).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # No committed package-lock.json (it's gitignored), so no `cache: npm` / `npm ci`.
+      - run: npm install --no-save
+      - run: npm run docs:js
       - uses: peaceiris/actions-mdbook@v2
         with:
           mdbook-version: latest

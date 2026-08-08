@@ -5,6 +5,13 @@ description = "Tooling for baresip SIP softphones — the ringo softphone and th
 language = "en"
 src = "src"
 
+[build]
+# The ringo-flow JS API pages are generated (`npm run docs:js`) and not committed.
+# mdBook's default is to silently create an empty file for any SUMMARY entry that's
+# missing — which would deploy an empty API reference if TypeDoc never ran. Fail the
+# build instead.
+create-missing = false
+
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "ayu"

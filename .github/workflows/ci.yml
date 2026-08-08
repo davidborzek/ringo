@@ -38,6 +38,16 @@ jobs:
       # No committed package-lock.json (it's gitignored), so no `cache: npm` / `npm ci`.
       - run: npm install --no-save
       - run: npm run check:js
+      # The JS API pages themselves aren't committed (the docs workflow regenerates
+      # them on deploy), so run TypeDoc here purely to catch a broken generator in the
+      # PR instead of at release time. Its SUMMARY.md section *is* committed — mdBook
+      # only renders what SUMMARY names — so fail if a .d.ts change added or removed a
+      # page without `npm run docs:js` being re-run.
+      - run: npm run docs:js
+      - name: SUMMARY.md JS API section is current
+        run: |
+          git diff --exit-code docs/src/SUMMARY.md \
+            || { echo "::error::docs/src/SUMMARY.md is stale — run \`npm run docs:js\` and commit it"; exit 1; }
 
   test:
     name: Test (Linux)

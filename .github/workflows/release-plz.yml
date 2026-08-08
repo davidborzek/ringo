@@ -126,6 +126,24 @@ jobs:
       phone_tag: ${{ needs.release.outputs.phone_tag }}
       flow_tag: ${{ needs.release.outputs.flow_tag }}
 
+  # Documentation site → GitHub Pages, built from the released tag's tree so the
+  # live site matches the latest release. Called from here rather than triggered by
+  # the tag push: release-plz tags with the default GITHUB_TOKEN, and GitHub does not
+  # fire workflows for events that token creates — same reason the binary/Docker jobs
+  # hang off `releases` instead of a tag trigger.
+  docs:
+    needs: release
+    if: ${{ needs.release.outputs.phone_tag != '' || needs.release.outputs.flow_tag != '' }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      # Both crates are tagged on the same release commit, so either tag names the
+      # same tree; prefer flow's, fall back to phone's when only phone was released.
+      ref: ${{ needs.release.outputs.flow_tag != '' && needs.release.outputs.flow_tag || needs.release.outputs.phone_tag }}
+
   # AUR `-bin` packages — same gating as homebrew; aur.yml publishes only the
   # package(s) whose tag is non-empty.
   aur:
