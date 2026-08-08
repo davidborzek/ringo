@@ -29,22 +29,61 @@ jobs:
   build:
     name: nix build
     runs-on: ubuntu-latest
+    permissions:
+      # Renovate cannot relock the flake (it has no Nix), so this job does it
+      # for them and pushes the result back onto the PR branch.
+      contents: write
     steps:
       # Deliberately no `submodules:` — the flake copies the vendored C sources
       # from its own `re`/`baresip` inputs, so this job doubles as proof that
       # the Nix path stays independent of the submodule checkout.
+      #
+      # Checks out the PR head rather than the default merge commit, so the
+      # relock below lands on a real branch that can be pushed.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # Upstream Nix. DeterminateSystems/nix-installer-action only installs
+      # Determinate Nix since 2026-01-01.
+      - uses: cachix/install-nix-action@v31
+
+      # Renovate bumps `branch` in .gitmodules, the gitlink, and the tags in the
+      # flake.nix input URLs — but flake.lock needs Nix to regenerate, which
+      # Renovate does not have. Left alone, every vendored-source PR arrives
+      # permanently red and waits on someone running one command by hand.
+      #
+      # The push does not start a new workflow run (GITHUB_TOKEN pushes never
+      # do), so this run keeps going and reports on the pre-relock SHA. The
+      # commit it pushes is checked the next time the PR is touched.
+      - name: Relock the flake for Renovate
+        if: github.actor == 'renovate[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          nix flake update re baresip
+          # `git diff --quiet && exit 0` would abort the step under `bash -e`:
+          # the whole && list returns 1 when the lock did change.
+          if git diff --quiet flake.lock; then
+            echo "flake.lock already matches flake.nix"
+            exit 0
+          fi
+          # `git -c` rather than `git config`: the identity belongs to this one
+          # commit, not to the repository the script happens to run in.
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m 'chore(deps): relock flake for the vendored C sources' flake.lock
+          git push origin "HEAD:$BRANCH"
+          echo "::notice::flake.lock relocked and pushed to $BRANCH"
 
       # The same two C libraries are pinned in four places: `branch` in
       # .gitmodules, the tag in the flake.nix input URL, that tag echoed in
       # flake.lock, and the submodule gitlink resolved against flake.lock's
       # locked rev. Nothing forces them to agree, and a partial bump is the
-      # realistic failure: Renovate's git-refs datasource and its github-tags
-      # datasource can move at different times, which ships a flake pointing at
-      # a release the cargo build never compiles.
+      # realistic failure: a hand edit that touches one of them.
       #
-      # Runs before Nix is even installed, because `nix flake check` reports
-      # this as "requires lock file changes but they're not allowed", which
+      # Runs after the relock above and before `nix flake check`, whose take on
+      # a mismatch — "requires lock file changes but they're not allowed" —
       # names neither the offending input nor the fix.
       - name: Vendored source pins agree
         run: |
@@ -66,10 +105,6 @@ jobs:
             fi
           done
           exit $status
-
-      # Upstream Nix. DeterminateSystems/nix-installer-action only installs
-      # Determinate Nix since 2026-01-01.
-      - uses: cachix/install-nix-action@v31
 
       # Evaluates every output — packages and devShells for all three declared
       # systems, the overlay, the NixOS module — without building them, so a
