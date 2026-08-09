@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "types": [],
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022"],
+    // Scenarios run as ES modules, so each file has its own scope. Without this,
+    // TypeScript would treat a file with no import/export as a global script and
+    // report the `caller` in one example as redeclaring the `caller` in another.
+    "moduleDetection": "force"
+  },
+  "files": [
+    "../../../docs/src/ringo-flow/ringo-flow.d.ts",
+    "two-party.js",
+    "three-party-transfer.js",
+    "suite.js",
+    "webhook-mock.js",
+    "mock-dynamic.js"
+  ]
+}

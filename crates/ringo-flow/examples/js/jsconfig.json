@@ -1,4 +1,0 @@
-{
-  "compilerOptions": { "checkJs": true, "noEmit": true, "strict": true, "types": [], "lib": ["ES2020"] },
-  "files": ["../../../../docs/src/ringo-flow/ringo-flow.d.ts", "two-party.js", "mock-dynamic.js"]
-}
