@@ -193,20 +193,24 @@ fn build_vendored() {
     // Use --whole-archive for libbaresip + libre so ALL symbols are
     // included, not just those referenced by Rust code.
 
+    // CMake's GNUInstallDirs picks the install libdir from the host: `lib` where a
+    // distro marker exists (/etc/debian_version, /etc/arch-release, …), `lib64` on
+    // a 64-bit system without one — a Nix shell, for instance. Ask where the
+    // archive actually landed instead of assuming.
+    let baresip_libdir = installed_libdir(&baresip_install, "libbaresip.a");
+    let re_libdir = installed_libdir(&re_install, "libre.a");
+
     println!(
         "cargo:rustc-link-search=native={}",
-        baresip_install.join("lib").display()
+        baresip_libdir.display()
     );
-    println!(
-        "cargo:rustc-link-search=native={}",
-        re_install.join("lib").display()
-    );
+    println!("cargo:rustc-link-search=native={}", re_libdir.display());
     // Expose .a paths to downstream build scripts via DEP_RINGO_CORE_*.
     println!(
         "cargo:baresip_lib={}",
-        baresip_install.join("lib/libbaresip.a").display()
+        baresip_libdir.join("libbaresip.a").display()
     );
-    println!("cargo:re_lib={}", re_install.join("lib/libre.a").display());
+    println!("cargo:re_lib={}", re_libdir.join("libre.a").display());
 
     // System libs that baresip/re and the statically linked modules depend on.
     //
@@ -393,6 +397,21 @@ fn run(cmd: &str, args: &[&str]) {
     if !status.success() {
         panic!("{cmd} failed with status {status}");
     }
+}
+
+/// The directory under `prefix` that actually holds `archive`.
+///
+/// CMake installs into `lib` or `lib64` depending on what GNUInstallDirs infers
+/// about the host, so probing beats guessing — and beats forcing
+/// `-DCMAKE_INSTALL_LIBDIR`, which would only cover the projects we configure
+/// ourselves. Falls back to `lib` so a missing archive fails at the linker with
+/// the path it wanted, rather than here with a less obvious message.
+fn installed_libdir(prefix: &std::path::Path, archive: &str) -> PathBuf {
+    ["lib", "lib64"]
+        .iter()
+        .map(|d| prefix.join(d))
+        .find(|dir| dir.join(archive).exists())
+        .unwrap_or_else(|| prefix.join("lib"))
 }
 
 /// Generate Rust FFI bindings from the libre + libbaresip C headers using bindgen.
