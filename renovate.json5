@@ -96,6 +96,11 @@
       description: "typedoc-plugin-markdown peer-depends on typedoc — they must move together",
       matchManagers: ["npm"],
       groupName: "docs toolchain",
+      // `package-lock.json` is gitignored (the docs toolchain is build tooling,
+      // not a shipped artifact), so there is no npm lock file to refresh. Without
+      // this, `:maintainLockFilesWeekly` still queues a second "lock file
+      // maintenance" entry on the dashboard every week that can never do anything.
+      lockFileMaintenance: { enabled: false },
     },
     {
       description: "re + baresip: one PR moving .gitmodules and flake.nix in lockstep; never automerged (C/ABI surface behind ringo-core's bindgen wrapper)",
