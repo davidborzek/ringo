@@ -50,17 +50,6 @@
         let
           lib = pkgs.lib;
           cargoToml = lib.importTOML (./crates + "/${crate}/Cargo.toml");
-          # ringo-core's build.rs hardcodes the vendored install path as
-          # `<out>/lib/lib{re,baresip}.a`, but GNUInstallDirs picks `lib64` in
-          # the Nix sandbox (no distro marker under /etc). This shim forces
-          # `CMAKE_INSTALL_LIBDIR=lib` on the configure step (not on
-          # `cmake --build`, which rejects -D flags).
-          cmakeShim = pkgs.writeShellScript "cmake" ''
-            for a in "$@"; do
-              [ "$a" = "--build" ] && exec ${pkgs.cmake}/bin/cmake "$@"
-            done
-            exec ${pkgs.cmake}/bin/cmake "$@" -DCMAKE_INSTALL_LIBDIR=lib
-          '';
         in
         pkgs.rustPlatform.buildRustPackage {
           pname = crate;
@@ -76,11 +65,6 @@
             rm -rf crates/ringo-core/vendor/re crates/ringo-core/vendor/baresip
             cp -r --no-preserve=mode,ownership ${re} crates/ringo-core/vendor/re
             cp -r --no-preserve=mode,ownership ${baresip} crates/ringo-core/vendor/baresip
-
-            # Shadow `cmake` with the lib-dir-forcing shim (see cmakeShim).
-            mkdir -p "$TMPDIR/cmake-shim"
-            ln -sf ${cmakeShim} "$TMPDIR/cmake-shim/cmake"
-            export PATH="$TMPDIR/cmake-shim:$PATH"
           '';
 
           nativeBuildInputs = [
