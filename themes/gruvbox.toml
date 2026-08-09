@@ -1,7 +1,8 @@
 # Gruvbox Dark
 # https://github.com/morhetz/gruvbox
 #
-# Copy the [theme] block into ~/.config/ringo/ringo.toml
+# Drop this file into ~/.config/ringo/ and add to ringo.toml:
+#   include = ["gruvbox.toml"]
 
 [theme]
 accent    = "#83a598"   # aqua

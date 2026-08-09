@@ -2,6 +2,55 @@
 
 Global config lives at `~/.config/ringo/ringo.toml`. Everything below is optional.
 
+## Splitting the config across files
+
+`include` folds other TOML files into `ringo.toml`:
+
+```toml
+include = ["theme.toml", "~/.config/ringo/work.toml"]
+```
+
+- Relative paths resolve against the directory of the file naming them, so
+  `theme.toml` means `~/.config/ringo/theme.toml`. A leading `~/` expands to
+  your home directory.
+- Includes are applied in the order listed, then the including file's own keys
+  go on top. So a later include beats an earlier one, and whatever you write in
+  `ringo.toml` beats all of them.
+- Tables merge per key. An included `[theme]` that sets only `accent` leaves
+  your local `subtle` alone. Arrays — `hooks`, `picker.info` — are replaced
+  whole, not concatenated.
+- Included files may include further files, up to eight levels deep. A file that
+  ends up including itself, directly or through a chain, is reported and skipped
+  rather than followed — but two files pulling in the same third file is fine and
+  applies it both times.
+- A file that is missing or unparseable is logged and skipped; the rest of your
+  config still loads.
+
+This is what makes generated themes practical. [matugen](https://github.com/InioX/matugen),
+for instance, can render a ringo theme from your wallpaper — point a template at
+`~/.config/ringo/theme.toml`:
+
+```toml
+# matugen config
+[templates.ringo]
+input_path = "~/.config/matugen/templates/ringo.toml"
+output_path = "~/.config/ringo/theme.toml"
+```
+
+```toml
+# ~/.config/matugen/templates/ringo.toml
+[theme]
+accent    = "{{colors.primary.default.hex}}"
+subtle    = "{{colors.outline.default.hex}}"
+success   = "{{colors.tertiary.default.hex}}"
+danger    = "{{colors.error.default.hex}}"
+attention = "{{colors.secondary.default.hex}}"
+transfer  = "{{colors.primary_fixed_dim.default.hex}}"
+```
+
+With `include = ["theme.toml"]` in `ringo.toml`, re-running matugen re-themes the
+phone on the next start, and nothing hand-written gets overwritten.
+
 ## Picker subtitle
 
 ```toml
@@ -35,7 +84,12 @@ transfer  = "magenta"
 ```
 
 Ready-made themes (Catppuccin Mocha, Gruvbox, Nord, Tokyo Night) live in
-[`themes/`](https://github.com/davidborzek/ringo/tree/main/themes).
+[`themes/`](https://github.com/davidborzek/ringo/tree/main/themes). Drop one next
+to your config and name it in `include` instead of copying the block:
+
+```toml
+include = ["tokyo-night.toml"]
+```
 
 ## baresip
 

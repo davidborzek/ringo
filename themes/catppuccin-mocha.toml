@@ -1,7 +1,8 @@
 # Catppuccin Mocha
 # https://github.com/catppuccin/catppuccin
 #
-# Copy the [theme] block into ~/.config/ringo/ringo.toml
+# Drop this file into ~/.config/ringo/ and add to ringo.toml:
+#   include = ["catppuccin-mocha.toml"]
 
 [theme]
 accent    = "#89b4fa"   # blue

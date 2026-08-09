@@ -1,7 +1,8 @@
 # Tokyo Night
 # https://github.com/enkia/tokyo-night-vscode-theme
 #
-# Copy the [theme] block into ~/.config/ringo/ringo.toml
+# Drop this file into ~/.config/ringo/ and add to ringo.toml:
+#   include = ["tokyo-night.toml"]
 
 [theme]
 accent    = "#7aa2f7"   # blue
