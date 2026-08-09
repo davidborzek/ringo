@@ -9,13 +9,13 @@ timeout = "120s"
 
 [[monitor]]
 name = "smoke"                  # unique — the metric label and /run/<name>
-path = "examples/two-party.rhai"
+path = "examples/two-party.js"
 schedule = "*/5 * * * *"        # every 5 minutes (cron; omit for on-demand only)
 env_file = ["ci.env"]           # dotenv with SIP_DOMAIN / *_USER / *_PASS
 
 [[monitor]]
 name = "transfer"
-path = "examples/three-party-transfer.rhai"
+path = "examples/three-party-transfer.js"
 schedule = "0 * * * *"          # hourly
 timeout = "180s"
 env_file = ["ci.env"]

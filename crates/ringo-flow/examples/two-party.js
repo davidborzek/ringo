@@ -1,7 +1,7 @@
 // @ts-check
 // A real two-party scenario showcase (compiles + wires through to baresip; the
 // dial/accept legs need live SIP creds via env to actually pass). Run with:
-//   ringo-flow run crates/ringo-flow/examples/js/two-party.js
+//   ringo-flow run crates/ringo-flow/examples/two-party.js
 //
 // Fixtures are plain closure-scoped variables: declared once up top, assigned in
 // `setup()` (which runs fresh before each scenario), and read by every scenario /
