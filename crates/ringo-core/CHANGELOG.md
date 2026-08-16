@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1](https://github.com/davidborzek/ringo/compare/ringo-core-v0.14.0...ringo-core-v0.14.1) - 2026-08-16
+
+### Bug Fixes
+
+- *(ringo-core)* find the vendored archives wherever cmake installed them ([#95](https://github.com/davidborzek/ringo/pull/95))
+
 ## [0.14.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.13.1...ringo-core-v0.14.0) - 2026-07-29
 
 ### Features
