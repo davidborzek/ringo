@@ -15,6 +15,6 @@ rust-version = "1.85"
 # `version` is the ringo-core release requirement; release-plz keeps it in sync
 # when ringo-core is bumped (dependents then get a matching release).
 [workspace.dependencies]
-ringo-core = { path = "crates/ringo-core", version = "0.14.0" }
-ringo-agent = { path = "crates/ringo-agent", version = "0.2.2" }
-ringo-flow-macros = { path = "crates/ringo-flow/macros", version = "0.1.0" }
+ringo-core = { path = "crates/ringo-core", version = "0.14.1" }
+ringo-agent = { path = "crates/ringo-agent", version = "0.2.3" }
+ringo-flow-macros = { path = "crates/ringo-flow/macros", version = "0.1.1" }

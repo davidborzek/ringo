@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.14.0...ringo-flow-v0.14.1) - 2026-08-16
+
+### Documentation
+
+- *(ringo-flow)* port the examples to JS and drop the Rhai ones ([#94](https://github.com/davidborzek/ringo/pull/94))
+
 ## [0.14.0](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.13.0...ringo-flow-v0.14.0) - 2026-08-07
 
 ### Bug Fixes
