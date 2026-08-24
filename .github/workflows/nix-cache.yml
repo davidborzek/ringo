@@ -1,0 +1,157 @@
+name: Nix cache
+
+# Populates the binary cache that the flake advertises, for every platform the
+# flake claims to support.
+#
+# The flake is shipped surface — README, docs and the NixOS/home-manager modules
+# all point at it — and building it means compiling OpenSSL from source (the
+# openssl-sys vendored build), then libre and libbaresip through cmake, then the
+# Rust tree. That is ten to eleven minutes per package on a CI runner, and every
+# user who installs ringo through Nix pays it again on their own machine. Cached,
+# it becomes a 12 MB download.
+#
+# Two jobs: `build` fills the cache from main, `pin` keeps a released version in
+# it for good. See the comment above `pin` for why both are needed.
+#
+# `build` is deliberately NOT path-filtered, unlike nix.yml. That job gates changes to the
+# packaging, so it only needs to run when the packaging moves. This one has to
+# hold the cache in step with what people actually fetch: `nix run
+# github:davidborzek/ringo` resolves to the default branch's HEAD, and any source
+# change gives a different derivation hash. A filter here would mean a cache that
+# is only sometimes warm, which is worse than none — it would look like it works
+# and then compile for ten minutes anyway.
+
+on:
+  push:
+    branches: [main]
+    # release-plz tags per crate. Only these two produce something installable;
+    # ringo-core, ringo-agent and ringo-flow-macros are published to crates.io
+    # but are not flake outputs, so a tag for them has nothing to pin.
+    tags:
+      - "ringo-phone-v*"
+      - "ringo-flow-v*"
+  # Manual runs are for filling the cache after a change to this workflow, or
+  # after the cache has been emptied.
+  workflow_dispatch:
+
+concurrency:
+  # One run per ref. Superseding an older main push is fine — only the newest
+  # HEAD is what `nix run` resolves to, so an overtaken build was going to cache
+  # something nobody fetches.
+  group: nix-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.system }}
+    # A tag points at a commit this job already built when it landed on main;
+    # rebuilding it under a different ref would cache nothing new. Tags go to
+    # `pin` below instead.
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # A platform that fails must not hide the others: the point of this job is
+      # to cache all three, and two out of three is still worth having.
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          # arm64 Linux and Apple Silicon runners are free for public
+          # repositories only; the labels fail outright in a private one.
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-15
+    steps:
+      # No `submodules:` — the flake copies the vendored C sources from its own
+      # `re`/`baresip` inputs, the same way nix.yml proves the Nix path stays
+      # independent of the submodule checkout.
+      - uses: actions/checkout@v7
+
+      # Upstream Nix. DeterminateSystems/nix-installer-action only installs
+      # Determinate Nix since 2026-01-01.
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: ringo
+          # Absent on a fork, where this workflow cannot run anyway (it has no
+          # pull_request trigger). Without it the action still works read-only,
+          # so a missing secret degrades to "built but not uploaded" rather than
+          # failing the run.
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      # Both packages, because both are what the modules and the docs install.
+      # They are separate derivations that each rebuild ringo-core, so this is
+      # two full C builds per platform — the reason the cache is worth having.
+      - run: nix build --print-build-logs --out-link result-phone .#ringo-phone
+      - run: nix build --print-build-logs --out-link result-flow .#ringo-flow
+
+      # Same smoke test the release binaries and nix.yml get: the wrapper links
+      # and runs. All three runners are native to their target, so this also
+      # catches a package that builds but cannot start — worth having on
+      # aarch64-darwin especially, which nothing in CI has ever executed.
+      - name: Smoke test
+        run: |
+          ./result-phone/bin/ringo --help
+          ./result-flow/bin/ringo-flow --help
+
+  # Releases are what people pin, and a pinned version is worth a cache hit for
+  # far longer than a passing main commit. But the free tier evicts least
+  # recently used entries at 5 GB, which at ~72 MB per main commit is a couple of
+  # months — so without this, the versions with the longest useful life are the
+  # first to be thrown out.
+  #
+  # Pinning marks a store path as exempt from that collection. Nothing is built
+  # that was not built already: the path comes out of the cache the `build` job
+  # filled minutes earlier when the release commit landed on main.
+  pin:
+    name: pin ${{ matrix.system }}
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v31
+      - uses: cachix/cachix-action@v17
+        with:
+          name: ringo
+          # Required here, unlike the read-only use in nix.yml: pinning writes.
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Pin the released package
+        env:
+          TAG: ${{ github.ref_name }}
+          SYSTEM: ${{ matrix.system }}
+        run: |
+          # ringo-phone-v0.14.0 -> package ringo-phone, version 0.14.0
+          package="${TAG%-v*}"
+          version="${TAG##*-v}"
+
+          # Deliberately allowed to build rather than forced to substitute
+          # (`--max-jobs 0`): release-plz tags right after the merge, so the
+          # main build may still be running. Substituting is the fast path, not
+          # a requirement — being slow beats failing the release.
+          path=$(nix build --print-build-logs --no-link --print-out-paths ".#$package")
+
+          # The pin name carries no version on purpose. Cachix keeps a pin as a
+          # series of revisions, so every release adds one under the same name
+          # and --keep-revisions prunes the oldest — the last few releases stay
+          # exempt from collection while older ones fall back to plain LRU. A
+          # per-version name would instead pin every release ever made, forever,
+          # and eventually crowd out the main commits this cache exists for.
+          #
+          # The system belongs in the name: a name maps to one store path, so
+          # without it the three runners would overwrite each other's pin.
+          cachix pin ringo "$package-$SYSTEM" "$path" --keep-revisions 5
+          echo "::notice::pinned $package $version ($SYSTEM) -> $path"

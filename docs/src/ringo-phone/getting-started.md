@@ -41,6 +41,39 @@ nix profile install github:davidborzek/ringo#ringo-phone
 Or manage ringo and its SIP profiles declaratively with the
 [Home-Manager module](home-manager.md).
 
+Building ringo from source means compiling OpenSSL, libre and libbaresip before
+the Rust code — ten minutes or so, more on a small machine. A binary cache holds
+the result for every platform the flake supports, so enable it first and the
+install is a download instead:
+
+```sh
+cachix use ringo
+```
+
+On NixOS, in your configuration:
+
+```nix
+nix.settings = {
+  substituters = [ "https://ringo.cachix.org" ];
+  trusted-public-keys = [ "ringo.cachix.org-1:Zfdjuf1dHz+C0a4BOKfPbBOxTcHmKy3c2Ddr0tUiawk=" ];
+};
+```
+
+The cache is filled from the default branch, so `nix run
+github:davidborzek/ringo` hits it. Pointing the overlay at your own nixpkgs
+produces a different derivation and builds from source again.
+
+To pin a released version, name its tag — a flake has no version of its own, the
+git ref is the version:
+
+```sh
+nix profile install github:davidborzek/ringo/ringo-phone-v0.14.0#ringo-phone
+```
+
+Releases are tagged per crate, so `ringo-phone-v0.14.0` is the tag for the phone.
+The flake at that tag still provides `ringo-flow` too, in whatever version that
+commit carried.
+
 > Homebrew 6.0+ requires third-party taps to be trusted before use. If `brew
 > install` prompts you to trust the tap, accept it — or trust it up front:
 >
