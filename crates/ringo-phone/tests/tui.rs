@@ -125,6 +125,67 @@ fn hint_keys(app: &App) -> Vec<String> {
 }
 
 #[test]
+fn every_command_is_offered_by_completion() {
+    // dispatch and COMMANDS are two lists that have to agree, and the entries
+    // added last are exactly the ones that get forgotten in the second one.
+    for cmd in ["register", "unregister", "deafen", "silence"] {
+        let (mut app, _rx) = test_app();
+        app.command.input = cmd[..3].to_string();
+        app.command.tab_prefix = None;
+        app.command.tab_index = 0;
+
+        // A single match completes with a trailing space, several cycle.
+        let mut seen = Vec::new();
+        for _ in 0..24 {
+            app.cycle_completion();
+            seen.push(app.command.input.trim().to_string());
+        }
+        assert!(
+            seen.iter().any(|c| c == cmd),
+            "'{cmd}' is dispatchable but Tab never offers it; got {seen:?}"
+        );
+    }
+}
+
+#[test]
+fn unregister_signs_off_without_looking_like_a_failure() {
+    // The registration is gone either way, but one of them is what the user
+    // asked for and must not be dressed up as an error.
+    let (mut app, mut rx) = test_app();
+    app.handle_message(AppEvent::RegisterOk {
+        account: "sip:user@example.com".into(),
+    });
+
+    assert!(app.dispatch("unregister", "").is_ok());
+    assert_eq!(commands(&mut rx), vec!["unregister"]);
+
+    // baresip answers with the event; the status follows from that, not from
+    // the command optimistically setting it.
+    app.handle_message(AppEvent::Unregistered {
+        account: "sip:user@example.com".into(),
+    });
+    assert_eq!(app.reg_status, RegStatus::Unregistered);
+    assert!(!matches!(app.reg_status, RegStatus::Failed(_)));
+}
+
+#[test]
+fn register_signs_back_on() {
+    let (mut app, mut rx) = test_app();
+    app.handle_message(AppEvent::Unregistered {
+        account: "sip:user@example.com".into(),
+    });
+
+    assert!(app.dispatch("register", "").is_ok());
+    assert_eq!(commands(&mut rx), vec!["uareg"]);
+    assert_eq!(app.reg_status, RegStatus::Registering);
+
+    app.handle_message(AppEvent::RegisterOk {
+        account: "sip:user@example.com".into(),
+    });
+    assert_eq!(app.reg_status, RegStatus::Ok);
+}
+
+#[test]
 fn leaving_a_transfer_returns_to_normal_not_the_dial_field() {
     // Entering transfer mode never touches dial.mode, so leaving it must not
     // either — landing in the dial field is a mode the user never asked for.

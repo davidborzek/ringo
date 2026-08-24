@@ -3,8 +3,27 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use super::app::App;
 
 pub const COMMANDS: &[&str] = &[
-    "accept", "contacts", "deafen", "dial", "dtmf", "edit", "hangup", "help", "history", "hold",
-    "info", "log", "mute", "quit", "resume", "silence", "switch", "transfer", "xfer",
+    "accept",
+    "contacts",
+    "deafen",
+    "dial",
+    "dtmf",
+    "edit",
+    "hangup",
+    "help",
+    "history",
+    "hold",
+    "info",
+    "log",
+    "mute",
+    "quit",
+    "register",
+    "resume",
+    "silence",
+    "switch",
+    "transfer",
+    "unregister",
+    "xfer",
 ];
 
 impl App {
@@ -144,6 +163,19 @@ impl App {
                     Err("No call on hold".into())
                 }
             }
+            "register" => {
+                self.phone
+                    .register(&self.account_aor.clone(), self.profile.regint.unwrap_or(0));
+                self.reg_status = super::app::RegStatus::Registering;
+                Ok("Registering".into())
+            }
+            "unregister" => {
+                // No optimistic status here: baresip answers with
+                // BEVENT_UNREGISTERING, and letting the event set it keeps one
+                // source of truth for what the registration is actually doing.
+                self.phone.unregister();
+                Ok("Unregistering".into())
+            }
             "deafen" => {
                 if self.in_active_call() {
                     self.toggle_deafen();
@@ -223,6 +255,7 @@ impl App {
             RegStatus::Unknown => "unknown".to_string(),
             RegStatus::Registering => "registering".to_string(),
             RegStatus::Ok => "registered".to_string(),
+            RegStatus::Unregistered => "unregistered".to_string(),
             RegStatus::Failed(r) => format!("failed: {r}"),
         };
         let calls: Vec<serde_json::Value> = self

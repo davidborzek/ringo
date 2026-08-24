@@ -33,6 +33,13 @@ impl Phone for BaresipPhone {
         });
     }
 
+    fn unregister(&self) {
+        let ua = self.ua;
+        on_re_thread(move || {
+            unsafe { ua_unregister(ua as *mut Ua) };
+        });
+    }
+
     fn dial(&self, number: &str) {
         let ua = self.ua;
         let num = match CString::new(number) {

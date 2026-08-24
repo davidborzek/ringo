@@ -11,6 +11,10 @@ pub enum RegStatus {
     Unknown,
     Registering,
     Ok,
+    /// Deliberately signed off, via `:unregister`. Distinct from `Failed`: the
+    /// registration is gone either way, but one of them is what the user asked
+    /// for and must not be dressed up as an error.
+    Unregistered,
     Failed(String),
 }
 
