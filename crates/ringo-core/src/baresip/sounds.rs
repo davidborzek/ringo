@@ -675,35 +675,9 @@ pub fn stop_alert() {
 /// Get alert_mod and alert_dev from config (audio_alert = "driver,device").
 /// Cached for the process lifetime: `audio_alert` doesn't change at runtime,
 /// and caching avoids leaking two `CString`s on every alert.
-fn get_alert_device() -> (*const std::os::raw::c_char, *const std::os::raw::c_char) {
-    use std::ffi::CStr;
-    use std::os::raw::c_char;
+fn get_alert_device() -> (*const c_char, *const c_char) {
     static CACHED: OnceLock<Option<(CString, CString)>> = OnceLock::new();
-    let cached = CACHED.get_or_init(|| {
-        let conf = unsafe { conf_cur() };
-        if conf.is_null() {
-            return None;
-        }
-        // `c_char` is i8 on x86_64 but u8 on aarch64 — type the buffer as c_char
-        // so `conf_get_str`/`CStr::from_ptr` match the FFI signature on both.
-        let mut buf = [0 as c_char; 256];
-        let rc =
-            unsafe { conf_get_str(conf, c"audio_alert".as_ptr(), buf.as_mut_ptr(), buf.len()) };
-        if rc != 0 {
-            return None;
-        }
-        let s = unsafe { CStr::from_ptr(buf.as_ptr()) }
-            .to_str()
-            .unwrap_or("");
-        let mut parts = s.splitn(2, ',');
-        let m = parts.next().unwrap_or("aubridge");
-        let d = parts.next().unwrap_or("default");
-        Some((
-            CString::new(m).unwrap_or_default(),
-            CString::new(d).unwrap_or_default(),
-        ))
-    });
-    match cached {
+    match CACHED.get_or_init(|| super::config::conf_device(c"audio_alert")) {
         Some((m, d)) => (m.as_ptr(), d.as_ptr()),
         None => (std::ptr::null(), std::ptr::null()),
     }

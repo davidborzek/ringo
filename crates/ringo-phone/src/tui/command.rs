@@ -3,8 +3,8 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use super::app::App;
 
 pub const COMMANDS: &[&str] = &[
-    "accept", "contacts", "dial", "dtmf", "edit", "hangup", "help", "history", "hold", "info",
-    "log", "mute", "quit", "resume", "silence", "switch", "transfer", "xfer",
+    "accept", "contacts", "deafen", "dial", "dtmf", "edit", "hangup", "help", "history", "hold",
+    "info", "log", "mute", "quit", "resume", "silence", "switch", "transfer", "xfer",
 ];
 
 impl App {
@@ -144,6 +144,19 @@ impl App {
                     Err("No call on hold".into())
                 }
             }
+            "deafen" => {
+                if self.in_active_call() {
+                    self.toggle_deafen();
+                    Ok(if self.deafened {
+                        "Deafened"
+                    } else {
+                        "Undeafened"
+                    }
+                    .into())
+                } else {
+                    Err("No active call".into())
+                }
+            }
             "silence" => {
                 if self.has_incoming_ringing() {
                     self.silence_alert();
@@ -249,6 +262,7 @@ impl App {
             "account": self.account_aor,
             "registration": registration,
             "muted": self.muted,
+            "deafened": self.deafened,
             "calls": calls,
             "last_call": last_call,
         })

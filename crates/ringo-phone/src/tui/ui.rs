@@ -34,7 +34,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let cmd_h = if app.command.active || app.command.error.is_some() {
         1
     } else {
-        hint_rows(&normal_hints(app), inner.width)
+        hint_rows(&app.hints(), inner.width)
     };
 
     // Fixed layout; all secondary views (Logs, Help, Call history, Contacts) are
@@ -88,9 +88,9 @@ pub fn render(f: &mut Frame, app: &mut App) {
             format!("Logs{status}")
         };
         let search_footer = [("Enter", "confirm"), ("Esc", "clear")];
+        // No ↑↓ / PgUp/PgDn here: scrolling with the arrow keys needs no
+        // telling. g/G stays — jumping to the ends is not guessable.
         let nav_footer = [
-            ("↑↓", "scroll"),
-            ("PgUp/PgDn", "page"),
             ("g/G", "ends"),
             ("/", "search"),
             ("w", "wrap"),
@@ -324,8 +324,9 @@ fn render_help(f: &mut Frame, app: &App) {
         row("a", "accept incoming"),
         row("s", "silence the ringtone"),
         row("b / Del", "hang up"),
-        row("h / r", "hold / resume"),
-        row("m", "mute"),
+        row("h", "hold / resume (toggle)"),
+        row("m", "mute the microphone"),
+        row("M", "deafen (microphone and speaker)"),
         row("t / T", "blind / attended transfer"),
         row("Tab", "switch active call"),
         row("i", "call details"),
@@ -338,7 +339,7 @@ fn render_help(f: &mut Frame, app: &App) {
         Line::from(""),
         Line::from(Span::styled("  Commands (:)", subtle)),
         Line::from(Span::styled(
-            "  dial <n>  hangup  accept  hold  resume  mute  silence",
+            "  dial <n>  hangup  accept  hold  resume  mute  deafen  silence",
             Style::default(),
         )),
         Line::from(Span::styled(
@@ -432,11 +433,12 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ));
     }
 
-    // Muted
-    if app.muted {
+    // Muted / deafened. Deafened implies muted, so show the stronger one alone
+    // rather than two badges saying overlapping things.
+    if app.deafened || app.muted {
         spans.push(sep.clone());
         spans.push(Span::styled(
-            "MUTED",
+            if app.deafened { "DEAFENED" } else { "MUTED" },
             Style::default()
                 .fg(app.theme.danger.get())
                 .add_modifier(Modifier::BOLD),
@@ -509,67 +511,78 @@ fn render_command_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     }
 }
 
-/// The base hint line's keys for the current mode. Overlay-specific hints live
-/// in each modal's own footer; this is the always-visible call-action bar.
-fn normal_hints(app: &App) -> Vec<Hint<'static>> {
-    match &app.transfer_mode {
-        TransferMode::BlindInput(_) | TransferMode::AttendedInput(_) => {
-            vec![("Enter", "send"), ("Tab", "contacts"), ("Esc", "cancel")]
-        }
-        TransferMode::AttendedPending => vec![("X", "execute transfer"), ("Esc", "abort")],
-        TransferMode::None => match app.dial.mode {
-            InputMode::Dial | InputMode::HistoryNav => vec![
-                ("Enter", "dial"),
-                ("Tab", "contacts"),
-                ("Esc", "cancel"),
-                ("↑/↓", "history"),
-                ("^R", "search"),
-            ],
-            InputMode::HistorySearch => Vec::new(),
-            InputMode::Normal => {
-                let mut h: Vec<Hint> = vec![("d", "dial")];
-                if app.has_incoming_ringing() {
-                    h.push(("a", "accept"));
-                    if !app.ring_silenced {
-                        h.push(("s", "silence"));
+impl App {
+    /// The base hint line's keys for the current mode. Overlay-specific hints
+    /// live in each modal's own footer; this is the always-visible call-action
+    /// bar.
+    ///
+    /// A method rather than a free function so the TUI tests can reach it
+    /// through `App`, which the crate already exports. What the bar offers in a
+    /// given state is behaviour worth asserting on; the rendered pixels are
+    /// ratatui's business.
+    pub fn hints(&self) -> Vec<(&'static str, &'static str)> {
+        let app = self;
+        match &app.transfer_mode {
+            TransferMode::BlindInput(_) | TransferMode::AttendedInput(_) => {
+                vec![("Enter", "send"), ("Tab", "contacts"), ("Esc", "cancel")]
+            }
+            TransferMode::AttendedPending => vec![("X", "execute transfer"), ("Esc", "abort")],
+            TransferMode::None => match app.dial.mode {
+                InputMode::Dial | InputMode::HistoryNav => vec![
+                    ("Enter", "dial"),
+                    ("Tab", "contacts"),
+                    ("Esc", "cancel"),
+                    ("↑/↓", "history"),
+                    ("^R", "search"),
+                ],
+                InputMode::HistorySearch => Vec::new(),
+                // A call in progress gets only what you reach for while talking.
+                // Logs, history, contacts and quit stay available — they are just
+                // not what the bar is for at that moment, and listing them crowds
+                // out the four keys that matter. `?` reads "more" rather than
+                // "help" so it is visible that something was set aside.
+                InputMode::Normal if app.has_any_call() => {
+                    let mut h: Vec<Hint> = Vec::new();
+                    if app.has_incoming_ringing() {
+                        h.push(("a", "accept"));
+                        if !app.ring_silenced {
+                            h.push(("s", "silence"));
+                        }
                     }
-                }
-                if app.has_any_call() {
                     h.push(("b", "hangup"));
+                    // One key, and the label says which way it will go —
+                    // clearer than "h/r hold/resume", and shorter.
+                    if app.selected_call_on_hold() {
+                        h.push(("h", "resume"));
+                    } else if app.in_active_call() {
+                        h.push(("h", "hold"));
+                    }
+                    if app.in_active_call() {
+                        h.push(("m/M", "mute/deafen"));
+                        h.push(("t/T", "xfer"));
+                    }
+                    if app.calls.len() > 1 {
+                        h.push(("Tab", "switch"));
+                    }
+                    h.push(("?", "more"));
+                    h
                 }
-                if app.has_any_call() {
-                    h.push(("i", "details"));
-                }
-                if app.in_active_call() {
-                    h.push(("h", "hold"));
-                }
-                if app.selected_call_on_hold() {
-                    h.push(("r", "resume"));
-                }
-                if app.in_active_call() {
-                    h.push(("m", "mute"));
-                    h.push(("t", "xfer"));
-                    h.push(("T", "att.xfer"));
-                }
-                if app.calls.len() > 1 {
-                    h.push(("Tab", "switch"));
-                }
-                h.extend([
+                InputMode::Normal => vec![
+                    ("d", "dial"),
                     ("l", "logs"),
                     ("c", "history"),
                     ("f", "contacts"),
                     ("?", "help"),
                     (":", "cmd"),
                     ("q", "quit"),
-                ]);
-                h
-            }
-        },
+                ],
+            },
+        }
     }
 }
 
 fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    render_hint_bar(f, area, &normal_hints(app), &app.theme);
+    render_hint_bar(f, area, &app.hints(), &app.theme);
 }
 
 /// One keybind hint: the key (or chord) and what it does. Structured so the

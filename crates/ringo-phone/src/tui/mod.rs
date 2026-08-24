@@ -13,7 +13,7 @@ mod transfer;
 
 pub use crate::event::AppEvent;
 #[allow(unused_imports)]
-pub use app::{App, CallDirection, CallState, RegStatus, TransferMode};
+pub use app::{App, CallDirection, CallState, InputMode, RegStatus, TransferMode};
 
 use anyhow::Result;
 use crossterm::event::{self as ct_event, Event};

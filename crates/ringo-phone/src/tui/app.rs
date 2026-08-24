@@ -238,6 +238,12 @@ pub struct App {
     pub calls: Vec<Call>,
     pub selected_call: usize,
     pub muted: bool,
+    /// Incoming *and* outgoing audio are off — what a chat client calls being
+    /// deafened. Implies `muted`; see `toggle_deafen`.
+    pub deafened: bool,
+    /// The microphone state from before deafening, restored when undeafening.
+    /// Muting and then deafening and then undeafening must leave you muted.
+    pub mic_before_deafen: Option<bool>,
     /// The current alert was silenced by hand. Purely for display: silencing is
     /// an action whose only feedback is the absence of sound, so the UI has to
     /// say it happened. Cleared when the next call comes in.
@@ -311,6 +317,8 @@ impl App {
             calls: Vec::new(),
             selected_call: 0,
             muted: false,
+            deafened: false,
+            mic_before_deafen: None,
             ring_silenced: false,
             media: None,
             codec: None,

@@ -6,7 +6,12 @@ impl super::app::App {
         match key.code {
             KeyCode::Esc => {
                 self.transfer_mode = TransferMode::None;
-                self.dial.mode = InputMode::Dial;
+                // Back to where the transfer was started from. Typing in the
+                // transfer field puts dial.mode into Dial so the history keys
+                // work (see the Char arm below), and leaving it in Dial on the
+                // way out dropped the user into the dial field they never asked
+                // for.
+                self.dial.mode = InputMode::Normal;
             }
             KeyCode::Backspace => {
                 if self.dial.mode == InputMode::HistoryNav {
@@ -23,7 +28,7 @@ impl super::app::App {
                 }
             }
             KeyCode::Enter => {
-                self.dial.mode = InputMode::Dial;
+                self.dial.mode = InputMode::Normal;
                 let old = std::mem::replace(&mut self.transfer_mode, TransferMode::None);
                 let aor = self.account_aor.clone();
                 match old {
