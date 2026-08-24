@@ -144,7 +144,14 @@ jobs:
           # a requirement — being slow beats failing the release.
           path=$(nix build --print-build-logs --no-link --print-out-paths ".#$package")
 
-          # One pin per system: a name maps to a single store path, so without
-          # the suffix the three runners would overwrite each other.
-          cachix pin ringo "$package-$version-$SYSTEM" "$path"
-          echo "::notice::pinned $package-$version-$SYSTEM -> $path"
+          # The pin name carries no version on purpose. Cachix keeps a pin as a
+          # series of revisions, so every release adds one under the same name
+          # and --keep-revisions prunes the oldest — the last few releases stay
+          # exempt from collection while older ones fall back to plain LRU. A
+          # per-version name would instead pin every release ever made, forever,
+          # and eventually crowd out the main commits this cache exists for.
+          #
+          # The system belongs in the name: a name maps to one store path, so
+          # without it the three runners would overwrite each other's pin.
+          cachix pin ringo "$package-$SYSTEM" "$path" --keep-revisions 5
+          echo "::notice::pinned $package $version ($SYSTEM) -> $path"
