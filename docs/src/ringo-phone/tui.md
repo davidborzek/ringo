@@ -21,6 +21,7 @@ the call list, and a mode line. Below are the keybindings per mode and overlay.
 |-----|--------|
 | `d` | Enter Dial mode |
 | `a` | Accept incoming call |
+| `s` | Silence the ringtone (the call keeps ringing) |
 | `b` / `Del` | Hang up |
 | `h` / `r` | Hold / Resume |
 | `m` | Toggle mute |

@@ -91,6 +91,82 @@ fn call_incoming_adds_ringing_call() {
     assert_eq!(app.calls[0].peer, "sip:alice@example.com");
 }
 
+/// Drain the mock's command channel into a list of command names.
+fn commands(rx: &mut tokio::sync::mpsc::Receiver<(String, String)>) -> Vec<String> {
+    let mut out = Vec::new();
+    while let Ok((cmd, _)) = rx.try_recv() {
+        out.push(cmd);
+    }
+    out
+}
+
+fn ring(app: &mut App, id: &str) {
+    app.handle_message(AppEvent::CallIncoming {
+        call_id: id.into(),
+        number: format!("sip:{id}@example.com"),
+        display_name: None,
+    });
+}
+
+#[test]
+fn silencing_stops_the_ring_but_not_the_call() {
+    // The whole point: your side goes quiet, the caller keeps hearing ringback,
+    // and the call is still there to answer.
+    let (mut app, mut rx) = test_app();
+    ring(&mut app, "1");
+    let _ = commands(&mut rx);
+
+    app.handle_key(key('s'));
+
+    assert_eq!(commands(&mut rx), vec!["silence"]);
+    assert!(app.ring_silenced, "the UI must be able to show it happened");
+    assert_eq!(app.calls.len(), 1, "the call survives");
+    assert_eq!(app.calls[0].state, CallState::Ringing);
+}
+
+#[test]
+fn a_silenced_call_can_still_be_answered() {
+    let (mut app, mut rx) = test_app();
+    ring(&mut app, "1");
+    app.handle_key(key('s'));
+    let _ = commands(&mut rx);
+
+    app.handle_key(key('a'));
+    assert_eq!(commands(&mut rx), vec!["accept"]);
+}
+
+#[test]
+fn silencing_lasts_only_until_the_next_call() {
+    let (mut app, _rx) = test_app();
+    ring(&mut app, "1");
+    app.handle_key(key('s'));
+    assert!(app.ring_silenced);
+
+    app.handle_message(AppEvent::CallClosed {
+        call_id: "1".into(),
+        reason: "Rejected by user".into(),
+        error: false,
+    });
+    ring(&mut app, "2");
+    assert!(!app.ring_silenced, "a new call rings again");
+}
+
+#[test]
+fn silencing_does_nothing_when_nothing_rings() {
+    let (mut app, mut rx) = test_app();
+    app.handle_key(key('s'));
+    assert!(commands(&mut rx).is_empty());
+    assert!(!app.ring_silenced);
+}
+
+#[test]
+fn the_silence_command_reports_when_nothing_rings() {
+    let (mut app, _rx) = test_app();
+    assert!(app.dispatch("silence", "").is_err());
+    ring(&mut app, "1");
+    assert!(app.dispatch("silence", "").is_ok());
+}
+
 #[test]
 fn call_outgoing_adds_ringing_call() {
     let (mut app, _) = test_app();

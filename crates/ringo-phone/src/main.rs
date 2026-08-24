@@ -46,8 +46,8 @@ fn target_candidates() -> Vec<CompletionCandidate> {
 /// Completion candidates for the `control` command name.
 fn control_command_candidates() -> Vec<CompletionCandidate> {
     [
-        "dial", "hangup", "accept", "hold", "resume", "mute", "dtmf", "transfer", "status",
-        "shutdown", "list",
+        "dial", "hangup", "accept", "hold", "resume", "mute", "silence", "dtmf", "transfer",
+        "status", "shutdown", "list",
     ]
     .iter()
     .map(|c| CompletionCandidate::new(*c))
@@ -112,7 +112,7 @@ enum Commands {
         #[arg(short = 't', long, add = ArgValueCandidates::new(target_candidates))]
         target: Option<String>,
 
-        /// Command: dial, hangup, accept, hold, resume, mute, dtmf, transfer, status, list
+        /// Command: dial, hangup, accept, hold, resume, mute, silence, dtmf, transfer, status, list
         #[arg(add = ArgValueCandidates::new(control_command_candidates))]
         command: String,
 

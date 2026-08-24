@@ -4,7 +4,7 @@ use super::app::App;
 
 pub const COMMANDS: &[&str] = &[
     "accept", "contacts", "dial", "dtmf", "edit", "hangup", "help", "history", "hold", "info",
-    "log", "mute", "quit", "resume", "switch", "transfer", "xfer",
+    "log", "mute", "quit", "resume", "silence", "switch", "transfer", "xfer",
 ];
 
 impl App {
@@ -142,6 +142,14 @@ impl App {
                     Ok("Resumed".into())
                 } else {
                     Err("No call on hold".into())
+                }
+            }
+            "silence" => {
+                if self.has_incoming_ringing() {
+                    self.silence_alert();
+                    Ok("Silenced".into())
+                } else {
+                    Err("Nothing is ringing".into())
                 }
             }
             "mute" => {

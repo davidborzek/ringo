@@ -133,6 +133,12 @@ pub fn render_chime(chime: &Chime, srate: u32) -> Vec<i16> {
     let attack = (srate as f64 * 0.003) as usize; // 3 ms, enough to kill the click
     for (i, &freq) in chime.freqs.iter().enumerate() {
         let onset = (srate as u64 * (i as u64 * chime.spacing_ms as u64) / 1000) as usize;
+        // A motif longer than its period would index past the buffer. The
+        // built-ins never do, but Chime is public — a caller composing one must
+        // get a truncated chime, not a panicked process.
+        if onset >= n {
+            break;
+        }
         for (age, slot) in buf[onset..].iter_mut().enumerate() {
             let t = age as f64 / srate as f64;
             let decay = (-t / tau).exp();
@@ -333,6 +339,29 @@ mod tests {
     fn parse(spec: &str) -> Tone {
         spec.parse()
             .unwrap_or_else(|e| panic!("'{spec}' should parse: {e}"))
+    }
+
+    #[test]
+    fn a_chime_longer_than_its_period_is_truncated_not_fatal() {
+        // Chime is public, so a caller can compose one whose motif outlasts the
+        // period. That must clip, not abort the process.
+        let overlong = Chime {
+            freqs: &[440.0, 550.0, 660.0, 880.0],
+            spacing_ms: 500,
+            timbre: &SOFT,
+            period_ms: 300,
+        };
+        let s = render_chime(&overlong, SRATE);
+        assert_eq!(s.len(), SRATE as usize * 300 / 1000);
+    }
+
+    #[test]
+    fn a_chime_fits_inside_its_period() {
+        for c in [&RING, &MESSAGE] {
+            let s = render_chime(c, SRATE);
+            assert_eq!(s.len(), SRATE as usize * c.period_ms as usize / 1000);
+            assert!(s.iter().any(|&v| v != 0), "the chime must make a sound");
+        }
     }
 
     #[test]

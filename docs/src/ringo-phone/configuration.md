@@ -131,6 +131,11 @@ exact and the loop has no seam. The values are the German ones (`[de]` in
 Asterisk's `indications.conf`): `busy` is the ordinary engaged tone, `error` the
 faster congestion tone that says the network could not put the call through.
 
+To silence a ringtone that is sounding right now without configuring anything,
+press `s` (or `:silence`, or `ringo ctl silence`). It stops your side only: the
+caller keeps hearing ringback, the call stays there to answer, and the next call
+rings again.
+
 `ring` and `message` are chimes — struck notes with a decay, the way a modern
 ringtone is a short motif in a cadence rather than a continuous tone. Nothing
 specifies what an incoming call should sound like, so these are a choice rather
@@ -173,8 +178,16 @@ An explicit entry beats a drop-in file of the same name, and any alert you leave
 out keeps its built-in tone.
 
 Your file is played by baresip straight from disk, so only its path is held in
-memory — a two-minute ringtone costs nothing while it is not playing, and there
-is no size limit. What baresip's loader accepts is:
+memory and there is no size limit. The flip side is that it is read when the
+alert fires: a few hundred kB from the page cache is nothing, but a very large
+file on cold or networked storage delays the call it is announcing. Keep a
+ringtone to a few seconds and it never matters.
+
+The path must not contain a comma — baresip's player reads one as a
+repeat/delay suffix and truncates the name there. ringo says so at start rather
+than letting it fail at the first call.
+
+What baresip's loader accepts is:
 
 - WAV (RIFF), with the `fmt ` chunk first — a leading `LIST`/metadata chunk makes
   the file unreadable for it.

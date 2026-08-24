@@ -8,13 +8,17 @@
 //!   single binary with no share directory to install. There is no file to
 //!   open, so their samples go to `play_tone` as a libre `mbuf`.
 //! * A **user's file** goes to `play_file`, which opens and decodes it itself.
-//!   Only the path stays resident, so a two-minute ringtone does not occupy
-//!   memory for the process lifetime, and baresip's own WAV loader decides what
-//!   it can read instead of us second-guessing it.
+//!   Only the path stays resident, so a long ringtone does not occupy memory
+//!   for the process lifetime, and baresip's own WAV loader decides what it can
+//!   read instead of us second-guessing it. The price is that the read happens
+//!   at play time, on the RE thread, inside the event handler — the same thing
+//!   baresip's own menu module does. Fine for a file of a few hundred kB in the
+//!   page cache; a large file on cold or networked storage stalls SIP and RTP
+//!   for as long as it takes to read.
 //!
 //! [`load_sounds`] installs the set at session start and preflights every
-//! configured file, so a bad path is a warning while ringo starts rather than
-//! silence at the first call. If `play_file` still fails at play time, the
+//! configured file — header only, never the samples — so a bad path is a
+//! warning while ringo starts rather than silence at the first call. If `play_file` still fails at play time, the
 //! built-in tone takes over for that alert.
 
 use std::ffi::CString;
@@ -259,6 +263,18 @@ fn load_file(alert: Alert, path: &str) -> Option<Source> {
         }
     };
     let shown = full.display().to_string();
+    // play_file runs parse_play_settings (vendor/baresip/src/play.c) over the
+    // name first, which splits on commas and writes the truncated head back —
+    // `ring,long.wav` reaches the loader as `ring`. Catching it here keeps the
+    // preflight honest instead of passing a file that then fails at play time.
+    if shown.contains(',') {
+        crate::rlog!(
+            Warn,
+            "sounds: {key}: '{shown}' contains a comma, which baresip's player \
+             reads as a repeat/delay suffix — rename the file or the directory"
+        );
+        return None;
+    }
     let head = match read_head(&full) {
         Ok(h) => h,
         Err(e) => {
@@ -489,6 +505,28 @@ fn alert_playp() -> *mut *mut Play {
         as *mut *mut Play
 }
 
+/// Which alert occupies the slot, as `Alert as u8 + 1`; 0 means none.
+///
+/// Only the RE thread touches it, but an atomic costs nothing here and spares
+/// the file another `unsafe`. Kept in step with [`alert_playp`]: set when a
+/// tone starts, cleared by [`stop_alert`]. A one-shot frees itself when it ends
+/// without clearing this, which is harmless — the value is only ever consulted
+/// to ask whether a *looping* alert is in progress, and those end only by being
+/// stopped or replaced.
+static PLAYING: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// The alert currently sounding, if the slot is occupied.
+///
+/// # Safety
+/// Must run on the RE thread, which owns the play slot.
+unsafe fn playing_alert() -> Option<Alert> {
+    if unsafe { (*alert_playp()).is_null() } {
+        return None;
+    }
+    let tag = PLAYING.load(std::sync::atomic::Ordering::Relaxed);
+    (tag > 0).then(|| Alert::ALL[tag as usize - 1])
+}
+
 /// Play `alert` on the alert device, replacing any currently playing tone.
 /// A muted alert is a no-op (it still stops whatever was playing).
 ///
@@ -497,6 +535,17 @@ fn alert_playp() -> *mut *mut Play {
 /// fails, the built-in tone stands in, so a rate the audio driver refuses ends
 /// as a lesser tone rather than as silence.
 pub fn play_alert(alert: Alert) {
+    // SAFETY: on the RE thread, see the note below.
+    if let Some(current) = unsafe { playing_alert() } {
+        // A one-shot must never cut off a tone that is still saying something.
+        // Voicemail arriving mid-ring used to tear the ring down and leave the
+        // call sounding on screen only, because nothing restarts a loop.
+        if alert.repeat() > 0 && current.repeat() < 0 {
+            let (new, held) = (alert.key(), current.key());
+            crate::rlog!(Debug, "alert: {new} suppressed, {held} is still playing");
+            return;
+        }
+    }
     stop_alert();
     let set = sound_slot()
         .read()
@@ -520,6 +569,7 @@ pub fn play_alert(alert: Alert) {
             return;
         }
         let (play_mod, play_dev) = get_alert_device();
+        PLAYING.store(alert as u8 + 1, std::sync::atomic::Ordering::Relaxed);
         match tone {
             Source::Builtin(pcm) => play_pcm(alert, pcm, player, play_mod, play_dev),
             Source::File(path) => {
@@ -606,8 +656,12 @@ unsafe fn play_pcm(
 }
 
 /// Stop the currently playing alert tone (if any).
-/// Like [`play_alert`], only called from the bevent handler (RE thread).
+///
+/// Reached from two directions: the bevent handler, which is already on the RE
+/// thread, and `Phone::silence_alert`, which marshals onto it. Both are the RE
+/// thread by the time they get here — anything else would race the destructor.
 pub fn stop_alert() {
+    PLAYING.store(0, std::sync::atomic::Ordering::Relaxed);
     // SAFETY: on the RE thread. mem_deref runs the play destructor, which sets
     // *playp = NULL via the stable cell — so a second stop_alert is a no-op.
     unsafe {
@@ -872,6 +926,41 @@ mod tests {
         // loader and fail as a missing path.
         let set = SoundSet::resolve(&[("error".into(), "tone:425/240,0/240".into())]);
         assert!(matches!(set.get(Alert::Error), Some(Source::Builtin(_))));
+    }
+
+    #[test]
+    fn a_comma_in_the_path_is_rejected_up_front() {
+        // baresip's player reads a comma as a repeat/delay suffix and truncates
+        // the name, so such a file would pass the header check and then fail to
+        // open. Better to say so while ringo starts.
+        let dir = std::env::temp_dir().join(format!("ringo-comma-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("ring,long.wav");
+        std::fs::write(&path, wav(1, 16, 1, 48000, &silence(100, 1))).unwrap();
+
+        let set = SoundSet::resolve(&[("ring".into(), path.display().to_string())]);
+        assert!(
+            matches!(set.get(Alert::Ring), Some(Source::Builtin(_))),
+            "a comma path must fall back to the built-in tone"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_one_shot_never_outranks_a_looping_alert() {
+        // Voicemail arriving mid-ring used to tear the ring down for good:
+        // stop_alert killed the loop, the chime played once, and nothing
+        // restarted the ring.
+        for loud in [Alert::Ring, Alert::Ringback] {
+            for quiet in [Alert::Busy, Alert::Error, Alert::Message] {
+                assert!(
+                    loud.repeat() < 0 && quiet.repeat() > 0,
+                    "{} must loop and {} must not",
+                    loud.key(),
+                    quiet.key()
+                );
+            }
+        }
     }
 
     #[test]

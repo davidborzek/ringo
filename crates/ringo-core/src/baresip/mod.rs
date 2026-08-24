@@ -163,9 +163,10 @@ impl Backend for BaresipBackend {
         // Redirect libre/baresip debug output to stderr
         redirect_logging();
 
-        // Load the alert sounds (embedded defaults + the caller's overrides)
-        // before any call can arrive. All file I/O happens here — play_alert
-        // runs on the RE thread, where a blocking read would stall SIP/RTP.
+        // Install the alert sounds (generated defaults + the caller's overrides)
+        // before any call can arrive, so a misconfigured file is a warning now
+        // rather than silence at the first call. Only headers are read here;
+        // a configured file itself is opened by baresip when the alert plays.
         sounds::load_sounds(&options.sounds);
 
         // Start libre + re_main on a dedicated RE thread (once, idempotent)

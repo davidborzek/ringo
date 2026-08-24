@@ -238,6 +238,10 @@ pub struct App {
     pub calls: Vec<Call>,
     pub selected_call: usize,
     pub muted: bool,
+    /// The current alert was silenced by hand. Purely for display: silencing is
+    /// an action whose only feedback is the absence of sound, so the UI has to
+    /// say it happened. Cleared when the next call comes in.
+    pub ring_silenced: bool,
     /// Live media stats for the active (selected) call, polled ~1 Hz. baresip
     /// reports stats for its current call, which `switch_line` keeps in sync
     /// with `selected_call`. `None` when no call is established.
@@ -307,6 +311,7 @@ impl App {
             calls: Vec::new(),
             selected_call: 0,
             muted: false,
+            ring_silenced: false,
             media: None,
             codec: None,
             notify_enabled,

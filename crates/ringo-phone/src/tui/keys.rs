@@ -234,6 +234,9 @@ impl super::app::App {
                 self.dial.mode = InputMode::Dial;
                 self.command.error = None;
             }
+            KeyCode::Char('s') if !ctrl && self.has_incoming_ringing() => {
+                self.silence_alert();
+            }
             KeyCode::Char('a') if !ctrl && self.has_incoming_ringing() => {
                 self.accept_incoming();
             }
