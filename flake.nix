@@ -1,6 +1,21 @@
 {
   description = "ringo — terminal SIP softphone (ringo-phone) and scenario runner (ringo-flow)";
 
+  # Building ringo means compiling OpenSSL, libre and libbaresip before the Rust
+  # code — ten minutes or so, more on a small machine. This cache holds the
+  # result for every platform below, filled from the default branch by
+  # .github/workflows/nix-cache.yml.
+  #
+  # Nix honours these only for a trusted user; everyone else is asked once, or
+  # sees the settings ignored with a warning. `cachix use ringo` (or
+  # nix.settings on NixOS) is the reliable route — see the docs.
+  nixConfig = {
+    extra-substituters = [ "https://ringo.cachix.org" ];
+    extra-trusted-public-keys = [
+      "ringo.cachix.org-1:Zfdjuf1dHz+C0a4BOKfPbBOxTcHmKy3c2Ddr0tUiawk="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 

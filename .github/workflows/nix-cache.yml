@@ -1,0 +1,90 @@
+name: Nix cache
+
+# Populates the binary cache that the flake advertises, for every platform the
+# flake claims to support.
+#
+# The flake is shipped surface — README, docs and the NixOS/home-manager modules
+# all point at it — and building it means compiling OpenSSL from source (the
+# openssl-sys vendored build), then libre and libbaresip through cmake, then the
+# Rust tree. That is ten to eleven minutes per package on a CI runner, and every
+# user who installs ringo through Nix pays it again on their own machine. Cached,
+# it becomes a 12 MB download.
+#
+# Deliberately NOT path-filtered, unlike nix.yml. That job gates changes to the
+# packaging, so it only needs to run when the packaging moves. This one has to
+# hold the cache in step with what people actually fetch: `nix run
+# github:davidborzek/ringo` resolves to the default branch's HEAD, and any source
+# change gives a different derivation hash. A filter here would mean a cache that
+# is only sometimes warm, which is worse than none — it would look like it works
+# and then compile for ten minutes anyway.
+
+on:
+  push:
+    branches: [main]
+  # Manual runs are for filling the cache after a change to this workflow, or
+  # after the cache has been emptied.
+  workflow_dispatch:
+
+# No tag trigger. release-plz tags per crate (`ringo-phone-v0.14.0`), and it
+# does so on the commit it just merged into main — which this workflow has
+# already built. A tag build would re-do the same derivation under a different
+# ref, five times per release, for a cache entry that is already there.
+
+concurrency:
+  # One run per ref. Superseding an older main push is fine — only the newest
+  # HEAD is what `nix run` resolves to, so an overtaken build was going to cache
+  # something nobody fetches.
+  group: nix-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # A platform that fails must not hide the others: the point of this job is
+      # to cache all three, and two out of three is still worth having.
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          # arm64 Linux and Apple Silicon runners are free for public
+          # repositories only; the labels fail outright in a private one.
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-15
+    steps:
+      # No `submodules:` — the flake copies the vendored C sources from its own
+      # `re`/`baresip` inputs, the same way nix.yml proves the Nix path stays
+      # independent of the submodule checkout.
+      - uses: actions/checkout@v7
+
+      # Upstream Nix. DeterminateSystems/nix-installer-action only installs
+      # Determinate Nix since 2026-01-01.
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: ringo
+          # Absent on a fork, where this workflow cannot run anyway (it has no
+          # pull_request trigger). Without it the action still works read-only,
+          # so a missing secret degrades to "built but not uploaded" rather than
+          # failing the run.
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      # Both packages, because both are what the modules and the docs install.
+      # They are separate derivations that each rebuild ringo-core, so this is
+      # two full C builds per platform — the reason the cache is worth having.
+      - run: nix build --print-build-logs --out-link result-phone .#ringo-phone
+      - run: nix build --print-build-logs --out-link result-flow .#ringo-flow
+
+      # Same smoke test the release binaries and nix.yml get: the wrapper links
+      # and runs. All three runners are native to their target, so this also
+      # catches a package that builds but cannot start — worth having on
+      # aarch64-darwin especially, which nothing in CI has ever executed.
+      - name: Smoke test
+        run: |
+          ./result-phone/bin/ringo --help
+          ./result-flow/bin/ringo-flow --help

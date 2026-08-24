@@ -48,6 +48,15 @@ jobs:
       # Determinate Nix since 2026-01-01.
       - uses: cachix/install-nix-action@v31
 
+      # Read-only: this job never pushes (a fork PR has no token, and the cache
+      # is filled from main by nix-cache.yml). It is here so an unchanged
+      # derivation is fetched instead of rebuilt — which happens more often than
+      # the path filter suggests, because the Renovate relock below pushes and
+      # re-triggers this very workflow on the same content.
+      - uses: cachix/cachix-action@v17
+        with:
+          name: ringo
+
       # Renovate bumps `branch` in .gitmodules, the gitlink, and the tags in the
       # flake.nix input URLs, but it cannot regenerate flake.lock. Not for lack
       # of Nix — its nix manager does shell out to `nix flake update` — but
