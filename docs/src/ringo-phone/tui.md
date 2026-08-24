@@ -23,8 +23,9 @@ the call list, and a mode line. Below are the keybindings per mode and overlay.
 | `a` | Accept incoming call |
 | `s` | Silence the ringtone (the call keeps ringing) |
 | `b` / `Del` | Hang up |
-| `h` / `r` | Hold / Resume |
-| `m` | Toggle mute |
+| `h` | Hold / resume the selected call (toggle) |
+| `m` | Toggle microphone mute |
+| `M` | Toggle deafen (microphone and speaker) |
 | `t` / `T` | Blind / attended transfer |
 | `0-9` `*` `#` | DTMF tones (during a call) |
 | `f` / `Tab` | Open contacts (`Tab` switches calls when several are active) |

@@ -201,6 +201,37 @@ pub fn configure_account(acc: *mut AccountC, account: &Account) -> Result<(), St
     Ok(())
 }
 
+/// Read a `driver,device` pair from the running config (e.g. `audio_player
+/// pulse,default`). `None` if the key is absent or there is no config yet.
+///
+/// baresip stores these as one string; every caller wants the two halves as
+/// separate C strings, which is what `audio_set_player` and friends take.
+pub(super) fn conf_device(key: &std::ffi::CStr) -> Option<(CString, CString)> {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+    let conf = unsafe { conf_cur() };
+    if conf.is_null() {
+        return None;
+    }
+    // `c_char` is i8 on x86_64 but u8 on aarch64 — type the buffer as c_char so
+    // `conf_get_str`/`CStr::from_ptr` match the FFI signature on both.
+    let mut buf = [0 as c_char; 256];
+    let rc = unsafe { conf_get_str(conf, key.as_ptr(), buf.as_mut_ptr(), buf.len()) };
+    if rc != 0 {
+        return None;
+    }
+    let s = unsafe { CStr::from_ptr(buf.as_ptr()) }
+        .to_str()
+        .unwrap_or("");
+    let mut parts = s.splitn(2, ',');
+    let m = parts.next().unwrap_or("aubridge");
+    let d = parts.next().unwrap_or("default");
+    Some((
+        CString::new(m).unwrap_or_default(),
+        CString::new(d).unwrap_or_default(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

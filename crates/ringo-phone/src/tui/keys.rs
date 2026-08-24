@@ -1,4 +1,4 @@
-use super::app::{CallState, InputMode, TransferMode};
+use super::app::{InputMode, TransferMode};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 impl super::app::App {
@@ -246,23 +246,17 @@ impl super::app::App {
             KeyCode::Delete if self.has_any_call() => {
                 self.hangup_selected();
             }
-            KeyCode::Char('h') if !ctrl && self.in_active_call() => {
-                self.phone.hold();
-                let idx = self.selected_call;
-                if let Some(c) = self.calls.get_mut(idx) {
-                    c.state = CallState::OnHold;
-                }
-            }
-            KeyCode::Char('r') if !ctrl && self.selected_call_on_hold() => {
-                self.phone.resume();
-                let idx = self.selected_call;
-                if let Some(c) = self.calls.get_mut(idx) {
-                    c.state = CallState::Established;
-                }
+            KeyCode::Char('h')
+                if !ctrl && (self.in_active_call() || self.selected_call_on_hold()) =>
+            {
+                self.toggle_hold();
             }
             KeyCode::Char('m') if !ctrl && self.in_active_call() => {
                 self.muted = !self.muted;
                 self.phone.mute();
+            }
+            KeyCode::Char('M') if key.modifiers == KeyModifiers::SHIFT && self.in_active_call() => {
+                self.toggle_deafen();
             }
             KeyCode::Char('t') if key.modifiers == KeyModifiers::NONE && self.in_active_call() => {
                 self.transfer_mode = TransferMode::BlindInput(String::new());

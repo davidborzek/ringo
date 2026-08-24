@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ringo::config::Theme;
 use ringo::phone::MockPhone;
-use ringo::tui::{App, AppEvent, CallDirection, CallState, RegStatus, TransferMode};
+use ringo::tui::{App, AppEvent, CallDirection, CallState, InputMode, RegStatus, TransferMode};
 use serde_json::Value;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -106,6 +106,194 @@ fn ring(app: &mut App, id: &str) {
         number: format!("sip:{id}@example.com"),
         display_name: None,
     });
+}
+
+fn established(app: &mut App, id: &str) {
+    app.handle_message(AppEvent::CallOutgoing {
+        call_id: id.into(),
+        number: format!("sip:{id}@example.com"),
+    });
+    app.handle_message(AppEvent::CallEstablished { call_id: id.into() });
+}
+
+/// The hint bar's key column, for asserting on what it offers.
+fn hint_keys(app: &App) -> Vec<String> {
+    app.hints()
+        .into_iter()
+        .map(|(k, _)| k.to_string())
+        .collect()
+}
+
+#[test]
+fn leaving_a_transfer_returns_to_normal_not_the_dial_field() {
+    // Entering transfer mode never touches dial.mode, so leaving it must not
+    // either — landing in the dial field is a mode the user never asked for.
+    for leave in [esc(), enter()] {
+        let (mut app, _rx) = test_app();
+        established(&mut app, "1");
+
+        app.handle_key(key('t'));
+        app.handle_key(key('9'));
+        app.handle_key(leave);
+
+        assert!(matches!(app.transfer_mode, TransferMode::None));
+        assert_eq!(app.dial.mode, InputMode::Normal, "after {leave:?}");
+    }
+}
+
+#[test]
+fn leaving_an_attended_transfer_returns_to_normal_too() {
+    let (mut app, _rx) = test_app();
+    established(&mut app, "1");
+
+    app.handle_key(shift_key('T'));
+    app.handle_key(key('9'));
+    app.handle_key(esc());
+
+    assert_eq!(app.dial.mode, InputMode::Normal);
+}
+
+#[test]
+fn h_toggles_hold_both_ways() {
+    let (mut app, mut rx) = test_app();
+    established(&mut app, "1");
+    let _ = commands(&mut rx);
+
+    app.handle_key(key('h'));
+    assert_eq!(app.calls[0].state, CallState::OnHold);
+    assert_eq!(commands(&mut rx), vec!["hold"]);
+
+    app.handle_key(key('h'));
+    assert_eq!(app.calls[0].state, CallState::Established);
+    assert_eq!(commands(&mut rx), vec!["resume"]);
+}
+
+#[test]
+fn the_hold_hint_says_which_way_it_goes() {
+    let (mut app, _rx) = test_app();
+    established(&mut app, "1");
+    assert!(app.hints().contains(&("h", "hold")));
+
+    app.handle_key(key('h'));
+    assert!(app.hints().contains(&("h", "resume")));
+}
+
+#[test]
+fn the_hint_bar_makes_room_during_a_call() {
+    // Idle it lists where you can go; in a call it lists what you can do. The
+    // global keys keep working either way — they are in `?`.
+    let (mut app, _rx) = test_app();
+    let idle = hint_keys(&app);
+    assert!(idle.contains(&"d".to_string()), "idle offers dialling");
+    assert!(idle.contains(&"q".to_string()), "idle offers quit");
+
+    established(&mut app, "1");
+    let busy = hint_keys(&app);
+    assert!(busy.contains(&"b".to_string()), "hangup is the first thing");
+    assert!(
+        busy.contains(&"m/M".to_string()),
+        "mute and deafen share a hint"
+    );
+    assert!(busy.contains(&"h".to_string()));
+    assert!(
+        !busy.contains(&"q".to_string()),
+        "quit is not a mid-call action"
+    );
+    assert!(!busy.contains(&"c".to_string()), "history is not either");
+    assert!(busy.len() <= 6, "too crowded: {busy:?}");
+    assert_eq!(busy.last().unwrap(), "?", "the escape hatch comes last");
+}
+
+#[test]
+fn a_ringing_call_leads_with_accept() {
+    let (mut app, _rx) = test_app();
+    ring(&mut app, "1");
+    let keys = hint_keys(&app);
+    assert_eq!(keys.first().unwrap(), "a");
+    assert!(
+        keys.contains(&"s".to_string()),
+        "silence is offered while ringing"
+    );
+
+    app.handle_key(key('s'));
+    assert!(
+        !hint_keys(&app).contains(&"s".to_string()),
+        "a silenced ring stops advertising the key that silences it"
+    );
+}
+
+#[test]
+fn switching_is_only_offered_with_more_than_one_call() {
+    let (mut app, _rx) = test_app();
+    established(&mut app, "1");
+    assert!(!hint_keys(&app).contains(&"Tab".to_string()));
+
+    ring(&mut app, "2");
+    assert!(hint_keys(&app).contains(&"Tab".to_string()));
+}
+
+#[test]
+fn deafening_takes_the_microphone_with_it() {
+    // Hearing nothing while still being heard is a trap.
+    let (mut app, mut rx) = test_app();
+    established(&mut app, "1");
+    let _ = commands(&mut rx);
+
+    app.handle_key(shift_key('M'));
+    assert!(app.deafened);
+    assert!(app.muted, "deafening must mute the microphone too");
+    assert_eq!(commands(&mut rx), vec!["speaker", "mute"]);
+}
+
+#[test]
+fn undeafening_restores_a_microphone_that_was_already_muted() {
+    // Mute by hand, deafen, undeafen — you stay muted.
+    let (mut app, _rx) = test_app();
+    established(&mut app, "1");
+    app.handle_key(key('m'));
+    assert!(app.muted);
+
+    app.handle_key(shift_key('M'));
+    app.handle_key(shift_key('M'));
+
+    assert!(!app.deafened);
+    assert!(app.muted, "the manual mute must survive the round trip");
+}
+
+#[test]
+fn undeafening_unmutes_a_microphone_that_was_not() {
+    let (mut app, _rx) = test_app();
+    established(&mut app, "1");
+
+    app.handle_key(shift_key('M'));
+    app.handle_key(shift_key('M'));
+
+    assert!(!app.deafened);
+    assert!(!app.muted);
+}
+
+#[test]
+fn deafening_needs_an_active_call() {
+    let (mut app, mut rx) = test_app();
+    app.handle_key(shift_key('M'));
+    assert!(!app.deafened);
+    assert!(commands(&mut rx).is_empty());
+}
+
+#[test]
+fn hanging_up_clears_deafening() {
+    // Both states live on the call's audio object and die with it.
+    let (mut app, _rx) = test_app();
+    established(&mut app, "1");
+    app.handle_key(shift_key('M'));
+
+    app.handle_message(AppEvent::CallClosed {
+        call_id: "1".into(),
+        reason: "Connection closed".into(),
+        error: false,
+    });
+    assert!(!app.deafened);
+    assert!(!app.muted);
 }
 
 #[test]

@@ -146,6 +146,44 @@ impl Phone for BaresipPhone {
         });
     }
 
+    fn set_speaker_muted(&self, muted: bool) {
+        let ua = self.ua;
+        on_re_thread(move || unsafe {
+            let call = ua_call(ua as *mut Ua);
+            if call.is_null() {
+                return;
+            }
+            let audio = call_audio(call);
+            if audio.is_null() {
+                return;
+            }
+            // Point the call's player at aubridge, baresip's in-process bridge:
+            // decoded audio still arrives and is still fed somewhere, it just
+            // stops reaching a speaker. Undoing it means restoring whatever
+            // `audio_player` the config settled on — read rather than
+            // remembered, so a device swapped at runtime is not clobbered.
+            let restored;
+            let (m, d) = if muted {
+                (c"aubridge".as_ptr(), c"default".as_ptr())
+            } else {
+                restored = super::config::conf_device(c"audio_player");
+                match &restored {
+                    Some((m, d)) => (m.as_ptr(), d.as_ptr()),
+                    // No config to restore from: leave the player alone rather
+                    // than guess, so the call keeps whatever it has.
+                    None => return,
+                }
+            };
+            let rc = audio_set_player(audio, m, d);
+            if rc != 0 {
+                crate::rlog!(
+                    Warn,
+                    "set_speaker_muted({muted}): audio_set_player failed (rc={rc})"
+                );
+            }
+        });
+    }
+
     fn silence_alert(&self) {
         // stop_alert touches the process-wide play slot, which only the RE
         // thread may do — the bevent handler is already on it, this path is not.

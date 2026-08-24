@@ -337,9 +337,10 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
     };
 
     let search_footer = [("Enter", "confirm"), ("Esc", "clear")];
+    // No ↑↓ / PgUp/PgDn here: scrolling a list with the arrow keys is not
+    // something anyone needs telling, and the four slots are better spent on
+    // the keys that are particular to this overlay.
     let nav_footer = [
-        ("↑↓", "nav"),
-        ("PgUp/PgDn", "page"),
         ("Enter", "dial"),
         ("/", "search"),
         ("a", "add"),

@@ -9,6 +9,17 @@ pub trait Phone: Send {
     fn hold(&self);
     fn resume(&self);
     fn mute(&self);
+    /// Mute or unmute the *incoming* audio of the active call — what a chat
+    /// client calls being deafened. Local only: the remote end is not told and
+    /// keeps sending, so nothing has to be renegotiated to hear again.
+    ///
+    /// Independent of [`Phone::mute`], which is the microphone. Pairing the two
+    /// into one "deafen" gesture is the caller's business. Default: no-op
+    /// (mocks).
+    fn set_speaker_muted(&self, muted: bool) {
+        let _ = muted;
+    }
+
     /// Stop the alert tone that is playing right now, without touching the
     /// call it belongs to. The caller keeps hearing ringback and the call can
     /// still be answered — this silences your side only, and only until the
@@ -132,6 +143,9 @@ impl Phone for MockPhone {
     }
     fn silence_alert(&self) {
         self.send("silence", "");
+    }
+    fn set_speaker_muted(&self, muted: bool) {
+        self.send("speaker", if muted { "off" } else { "on" });
     }
     fn send_dtmf(&self, digit: char) {
         self.send("sndcode", &digit.to_string());

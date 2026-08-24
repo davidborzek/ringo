@@ -167,7 +167,11 @@ impl super::app::App {
         if error {
             self.last_call_reason = Some(reason);
         }
+        // The player and mute live on the call's audio object, so both states
+        // die with it.
         self.muted = false;
+        self.deafened = false;
+        self.mic_before_deafen = None;
         self.dial.dtmf.clear();
         self.calls.retain(|c| c.id != call_id);
         if self.selected_call >= self.calls.len() && !self.calls.is_empty() {
@@ -238,6 +242,49 @@ impl super::app::App {
             .get(self.selected_call)
             .map(|c| c.state == CallState::OnHold)
             .unwrap_or(false)
+    }
+
+    /// Put the selected call on hold, or take it off again. One gesture for
+    /// both directions: the call is in exactly one of the two states, so a
+    /// separate resume key only ever applies to half of them.
+    pub(super) fn toggle_hold(&mut self) {
+        let idx = self.selected_call;
+        let on_hold = self.selected_call_on_hold();
+        if on_hold {
+            self.phone.resume();
+        } else {
+            self.phone.hold();
+        }
+        if let Some(c) = self.calls.get_mut(idx) {
+            c.state = if on_hold {
+                CallState::Established
+            } else {
+                CallState::OnHold
+            };
+        }
+    }
+
+    /// Turn all audio of the active call off, or back on. Deafening takes the
+    /// microphone with it — hearing nothing while still being heard is a trap,
+    /// and every chat client resolves it the same way.
+    pub(super) fn toggle_deafen(&mut self) {
+        self.deafened = !self.deafened;
+        self.phone.set_speaker_muted(self.deafened);
+        if self.deafened {
+            self.mic_before_deafen = Some(self.muted);
+            if !self.muted {
+                self.phone.mute();
+                self.muted = true;
+            }
+        } else {
+            // Back to whatever the microphone was before, not simply on: muting
+            // by hand and then deafening must not quietly unmute you later.
+            let restore = self.mic_before_deafen.take().unwrap_or(false);
+            if self.muted != restore {
+                self.phone.mute();
+                self.muted = restore;
+            }
+        }
     }
 
     /// Silence the alert that is sounding right now. The call is untouched —
