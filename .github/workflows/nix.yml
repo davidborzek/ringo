@@ -10,6 +10,9 @@ name: Nix
 # build` misses. What *can* break it is a new system dependency or a change to
 # the packaging itself — and that always shows up in a manifest, a build script,
 # the flake, or the submodule pins.
+#
+# Because the filter makes this rare, it can afford to be thorough: one runner
+# per supported platform rather than x86_64 alone.
 
 on:
   pull_request:
@@ -26,9 +29,18 @@ on:
       - .github/workflows/nix.yml
 
 jobs:
-  build:
-    name: nix build
+  # Everything that must happen exactly once: the relock pushes a commit, and
+  # three runners racing to push the same one would collide. `nix flake check
+  # --all-systems` evaluates every system from here anyway, so it belongs with
+  # them rather than in the matrix.
+  check:
+    name: flake check
     runs-on: ubuntu-latest
+    outputs:
+      # The relock below may add a commit. The build matrix checks out this sha
+      # rather than the PR head, so it validates the lock file that will
+      # actually be merged instead of the one the PR arrived with.
+      sha: ${{ steps.resolve.outputs.sha }}
     permissions:
       # Renovate cannot relock the flake (it has no Nix), so this job does it
       # for them and pushes the result back onto the PR branch.
@@ -47,15 +59,6 @@ jobs:
       # Upstream Nix. DeterminateSystems/nix-installer-action only installs
       # Determinate Nix since 2026-01-01.
       - uses: cachix/install-nix-action@v31
-
-      # Read-only: this job never pushes (a fork PR has no token, and the cache
-      # is filled from main by nix-cache.yml). It is here so an unchanged
-      # derivation is fetched instead of rebuilt — which happens more often than
-      # the path filter suggests, because the Renovate relock below pushes and
-      # re-triggers this very workflow on the same content.
-      - uses: cachix/cachix-action@v17
-        with:
-          name: ringo
 
       # Renovate bumps `branch` in .gitmodules, the gitlink, and the tags in the
       # flake.nix input URLs, but it cannot regenerate flake.lock. Not for lack
@@ -128,10 +131,54 @@ jobs:
       # flake.nix instead of quietly relocking.
       - run: nix flake check --no-update-lock-file --all-systems
 
+      - id: resolve
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  # One runner per platform the flake claims to support. Building only x86_64
+  # here would let a change that breaks the darwin branch of mkRingo through,
+  # to surface after the merge on main — where the cache job goes red and the
+  # break is already in the default branch that `nix run` resolves to.
+  #
+  # arm64 Linux and Apple Silicon runners are free for public repositories only;
+  # the labels fail outright in a private one.
+  build:
+    name: ${{ matrix.system }}
+    needs: check
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # A platform that fails must not hide the others — the whole point is to
+      # learn about all three in one run.
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.check.outputs.sha }}
+
+      - uses: cachix/install-nix-action@v31
+
+      # Read-only: nothing here pushes. A fork PR has no token, and the cache is
+      # filled from main by nix-cache.yml. It is here so an unchanged derivation
+      # is fetched instead of rebuilt — which happens more often than the path
+      # filter suggests, because the Renovate relock re-triggers this workflow
+      # on content it has already seen.
+      - uses: cachix/cachix-action@v17
+        with:
+          name: ringo
+
       - run: nix build --print-build-logs --out-link result-phone .#ringo-phone
       - run: nix build --print-build-logs --out-link result-flow .#ringo-flow
 
       # Same smoke test the release binaries get: the wrapper links and runs.
+      # Every runner is native to its target, so this also catches a package
+      # that builds but cannot start.
       - name: Smoke test
         run: |
           ./result-phone/bin/ringo --help
