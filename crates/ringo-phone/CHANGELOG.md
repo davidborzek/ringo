@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.14.0...ringo-phone-v0.15.0) - 2026-08-24
+
+### Bug Fixes
+
+- *(deps)* update rust crate toml to v1 ([#91](https://github.com/davidborzek/ringo/pull/91))
+- *(ringo-phone)* clear the screen without asking where the cursor is ([#92](https://github.com/davidborzek/ringo/pull/92))
+- *(deps)* update rust dependencies (non-major) ([#81](https://github.com/davidborzek/ringo/pull/81))
+
+### Features
+
+- customizable alert sounds ([#101](https://github.com/davidborzek/ringo/pull/101))
+- *(ringo-phone)* include other TOML files from ringo.toml ([#93](https://github.com/davidborzek/ringo/pull/93))
+
 ## [0.14.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.13.0...ringo-phone-v0.14.0) - 2026-07-29
 
 ### Bug Fixes
