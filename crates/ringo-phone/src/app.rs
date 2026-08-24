@@ -45,7 +45,7 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     let config = crate::config::load();
 
     let account = account_from(&prof)?;
-    let options = backend_options(&config.baresip);
+    let options = backend_options(&config);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -112,8 +112,10 @@ fn account_from(p: &profile::Profile) -> Result<crate::account::Account> {
     })
 }
 
-/// Map ringo's `[baresip]` config section to the engine's backend options.
-fn backend_options(c: &crate::config::BaresipConfig) -> crate::account::BackendOptions {
+/// Map ringo's `[baresip]` and `[sounds]` config sections to the engine's
+/// backend options.
+fn backend_options(cfg: &crate::config::RingoConfig) -> crate::account::BackendOptions {
+    let c = &cfg.baresip;
     crate::account::BackendOptions {
         audio_driver: c.audio_driver.clone(),
         audio_player_device: c.audio_player_device.clone(),
@@ -127,6 +129,7 @@ fn backend_options(c: &crate::config::BaresipConfig) -> crate::account::BackendO
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
+        sounds: cfg.sounds.overrides(),
         ..Default::default()
     }
 }

@@ -22,6 +22,7 @@ pub struct RingoConfig {
     pub picker: PickerConfig,
     pub theme: Theme,
     pub baresip: BaresipConfig,
+    pub sounds: SoundsConfig,
     #[serde(default)]
     pub hooks: Vec<Hook>,
 }
@@ -74,6 +75,117 @@ pub struct BaresipConfig {
     /// Arbitrary extra baresip config lines appended at the end.
     /// Last value wins, so these override anything in the generated config.
     pub extra: std::collections::HashMap<String, String>,
+}
+
+/// Custom alert sounds. Each value is either a path to a WAV file (16-bit PCM
+/// or G.711 mu-law, mono or stereo) or `"off"` to silence that alert.
+///
+/// Example in ringo.toml:
+/// ```toml
+/// [sounds]
+/// ring     = "~/sounds/nokia.wav"   # absolute, or ~/ for $HOME
+/// ringback = "old-ringback.wav"     # relative to ~/.config/ringo/sounds/
+/// busy     = "off"                  # silent
+/// ```
+/// A key that is absent falls back to `~/.config/ringo/sounds/<alert>.wav` if
+/// that file exists, and otherwise to the tone built into ringo. A file that
+/// cannot be read or is not a supported WAV falls back the same way, with a
+/// warning in the log — a typo must never leave an incoming call silent.
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct SoundsConfig {
+    /// Incoming call. Loops until the call is answered or gone.
+    pub ring: Option<String>,
+    /// Outgoing call, remote end is ringing. Loops until the call is up or gone.
+    pub ringback: Option<String>,
+    /// Outgoing call rejected as busy. Played once.
+    pub busy: Option<String>,
+    /// Outgoing call failed for another reason. Played once.
+    pub error: Option<String>,
+    /// New voicemail. Played once.
+    pub message: Option<String>,
+}
+
+impl SoundsConfig {
+    /// The alerts ringo knows, paired with what the config says about them.
+    /// The names must match `ringo_core`'s alert keys.
+    fn entries(&self) -> [(&'static str, Option<&str>); 5] {
+        [
+            ("ring", self.ring.as_deref()),
+            ("ringback", self.ringback.as_deref()),
+            ("busy", self.busy.as_deref()),
+            ("error", self.error.as_deref()),
+            ("message", self.message.as_deref()),
+        ]
+    }
+
+    /// The `(alert, value)` pairs the engine takes. Alerts left at their
+    /// embedded default are omitted entirely.
+    pub fn overrides(&self) -> Vec<(String, String)> {
+        self.overrides_in(sounds_dir().as_deref())
+    }
+
+    /// [`Self::overrides`] against an explicit sounds directory (the drop-in
+    /// location), so this is testable without touching $HOME.
+    fn overrides_in(&self, dir: Option<&Path>) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for (alert, value) in self.entries() {
+            match value {
+                // Configured: `off` and `tone:` specs pass through untouched,
+                // only a path gets resolved.
+                Some(v) if is_muted(v) => out.push((alert.into(), "off".into())),
+                Some(v) if is_tone(v) => out.push((alert.into(), v.trim().into())),
+                Some(v) => out.push((alert.into(), resolve_sound(v, dir))),
+                // Not configured: pick up a drop-in file if the user put one there.
+                None => {
+                    let drop_in = dir.map(|d| d.join(format!("{alert}.wav")));
+                    match drop_in {
+                        Some(p) if p.is_file() => out.push((alert.into(), p.display().to_string())),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Values that describe a tone to generate rather than a file to play. They
+/// contain slashes, so treating one as a relative path would quietly turn it
+/// into `~/.config/ringo/sounds/tone:425/480,0/480`.
+fn is_tone(value: &str) -> bool {
+    value.trim_start().starts_with("tone:")
+}
+
+/// Values that silence an alert instead of naming a file.
+fn is_muted(value: &str) -> bool {
+    let v = value.trim();
+    v.is_empty() || v.eq_ignore_ascii_case("off") || v.eq_ignore_ascii_case("none")
+}
+
+/// Resolve a configured sound path: `~/` expands to $HOME, an absolute path is
+/// taken as-is, and a bare name resolves against the drop-in sounds directory
+/// so `ring = "nokia.wav"` finds `~/.config/ringo/sounds/nokia.wav`.
+fn resolve_sound(spec: &str, dir: Option<&Path>) -> String {
+    let spec = spec.trim();
+    if spec.starts_with("~/") {
+        return expand_home(spec).display().to_string();
+    }
+    let path = Path::new(spec);
+    match dir {
+        Some(d) if path.is_relative() => d.join(path).display().to_string(),
+        _ => spec.to_string(),
+    }
+}
+
+/// Where ringo looks for drop-in sound files: `~/.config/ringo/sounds/`.
+pub fn sounds_dir() -> Option<PathBuf> {
+    config_path().map(|p| {
+        p.parent()
+            .unwrap_or(Path::new("."))
+            .join("sounds")
+            .to_path_buf()
+    })
 }
 
 #[derive(Debug, Deserialize)]
@@ -276,12 +388,9 @@ fn include_paths(table: &toml::Table, path: &Path) -> Vec<PathBuf> {
             entries
                 .iter()
                 .filter_map(toml::Value::as_str)
-                .map(|spec| match spec.strip_prefix("~/") {
-                    Some(rest) => match std::env::var("HOME") {
-                        Ok(home) => PathBuf::from(home).join(rest),
-                        Err(_) => PathBuf::from(spec),
-                    },
-                    None => base.join(spec),
+                .map(|spec| match spec.starts_with("~/") {
+                    true => expand_home(spec),
+                    false => base.join(spec),
                 })
                 .collect()
         })
@@ -301,6 +410,16 @@ fn merge(base: &mut toml::Table, over: toml::Table) {
                 base.insert(k, v);
             }
         }
+    }
+}
+
+/// `~/` expands to $HOME; anything else is taken as written. With no $HOME the
+/// spec is left alone, so the failure shows up as a missing file, not as a path
+/// silently pointing somewhere else.
+fn expand_home(spec: &str) -> PathBuf {
+    match (spec.strip_prefix("~/"), std::env::var("HOME")) {
+        (Some(rest), Ok(home)) => PathBuf::from(home).join(rest),
+        _ => PathBuf::from(spec),
     }
 }
 
@@ -333,6 +452,136 @@ mod tests {
             fs::write(path, body).unwrap();
         }
         load_from(&dir.join(files[0].0))
+    }
+
+    /// A private directory to act as the drop-in sounds dir.
+    fn sounds_test_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ringo-snd-{}-{tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn no_sound_config_and_no_drop_ins_means_no_overrides() {
+        // Everything stays on the tones embedded in the binary.
+        let dir = sounds_test_dir("empty");
+        assert!(SoundsConfig::default().overrides_in(Some(&dir)).is_empty());
+    }
+
+    #[test]
+    fn a_drop_in_file_is_picked_up_without_any_config() {
+        let dir = sounds_test_dir("dropin");
+        fs::write(dir.join("ring.wav"), b"x").unwrap();
+        let out = SoundsConfig::default().overrides_in(Some(&dir));
+        assert_eq!(
+            out,
+            vec![(
+                "ring".to_string(),
+                dir.join("ring.wav").display().to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn an_explicit_path_wins_over_the_drop_in_file() {
+        let dir = sounds_test_dir("explicit");
+        fs::write(dir.join("ring.wav"), b"x").unwrap();
+        let cfg = SoundsConfig {
+            ring: Some("/opt/tones/custom.wav".into()),
+            ..Default::default()
+        };
+        let out = cfg.overrides_in(Some(&dir));
+        assert_eq!(
+            out,
+            vec![("ring".to_string(), "/opt/tones/custom.wav".into())]
+        );
+    }
+
+    #[test]
+    fn a_bare_name_resolves_against_the_sounds_dir() {
+        let dir = sounds_test_dir("relative");
+        let cfg = SoundsConfig {
+            ringback: Some("old.wav".into()),
+            ..Default::default()
+        };
+        let out = cfg.overrides_in(Some(&dir));
+        assert_eq!(
+            out,
+            vec![(
+                "ringback".to_string(),
+                dir.join("old.wav").display().to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn off_survives_even_when_a_drop_in_file_exists() {
+        // Muting is an explicit choice; a file lying in the directory must not
+        // quietly undo it.
+        let dir = sounds_test_dir("muted");
+        fs::write(dir.join("ring.wav"), b"x").unwrap();
+        let cfg = SoundsConfig {
+            ring: Some("Off".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.overrides_in(Some(&dir)),
+            vec![("ring".to_string(), "off".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_tone_spec_reaches_the_engine_untouched() {
+        // It has slashes in it; the path resolver must keep its hands off.
+        let dir = sounds_test_dir("tone");
+        let cfg = SoundsConfig {
+            ringback: Some("tone:440+480/2000,0/4000".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.overrides_in(Some(&dir)),
+            vec![(
+                "ringback".to_string(),
+                "tone:440+480/2000,0/4000".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_tone_spec_wins_over_a_drop_in_file() {
+        let dir = sounds_test_dir("tone-dropin");
+        fs::write(dir.join("busy.wav"), b"x").unwrap();
+        let cfg = SoundsConfig {
+            busy: Some("tone:425/480,0/480".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.overrides_in(Some(&dir)),
+            vec![("busy".to_string(), "tone:425/480,0/480".to_string())]
+        );
+    }
+
+    #[test]
+    fn tilde_expands_to_home() {
+        let Ok(home) = std::env::var("HOME") else {
+            return;
+        };
+        assert_eq!(
+            resolve_sound("~/tones/a.wav", None),
+            format!("{home}/tones/a.wav")
+        );
+    }
+
+    #[test]
+    fn the_sounds_section_comes_out_of_toml() {
+        let cfg = load_files(&[(
+            "ringo.toml",
+            "[sounds]\nring = \"/tmp/r.wav\"\nbusy = \"off\"\n",
+        )]);
+        assert_eq!(cfg.sounds.ring.as_deref(), Some("/tmp/r.wav"));
+        assert_eq!(cfg.sounds.busy.as_deref(), Some("off"));
+        assert_eq!(cfg.sounds.message, None);
     }
 
     #[test]

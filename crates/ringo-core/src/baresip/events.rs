@@ -7,6 +7,7 @@ use crate::event::AppEvent;
 
 use super::bindings::*;
 use super::re_thread::EVENT_TX;
+use super::sounds::{Alert, play_alert};
 
 /// Inbound INVITE headers keyed by (UA pointer, SIP Call-ID); value is the
 /// ordered list of (header-name, header-value) pairs from the INVITE.
@@ -83,12 +84,51 @@ pub(crate) fn received_dtmf(ua: usize) -> String {
         .unwrap_or_default()
 }
 
-/// Drop a UA's received-DTMF buffer (on session teardown).
+/// Drop a UA's received-DTMF buffer and voicemail count (on session teardown).
 pub(crate) fn clear_dtmf(ua: usize) {
     received_dtmf_store()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&ua);
+    mwi_counts()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&ua);
+}
+
+/// New-voicemail count per UA, as last announced.
+static MWI_COUNTS: OnceLock<Mutex<std::collections::HashMap<usize, u32>>> = OnceLock::new();
+
+fn mwi_counts() -> &'static Mutex<std::collections::HashMap<usize, u32>> {
+    MWI_COUNTS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Whether `ua`'s new-voicemail count went up, remembering the new value. The
+/// MWI NOTIFY repeats on every subscription refresh, so playing the message
+/// tone on each one would beep once per registration interval.
+fn mwi_count_rose(ua: usize, new_count: u32) -> bool {
+    match mwi_counts()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(ua, new_count)
+    {
+        // First NOTIFY for this UA — it lands right after registration and
+        // describes messages you already know about. Take it as the baseline
+        // and stay quiet; the TUI shows the count either way.
+        None => false,
+        Some(prev) => new_count > prev,
+    }
+}
+
+/// The tone for a failed outgoing call, mirroring baresip's menu module: busy
+/// for the busy/decline codes, nothing for a call we cancelled ourselves (487),
+/// the generic error tone for everything else.
+fn play_closed_tone(scode: u16) {
+    match scode {
+        486 | 600 | 603 => play_alert(Alert::Busy),
+        487 => {}
+        _ => play_alert(Alert::Error),
+    }
 }
 
 /// Take (read + remove) the stored INVITE headers for `(ua, call_id)`.
@@ -287,7 +327,7 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
         }
         x if x == bevent_ev::BEVENT_CALL_INCOMING as i32 => {
             let call = unsafe { bevent_get_call(event) };
-            super::sounds::play_alert("ring.wav");
+            play_alert(Alert::Ring);
             let (call_id, number, display_name) = call_info(call);
             AppEvent::CallIncoming {
                 call_id,
@@ -302,7 +342,7 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
         }
         x if x == bevent_ev::BEVENT_CALL_RINGING as i32 => {
             let call = unsafe { bevent_get_call(event) };
-            super::sounds::play_alert("ringback.wav");
+            play_alert(Alert::Ringback);
             let call_id = call_id_str(call);
             AppEvent::CallRinging { call_id }
         }
@@ -333,6 +373,12 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
             } else {
                 text
             };
+            // A failed outgoing call gets a short tone saying why, the way
+            // baresip's menu module does it. Incoming calls stay silent: a busy
+            // tone in your own ear after you decline a call is just noise.
+            if scode != 0 && !call.is_null() && unsafe { call_is_outgoing(call) } {
+                play_closed_tone(scode);
+            }
             let error = crate::event::is_error_reason(&reason);
             AppEvent::CallClosed {
                 call_id,
@@ -358,7 +404,14 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
         }
         x if x == bevent_ev::BEVENT_MWI_NOTIFY as i32 => {
             let text = bevent_text(event);
-            parse_mwi(&text)
+            let mwi = parse_mwi(&text);
+            if let AppEvent::VoicemailStatus { new_count, .. } = mwi {
+                let ua = unsafe { bevent_get_ua(event) };
+                if mwi_count_rose(ua as usize, new_count) {
+                    play_alert(Alert::Message);
+                }
+            }
+            mwi
         }
         _ => AppEvent::Unknown {
             class: "bevent".into(),
