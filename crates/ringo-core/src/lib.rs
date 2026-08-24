@@ -7,6 +7,7 @@ pub mod backend;
 pub mod event;
 pub mod log;
 pub mod phone;
+pub mod tones;
 
 pub use backend::{
     AudioFrame, available_audio_codecs, call_count, is_registered, push_audio, received_audio,

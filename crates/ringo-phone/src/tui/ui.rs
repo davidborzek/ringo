@@ -322,6 +322,7 @@ fn render_help(f: &mut Frame, app: &App) {
         Line::from(Span::styled("  Keys", subtle)),
         row("d", "dial"),
         row("a", "accept incoming"),
+        row("s", "silence the ringtone"),
         row("b / Del", "hang up"),
         row("h / r", "hold / resume"),
         row("m", "mute"),
@@ -337,7 +338,7 @@ fn render_help(f: &mut Frame, app: &App) {
         Line::from(""),
         Line::from(Span::styled("  Commands (:)", subtle)),
         Line::from(Span::styled(
-            "  dial <n>  hangup  accept  hold  resume  mute",
+            "  dial <n>  hangup  accept  hold  resume  mute  silence",
             Style::default(),
         )),
         Line::from(Span::styled(
@@ -442,6 +443,16 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         ));
     }
 
+    // Silenced ringtone. Silencing produces no sound and no state change the
+    // user can otherwise see, so this line is the only confirmation it worked.
+    if app.ring_silenced && app.has_incoming_ringing() {
+        spans.push(sep.clone());
+        spans.push(Span::styled(
+            "RING SILENCED",
+            Style::default().fg(app.theme.subtle.get()),
+        ));
+    }
+
     // MWI
     if app.mwi.waiting {
         spans.push(sep.clone());
@@ -519,6 +530,9 @@ fn normal_hints(app: &App) -> Vec<Hint<'static>> {
                 let mut h: Vec<Hint> = vec![("d", "dial")];
                 if app.has_incoming_ringing() {
                     h.push(("a", "accept"));
+                    if !app.ring_silenced {
+                        h.push(("s", "silence"));
+                    }
                 }
                 if app.has_any_call() {
                     h.push(("b", "hangup"));

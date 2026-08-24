@@ -3,7 +3,7 @@
 #
 # ringo-phone has two config layers with different mutability:
 #
-#   * ~/.config/ringo/ringo.toml  — global (theme/picker/baresip/hooks). ringo
+#   * ~/.config/ringo/ringo.toml  — global (theme/picker/baresip/sounds/hooks). ringo
 #     only ever READS it, so it is managed as a read-only store symlink.
 #   * ~/.config/ringo/profiles/<name>/profile.toml — per SIP profile. The TUI
 #     REWRITES these at runtime (add/clone/edit/rename, in-call edit), so they
@@ -149,7 +149,7 @@ in
         }
       '';
       description = ''
-        Global ~/.config/ringo/ringo.toml (theme/picker/baresip/hooks). ringo
+        Global ~/.config/ringo/ringo.toml (theme/picker/baresip/sounds/hooks). ringo
         only reads this file, so it is managed as a read-only store symlink.
       '';
     };

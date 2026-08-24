@@ -17,6 +17,8 @@ impl super::app::App {
     ) {
         self.deflected = None;
         self.last_call_reason = None;
+        // A new call rings again, whatever you did about the last one.
+        self.ring_silenced = false;
         let notify_text = match &display_name {
             Some(name) => format!("{} ({})", name, number),
             None => number.clone(),
@@ -236,6 +238,13 @@ impl super::app::App {
             .get(self.selected_call)
             .map(|c| c.state == CallState::OnHold)
             .unwrap_or(false)
+    }
+
+    /// Silence the alert that is sounding right now. The call is untouched —
+    /// it keeps ringing for the caller and can still be answered.
+    pub(super) fn silence_alert(&mut self) {
+        self.phone.silence_alert();
+        self.ring_silenced = true;
     }
 
     pub(super) fn has_incoming_ringing(&self) -> bool {

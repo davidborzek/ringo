@@ -64,14 +64,14 @@ info = ["aor"]   # default
 
 All UI colors are configurable — named values or `#rrggbb` hex.
 
-| Role | Default | Used for |
-|------|---------|----------|
-| `accent` | `cyan` | Logo, picker selection, DTMF input, history popup |
-| `subtle` | `dark_gray` | Hints, log text, subtitles, unfocused labels |
-| `success` | `green` | Registered, established call, toggle on |
-| `danger` | `red` | Muted, missed calls, registration failed |
-| `attention` | `yellow` | Selected call, ringing, MWI, focused field |
-| `transfer` | `magenta` | Transfer-mode input |
+| Role        | Default     | Used for                                          |
+| ----------- | ----------- | ------------------------------------------------- |
+| `accent`    | `cyan`      | Logo, picker selection, DTMF input, history popup |
+| `subtle`    | `dark_gray` | Hints, log text, subtitles, unfocused labels      |
+| `success`   | `green`     | Registered, established call, toggle on           |
+| `danger`    | `red`       | Muted, missed calls, registration failed          |
+| `attention` | `yellow`    | Selected call, ringing, MWI, focused field        |
+| `transfer`  | `magenta`   | Transfer-mode input                               |
 
 ```toml
 [theme]
@@ -112,6 +112,112 @@ dns_server     = "10.0.0.1:53"
 call_max_calls = "8"
 ```
 
+## Sounds
+
+ringo plays five alert tones, each with a default built into the binary:
+
+| Alert      | When                                                  | Plays     | Default                 |
+| ---------- | ----------------------------------------------------- | --------- | ----------------------- |
+| `ring`     | incoming call                                         | on repeat | rising G–C–E chime, every 2.5 s |
+| `ringback` | outgoing call, the other end is ringing               | on repeat | 425 Hz, 1 s / 4 s       |
+| `busy`     | your outgoing call was rejected as busy (486/600/603) | once      | 425 Hz, 480 ms / 480 ms |
+| `error`    | your outgoing call failed for another reason          | once      | 425 Hz, 240 ms / 240 ms |
+| `message`  | a new voicemail arrived while ringo was running (MWI) | once      | two descending notes    |
+
+Every default is generated at 48 kHz — ringo embeds no audio files at all.
+
+The three call-progress tones come from their specification, so the cadence is
+exact and the loop has no seam. The values are the German ones (`[de]` in
+Asterisk's `indications.conf`): `busy` is the ordinary engaged tone, `error` the
+faster congestion tone that says the network could not put the call through.
+
+To silence a ringtone that is sounding right now without configuring anything,
+press `s` (or `:silence`, or `ringo ctl silence`). It stops your side only: the
+caller keeps hearing ringback, the call stays there to answer, and the next call
+rings again.
+
+`ring` and `message` are chimes — struck notes with a decay, the way a modern
+ringtone is a short motif in a cadence rather than a continuous tone. Nothing
+specifies what an incoming call should sound like, so these are a choice rather
+than a standard; replace them like anything else below.
+
+There are three ways to replace any of them.
+
+**Drop in a file.** Put `ring.wav`, `ringback.wav`, `busy.wav`, `error.wav` or
+`message.wav` into `~/.config/ringo/sounds/` and ringo uses it. No config needed.
+
+**Write a tone.** A value starting with `tone:` is generated instead of read
+from disk, in the notation Asterisk's `indications.conf` uses — so any of its 50
+country zones can be pasted in. Elements are separated by commas, each is
+`freq[+freq…]/milliseconds`, and a frequency of `0` is silence:
+
+```toml
+[sounds]
+ringback = "tone:440+480/2000,0/4000"    # North America
+busy     = "tone:480+620/500,0/500"      # North America
+error    = "tone:914/330,1371/330,1777/330,0/1000"   # the three-tone SIT
+```
+
+The British double ring shows why an element list beats a simple on/off pair:
+`ringback = "tone:400+450/400,0/200,400+450/400,0/2000"`.
+
+Asterisk's `*` (modulation) and `!` (play once) are not supported; ringo says so
+by name rather than mis-playing them. A spec that cannot be read is logged and
+leaves the built-in tone in place.
+
+**Or name a file explicitly:**
+
+```toml
+[sounds]
+ring     = "~/media/nokia.wav"   # absolute path, or ~/ for your home directory
+ringback = "old-ringback.wav"    # bare name: relative to ~/.config/ringo/sounds/
+busy     = "off"                 # "off" (or "none") silences this alert
+```
+
+An explicit entry beats a drop-in file of the same name, and any alert you leave
+out keeps its built-in tone.
+
+Your file is played by baresip straight from disk, so only its path is held in
+memory and there is no size limit. The flip side is that it is read when the
+alert fires: a few hundred kB from the page cache is nothing, but a very large
+file on cold or networked storage delays the call it is announcing. Keep a
+ringtone to a few seconds and it never matters.
+
+The path must not contain a comma — baresip's player reads one as a
+repeat/delay suffix and truncates the name there. ringo says so at start rather
+than letting it fail at the first call.
+
+What baresip's loader accepts is:
+
+- WAV (RIFF), with the `fmt ` chunk first — a leading `LIST`/metadata chunk makes
+  the file unreadable for it.
+- 16-bit PCM, A-law or mu-law. Not 8-bit or 24-bit PCM, not float, and not
+  `WAVE_FORMAT_EXTENSIBLE`, which many converters emit by default.
+- Any sample rate and channel count your audio driver will open. Rates other
+  than 8/16/32/44.1/48 kHz work with PulseAudio and PipeWire; ALSA on a raw
+  `hw:` device can refuse them.
+
+ringo checks all of this while it starts, so a file it cannot use is a line in
+the log rather than silence at the first call:
+
+```
+WARN: sounds: ring: '/home/you/tune.wav' is WAVE_FORMAT_EXTENSIBLE, which
+      baresip's loader rejects — re-encode it as plain 16-bit PCM
+```
+
+Whatever fails — bad path, wrong format, a rate the driver turns down — falls
+back to the built-in tone. A typo never leaves an incoming call silent.
+
+`ffmpeg` produces a file that always works:
+
+```sh
+ffmpeg -i nokia.mp3 -ac 1 -ar 48000 -c:a pcm_s16le ~/.config/ringo/sounds/ring.wav
+```
+
+The config is read once at start, so a _different_ file takes effect on the next
+start (or after a profile switch) — but overwriting the file you already
+configured takes effect immediately, since it is opened fresh on every alert.
+
 ## Contacts
 
 Contacts live at `~/.config/ringo/contacts.toml`; names resolve in the call list
@@ -137,12 +243,12 @@ event = "call_incoming"
 command = "notify-send 'ringo' \"Call from $(echo $RINGO_EVENT_DATA | jq -r .number)\""
 ```
 
-| Event | Trigger | Event data |
-|-------|---------|------------|
-| `profile_loaded` | Profile loaded, baresip spawned | — |
-| `call_incoming` | Incoming call | `call_id`, `number`, `display_name` |
-| `call_outgoing` | Outgoing call initiated | `call_id`, `number` |
-| `call_ended` | Call closed | `call_id`, `number`, `direction`, `duration_secs`, `reason`, `error` |
+| Event            | Trigger                         | Event data                                                           |
+| ---------------- | ------------------------------- | -------------------------------------------------------------------- |
+| `profile_loaded` | Profile loaded, baresip spawned | —                                                                    |
+| `call_incoming`  | Incoming call                   | `call_id`, `number`, `display_name`                                  |
+| `call_outgoing`  | Outgoing call initiated         | `call_id`, `number`                                                  |
+| `call_ended`     | Call closed                     | `call_id`, `number`, `direction`, `duration_secs`, `reason`, `error` |
 
 Each hook receives `RINGO_EVENT`, `RINGO_PROFILE`, `RINGO_PROFILE_JSON` (no
 password) and `RINGO_EVENT_DATA` (JSON).

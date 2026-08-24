@@ -20,8 +20,8 @@ use tokio::{
 /// Commands accepted over the control socket. ringo's UI-only commands
 /// (`quit`, `edit`, `switch`, panel toggles) are intentionally excluded.
 pub const ALLOWED_COMMANDS: &[&str] = &[
-    "dial", "d", "hangup", "accept", "a", "hold", "resume", "mute", "dtmf", "transfer", "xfer",
-    "status", "shutdown",
+    "dial", "d", "hangup", "accept", "a", "hold", "resume", "mute", "silence", "dtmf", "transfer",
+    "xfer", "status", "shutdown",
 ];
 
 const MAX_FRAME_LEN: usize = 1_000_000;

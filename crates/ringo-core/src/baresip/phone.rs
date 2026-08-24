@@ -146,6 +146,12 @@ impl Phone for BaresipPhone {
         });
     }
 
+    fn silence_alert(&self) {
+        // stop_alert touches the process-wide play slot, which only the RE
+        // thread may do — the bevent handler is already on it, this path is not.
+        on_re_thread(super::sounds::stop_alert);
+    }
+
     fn send_dtmf(&self, digit: char) {
         let ua = self.ua;
         let key = digit as c_char;

@@ -9,6 +9,11 @@ pub trait Phone: Send {
     fn hold(&self);
     fn resume(&self);
     fn mute(&self);
+    /// Stop the alert tone that is playing right now, without touching the
+    /// call it belongs to. The caller keeps hearing ringback and the call can
+    /// still be answered — this silences your side only, and only until the
+    /// next alert. Default: no-op (mocks).
+    fn silence_alert(&self) {}
     fn send_dtmf(&self, digit: char);
     fn switch_line(&self, line: usize);
     /// Make the call with SIP `call_id` the UA's current call (baresip
@@ -124,6 +129,9 @@ impl Phone for MockPhone {
     }
     fn mute(&self) {
         self.send("mute", "");
+    }
+    fn silence_alert(&self) {
+        self.send("silence", "");
     }
     fn send_dtmf(&self, digit: char) {
         self.send("sndcode", &digit.to_string());

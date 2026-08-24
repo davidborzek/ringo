@@ -58,6 +58,12 @@ pub struct BackendOptions {
     pub user_agent: Option<String>,
     /// Arbitrary extra config lines appended at the end (key, value).
     pub extra: Vec<(String, String)>,
+    /// Alert sounds as `(alert, value)` pairs, where `alert` is one of
+    /// `ring`, `ringback`, `busy`, `error`, `message` and `value` is a path to
+    /// a WAV file or `off` to mute that alert. Alerts not named here keep the
+    /// tone embedded in the binary. Unusable files fall back to that default.
+    #[serde(default)]
+    pub sounds: Vec<(String, String)>,
     /// Capture the full call's sent + received audio in-process (for the
     /// scenario runner's `--save-audio`). When off, only a short rolling window
     /// is retained for `verify-audio`. The softphone leaves this off.

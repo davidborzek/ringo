@@ -7,6 +7,7 @@ use crate::event::AppEvent;
 
 use super::bindings::*;
 use super::re_thread::EVENT_TX;
+use super::sounds::{Alert, play_alert};
 
 /// Inbound INVITE headers keyed by (UA pointer, SIP Call-ID); value is the
 /// ordered list of (header-name, header-value) pairs from the INVITE.
@@ -83,12 +84,105 @@ pub(crate) fn received_dtmf(ua: usize) -> String {
         .unwrap_or_default()
 }
 
-/// Drop a UA's received-DTMF buffer (on session teardown).
+/// Drop a UA's received-DTMF buffer and voicemail state (on session teardown).
 pub(crate) fn clear_dtmf(ua: usize) {
     received_dtmf_store()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&ua);
+    mwi_state()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&ua);
+}
+
+/// Voicemail state per UA, as last announced.
+static MWI_STATE: OnceLock<Mutex<std::collections::HashMap<usize, (bool, u32)>>> = OnceLock::new();
+
+fn mwi_state() -> &'static Mutex<std::collections::HashMap<usize, (bool, u32)>> {
+    MWI_STATE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Whether `ua` has voicemail it did not have before, remembering the new
+/// state. The MWI NOTIFY repeats on every subscription refresh, so announcing
+/// each one would beep once per registration interval.
+///
+/// Both halves of the NOTIFY count. Watching only `Voice-Message:` would leave
+/// the alert dead against a server that sends nothing but `Messages-Waiting:
+/// yes` — the count stays 0 there, and 0 never rises.
+fn mwi_is_news(ua: usize, waiting: bool, new_count: u32) -> bool {
+    match mwi_state()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(ua, (waiting, new_count))
+    {
+        // First NOTIFY for this UA — it lands right after registration and
+        // describes messages you already know about. Take it as the baseline
+        // and stay quiet; the TUI shows the count either way.
+        None => false,
+        Some((was_waiting, prev_count)) => new_count > prev_count || (waiting && !was_waiting),
+    }
+}
+
+/// The tone for a failed outgoing call, mirroring baresip's menu module: busy
+/// for the busy/decline codes, nothing for a call we cancelled ourselves (487),
+/// the generic error tone for everything else.
+fn play_closed_tone(scode: u16) {
+    match scode {
+        486 | 600 | 603 => play_alert(Alert::Busy),
+        487 => {}
+        _ => play_alert(Alert::Error),
+    }
+}
+
+/// Whether `ua` has a call other than `except` that is still waiting to be
+/// answered, and whether any call is up. Walks the UA's call list directly —
+/// libre's `list` is a plain doubly-linked list of `le` cells.
+///
+/// # Safety
+/// Must run on the RE thread, where the call list is stable.
+unsafe fn other_calls(ua: *mut Ua, except: *mut Call) -> (bool, bool) {
+    let (mut ringing, mut established) = (false, false);
+    if ua.is_null() {
+        return (ringing, established);
+    }
+    unsafe {
+        let list = ua_calls(ua);
+        if list.is_null() {
+            return (ringing, established);
+        }
+        let mut le = (*list).head;
+        while !le.is_null() {
+            let call = (*le).data as *mut Call;
+            if !call.is_null() && call != except {
+                match call_state(call) {
+                    x if x == call_state_CALL_STATE_INCOMING => ringing = true,
+                    x if x == call_state_CALL_STATE_ESTABLISHED => established = true,
+                    _ => {}
+                }
+            }
+            le = (*le).next;
+        }
+    }
+    (ringing, established)
+}
+
+/// End the alert belonging to a call that just went away, and pick the ring
+/// back up if another call is still waiting to be answered. Without this, a
+/// second call closing takes the first one's ring with it — the call goes on
+/// flashing on screen with nothing to hear.
+///
+/// Nothing is restored while another call is established: a full ring in your
+/// ear during a conversation would be worse than the silence.
+///
+/// # Safety
+/// Must run on the RE thread (the bevent handler is).
+unsafe fn end_alert_for(ua: *mut Ua, call: *mut Call) {
+    super::sounds::stop_alert();
+    let (ringing, established) = unsafe { other_calls(ua, call) };
+    if ringing && !established {
+        play_alert(Alert::Ring);
+    }
 }
 
 /// Take (read + remove) the stored INVITE headers for `(ua, call_id)`.
@@ -287,7 +381,7 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
         }
         x if x == bevent_ev::BEVENT_CALL_INCOMING as i32 => {
             let call = unsafe { bevent_get_call(event) };
-            super::sounds::play_alert("ring.wav");
+            play_alert(Alert::Ring);
             let (call_id, number, display_name) = call_info(call);
             AppEvent::CallIncoming {
                 call_id,
@@ -302,22 +396,25 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
         }
         x if x == bevent_ev::BEVENT_CALL_RINGING as i32 => {
             let call = unsafe { bevent_get_call(event) };
-            super::sounds::play_alert("ringback.wav");
+            play_alert(Alert::Ringback);
             let call_id = call_id_str(call);
             AppEvent::CallRinging { call_id }
         }
         x if x == bevent_ev::BEVENT_CALL_ESTABLISHED as i32 => {
-            super::sounds::stop_alert();
             let call = unsafe { bevent_get_call(event) };
+            // No ring is restored here: this call is now up, and a waiting one
+            // must not ring into the conversation.
+            super::sounds::stop_alert();
             let call_id = call_id_str(call);
             AppEvent::CallEstablished { call_id }
         }
         x if x == bevent_ev::BEVENT_CALL_CLOSED as i32 => {
-            super::sounds::stop_alert();
             let call = unsafe { bevent_get_call(event) };
             // Snapshot RTP stats while the call still exists, so a scenario can
             // assert on call quality (MOS, loss, …) after hanging up.
             let ua = unsafe { bevent_get_ua(event) };
+            // SAFETY: the bevent handler runs on the RE thread.
+            unsafe { end_alert_for(ua, call) };
             if !ua.is_null() && !call.is_null() {
                 super::stats::snapshot_on_close(ua as usize, call);
             }
@@ -333,6 +430,12 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
             } else {
                 text
             };
+            // A failed outgoing call gets a short tone saying why, the way
+            // baresip's menu module does it. Incoming calls stay silent: a busy
+            // tone in your own ear after you decline a call is just noise.
+            if scode != 0 && !call.is_null() && unsafe { call_is_outgoing(call) } {
+                play_closed_tone(scode);
+            }
             let error = crate::event::is_error_reason(&reason);
             AppEvent::CallClosed {
                 call_id,
@@ -358,7 +461,14 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
         }
         x if x == bevent_ev::BEVENT_MWI_NOTIFY as i32 => {
             let text = bevent_text(event);
-            parse_mwi(&text)
+            let mwi = parse_mwi(&text);
+            if let AppEvent::VoicemailStatus { waiting, new_count } = mwi {
+                let ua = unsafe { bevent_get_ua(event) };
+                if mwi_is_news(ua as usize, waiting, new_count) {
+                    play_alert(Alert::Message);
+                }
+            }
+            mwi
         }
         _ => AppEvent::Unknown {
             class: "bevent".into(),
