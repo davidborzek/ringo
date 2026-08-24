@@ -20,7 +20,7 @@ impl super::app::App {
                 self.reg_status = RegStatus::Failed(reason.clone());
             }
             AppEvent::Unregistered { .. } => {
-                self.reg_status = RegStatus::Failed("Unregistered".into());
+                self.reg_status = RegStatus::Unregistered;
             }
             AppEvent::CallIncoming {
                 call_id,

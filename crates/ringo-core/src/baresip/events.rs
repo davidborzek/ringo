@@ -366,7 +366,17 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
         {
             let ua = unsafe { bevent_get_ua(event) };
             let account = ua_aor(ua);
-            AppEvent::RegisterOk { account }
+            // A de-registration is acknowledged with a plain 200 OK, and
+            // baresip reports any 2xx to a REGISTER as REGISTER_OK — so signing
+            // off arrives here as "registered", right after UNREGISTERING said
+            // otherwise. libre has already cleared the flag by this point
+            // (`reg->registered = reg->wait > 0` with expires 0, set before the
+            // handler runs), so asking tells the two apart.
+            if unsafe { ua_isregistered(ua) } {
+                AppEvent::RegisterOk { account }
+            } else {
+                AppEvent::Unregistered { account }
+            }
         }
         x if x == bevent_ev::BEVENT_REGISTER_FAIL as i32
             || x == bevent_ev::BEVENT_FALLBACK_FAIL as i32 =>

@@ -18,7 +18,13 @@ ringo control -t work status         # registration + active calls
 when a name is awkward to type or the same profile runs more than once.
 
 Commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`, `deafen`,
-`silence`, `dtmf <digits>`, `transfer <uri>`, `status`, `shutdown`.
+`silence`, `dtmf <digits>`, `transfer <uri>`, `register`, `unregister`, `status`,
+`shutdown`.
+
+`unregister` signs the account off: the provider has nowhere to deliver calls to
+and usually takes them itself — voicemail, or whatever the account is set up to
+do. Outgoing calls may stop working too, depending on the provider. `register`
+signs back on. The header shows `○ Unregistered` in the meantime.
 
 ## Headless sessions
 

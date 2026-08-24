@@ -343,11 +343,11 @@ fn render_help(f: &mut Frame, app: &App) {
             Style::default(),
         )),
         Line::from(Span::styled(
-            "  dtmf <digits>  transfer <uri>  info  log  history",
+            "  dtmf <digits>  transfer <uri>  register  unregister",
             Style::default(),
         )),
         Line::from(Span::styled(
-            "  contacts  edit  switch  quit",
+            "  info  log  history  contacts  edit  switch  quit",
             Style::default(),
         )),
     ];
@@ -408,6 +408,12 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let (reg_text, reg_style) = match &app.reg_status {
         RegStatus::Ok => ("● Registered", Style::default().fg(app.theme.success.get())),
         RegStatus::Failed(_) => ("✗ Failed", Style::default().fg(app.theme.danger.get())),
+        // Attention, not danger: nothing went wrong, but calls will not arrive
+        // and that has to stay visible until it is undone.
+        RegStatus::Unregistered => (
+            "○ Unregistered",
+            Style::default().fg(app.theme.attention.get()),
+        ),
         RegStatus::Registering => (
             "◌ Registering",
             Style::default().fg(app.theme.attention.get()),

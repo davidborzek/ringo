@@ -2,6 +2,12 @@ use tokio::sync::mpsc::Sender;
 
 pub trait Phone: Send {
     fn register(&self, aor: &str, regint: u32);
+    /// Drop the registration: stop refreshing it and send REGISTER with
+    /// Expires: 0. The provider then has nowhere to deliver calls to and will
+    /// usually take them itself — voicemail, or whatever the account is set up
+    /// to do. Undone with [`Phone::register`]. Default: no-op (mocks).
+    fn unregister(&self) {}
+
     fn dial(&self, number: &str);
     fn hangup(&self);
     fn hangup_all(&self);
@@ -119,6 +125,9 @@ impl MockPhone {
 impl Phone for MockPhone {
     fn register(&self, _aor: &str, regint: u32) {
         self.send("uareg", &format!("{} 0", regint));
+    }
+    fn unregister(&self) {
+        self.send("unregister", "");
     }
     fn dial(&self, number: &str) {
         self.send("dial", number);
