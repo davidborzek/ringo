@@ -1,0 +1,113 @@
+name: Nix cache pin
+
+# Reusable: mark a released version's store paths as exempt from the binary
+# cache's garbage collection. Called by release-plz after the tags exist; also
+# `workflow_dispatch`able to pin a tag by hand. Needs CACHIX_AUTH_TOKEN —
+# callers pass `secrets: inherit`.
+#
+# Called rather than triggered by the tag push, for the same reason the
+# binary/Docker/docs jobs are: release-plz tags with the default GITHUB_TOKEN,
+# and GitHub does not fire workflows for events that token creates.
+#
+# Why pin at all: nix-cache.yml fills the cache from every main commit, which is
+# what `nix run` and a home-manager input actually resolve to. But the free tier
+# evicts least recently used entries at 5 GB — a couple of months at ~72 MB per
+# commit — and a pinned release is worth a cache hit for far longer than a
+# passing main commit. Without this, the entries with the longest useful life
+# would be the first thrown out.
+
+on:
+  workflow_call:
+    inputs:
+      phone_tag:
+        description: "ringo-phone tag (ringo-phone-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
+      flow_tag:
+        description: "ringo-flow tag (ringo-flow-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
+  workflow_dispatch:
+    inputs:
+      phone_tag:
+        description: "ringo-phone tag (ringo-phone-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
+      flow_tag:
+        description: "ringo-flow tag (ringo-flow-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
+
+jobs:
+  pin:
+    name: ${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # A platform that fails must not hide the others: two of three releases
+      # pinned is still worth having.
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          # arm64 Linux and Apple Silicon runners are free for public
+          # repositories only; the labels fail outright in a private one.
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-15
+    steps:
+      # Both crates are tagged on the same release commit, so either tag names
+      # the same tree; prefer flow's, fall back to phone's when only phone was
+      # released — the same choice the docs job makes.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.flow_tag != '' && inputs.flow_tag || inputs.phone_tag }}
+
+      - uses: cachix/install-nix-action@v31
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: ringo
+          # Required here, unlike the read-only use in nix.yml: pinning writes.
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Pin the released packages
+        env:
+          PHONE_TAG: ${{ inputs.phone_tag }}
+          FLOW_TAG: ${{ inputs.flow_tag }}
+          SYSTEM: ${{ matrix.system }}
+        run: |
+          for tag in "$PHONE_TAG" "$FLOW_TAG"; do
+            # release-plz releases the crates independently, so one of the two
+            # is routinely empty.
+            [ -n "$tag" ] || continue
+
+            # ringo-phone-v0.15.0 -> package ringo-phone, version 0.15.0
+            package="${tag%-v*}"
+            version="${tag##*-v}"
+
+            # Deliberately allowed to build rather than forced to substitute
+            # (`--max-jobs 0`): this runs right after the release commit landed
+            # on main, so nix-cache.yml may still be building it. Substituting
+            # is the fast path, not a requirement — being slow beats failing
+            # the release.
+            path=$(nix build --print-build-logs --no-link --print-out-paths ".#$package")
+
+            # The pin name carries no version on purpose. Cachix keeps a pin as
+            # a series of revisions, so every release adds one under the same
+            # name and --keep-revisions prunes the oldest — the last few
+            # releases stay exempt from collection while older ones fall back to
+            # plain LRU. A per-version name would pin every release ever made,
+            # forever, and eventually crowd out the main commits this cache
+            # exists for.
+            #
+            # The system belongs in the name: a name maps to one store path, so
+            # without it the three runners would overwrite each other's pin.
+            cachix pin ringo "$package-$SYSTEM" "$path" --keep-revisions 5
+            echo "::notice::pinned $package $version ($SYSTEM) -> $path"
+          done

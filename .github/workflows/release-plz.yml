@@ -152,6 +152,18 @@ jobs:
       # same tree; prefer flow's, fall back to phone's when only phone was released.
       ref: ${{ needs.release.outputs.flow_tag != '' && needs.release.outputs.flow_tag || needs.release.outputs.phone_tag }}
 
+  # Pin the released store paths in the Nix binary cache, so the versions people
+  # pin outlive the cache's least-recently-used eviction. Needs only the tags —
+  # nix-cache.yml has already built the same tree from main.
+  nix-pin:
+    needs: release
+    if: ${{ needs.release.outputs.phone_tag != '' || needs.release.outputs.flow_tag != '' }}
+    uses: ./.github/workflows/nix-pin.yml
+    secrets: inherit
+    with:
+      phone_tag: ${{ needs.release.outputs.phone_tag }}
+      flow_tag: ${{ needs.release.outputs.flow_tag }}
+
   # AUR `-bin` packages — same gating as homebrew; aur.yml publishes only the
   # package(s) whose tag is non-empty.
   aur:
