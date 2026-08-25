@@ -193,7 +193,9 @@ pub fn sounds_dir() -> Option<PathBuf> {
 pub struct PickerConfig {
     /// Profile fields shown as subtitle next to each entry.
     /// Available: aor, username, domain, display_name, transport,
-    ///            auth_user, outbound, stun_server, media_enc
+    ///            auth_user, outbound, stun_server, media_enc, notes,
+    ///            and `metadata.<key>` for anything under the profile's
+    ///            `[metadata]` table.
     pub info: Vec<String>,
 }
 
