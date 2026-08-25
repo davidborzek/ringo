@@ -57,6 +57,10 @@ pub struct Profile {
     pub deflect: bool,
     #[serde(default)]
     pub deflect_target: Option<String>,
+    /// Free-form key/value pairs about this profile, never interpreted by
+    /// ringo. Surfaced through the picker's subtitle as `metadata.<key>` (see
+    /// `picker.info`), for whatever tells profiles apart that the SIP fields do
+    /// not — environment, tenant, the extension it answers on.
     #[serde(default)]
     pub metadata: HashMap<String, String>,
 }
