@@ -25,6 +25,16 @@ pub struct RingoConfig {
     pub sounds: SoundsConfig,
     #[serde(default)]
     pub hooks: Vec<Hook>,
+    /// What went wrong while loading, in the order it was found. Empty on a
+    /// clean load.
+    ///
+    /// A broken config is never fatal — a phone that refuses to start because a
+    /// generated theme file is momentarily absent would be worse than one with
+    /// default colors. But falling back silently is worse still: the picker runs
+    /// before the log file is opened, so a warning at that point goes nowhere at
+    /// all, and the user sees a phone that simply ignores its configuration.
+    #[serde(skip)]
+    pub problems: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -188,6 +198,61 @@ pub fn sounds_dir() -> Option<PathBuf> {
     })
 }
 
+/// How much of the wordmark the picker shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogoMode {
+    /// Full block letters when the terminal has room for them, a single line
+    /// when it does not. What most people want, so it is the default.
+    #[default]
+    Auto,
+    /// Always the block letters, even where they crowd out the profile list.
+    Full,
+    /// Always the one-line wordmark.
+    Small,
+    /// No wordmark at all — the picker starts with the search box.
+    Off,
+}
+
+impl<'de> Deserialize<'de> for LogoMode {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        match s.to_lowercase().as_str() {
+            "auto" => Ok(LogoMode::Auto),
+            "full" | "on" | "true" => Ok(LogoMode::Full),
+            "small" | "compact" => Ok(LogoMode::Small),
+            "off" | "none" | "false" | "hidden" => Ok(LogoMode::Off),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown logo mode '{other}' — use auto, full, small or off"
+            ))),
+        }
+    }
+}
+
+/// The order profiles are listed in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PickerOrder {
+    /// Most recently started first, then the rest by name. What you reach for
+    /// is usually what you reached for last.
+    #[default]
+    Recent,
+    /// Always by name — a list that never moves, for people who navigate by
+    /// position rather than by reading.
+    Name,
+}
+
+impl<'de> Deserialize<'de> for PickerOrder {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        match s.to_lowercase().as_str() {
+            "recent" | "recently_used" => Ok(PickerOrder::Recent),
+            "name" | "alphabetical" => Ok(PickerOrder::Name),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown picker order '{other}' — use recent or name"
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct PickerConfig {
@@ -195,12 +260,18 @@ pub struct PickerConfig {
     /// Available: aor, username, domain, display_name, transport,
     ///            auth_user, outbound, stun_server, media_enc
     pub info: Vec<String>,
+    /// `auto` (default), `full`, `small` or `off`.
+    pub logo: LogoMode,
+    /// `recent` (default) or `name`.
+    pub order: PickerOrder,
 }
 
 impl Default for PickerConfig {
     fn default() -> Self {
         PickerConfig {
             info: vec!["aor".into()],
+            logo: LogoMode::Auto,
+            order: PickerOrder::Recent,
         }
     }
 }
@@ -293,6 +364,14 @@ pub fn load() -> RingoConfig {
     }
 }
 
+/// Record a problem: into the log for the session file, and onto the list the
+/// UI shows. Both, because neither alone reaches every case — the log is not
+/// open yet during the picker, and the list is gone by the time you read a log.
+fn note(problems: &mut Vec<String>, msg: String) {
+    crate::rlog!(Warn, "config: {}", msg);
+    problems.push(format!("config ignored — {msg}"));
+}
+
 /// Loads `path` plus everything it includes. A missing or broken file is a
 /// warning, never fatal: a phone that refuses to start because a generated
 /// theme file is momentarily absent would be worse than one with default
@@ -301,17 +380,24 @@ fn load_from(path: &Path) -> RingoConfig {
     if !path.exists() {
         return RingoConfig::default();
     }
+    let mut problems = Vec::new();
     let mut chain = HashSet::new();
-    let Some(table) = read_merged(path, &mut chain, 0) else {
-        return RingoConfig::default();
+    let table = read_merged(path, &mut chain, 0, &mut problems);
+    let mut cfg = match table {
+        Some(table) => match table.try_into() {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                note(
+                    &mut problems,
+                    format!("{}: {e} — using defaults", path.display()),
+                );
+                RingoConfig::default()
+            }
+        },
+        None => RingoConfig::default(),
     };
-    match table.try_into() {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            crate::rlog!(Warn, "config parse error ({}): {}", path.display(), e);
-            RingoConfig::default()
-        }
-    }
+    cfg.problems = problems;
+    cfg
 }
 
 /// Reads one file and folds its includes underneath it: includes are applied in
@@ -323,31 +409,36 @@ fn load_from(path: &Path) -> RingoConfig {
 /// everything seen so far. That distinction matters: two files legitimately
 /// including the same third file is a diamond, not a cycle, and treating it as
 /// one would silently drop the second application and break the ordering above.
-fn read_merged(path: &Path, chain: &mut HashSet<PathBuf>, depth: usize) -> Option<toml::Table> {
+fn read_merged(
+    path: &Path,
+    chain: &mut HashSet<PathBuf>,
+    depth: usize,
+    problems: &mut Vec<String>,
+) -> Option<toml::Table> {
     if depth > MAX_INCLUDE_DEPTH {
-        crate::rlog!(
-            Warn,
-            "config include nested deeper than {} levels, ignoring {}",
-            MAX_INCLUDE_DEPTH,
-            path.display()
+        note(
+            problems,
+            format!(
+                "include nested deeper than {MAX_INCLUDE_DEPTH} levels, ignoring {}",
+                path.display()
+            ),
         );
         return None;
     }
     // Canonicalize so `a.toml` and `./a.toml` count as the same file.
     let key = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     if !chain.insert(key.clone()) {
-        crate::rlog!(
-            Warn,
-            "config include cycle at {}, ignoring it",
-            path.display()
+        note(
+            problems,
+            format!("include cycle at {}, ignoring it", path.display()),
         );
         return None;
     }
 
-    let table = read_one(path).map(|own| {
+    let table = read_one(path, problems).map(|own| {
         let mut merged = toml::Table::new();
         for spec in include_paths(&own, path) {
-            if let Some(t) = read_merged(&spec, chain, depth + 1) {
+            if let Some(t) = read_merged(&spec, chain, depth + 1, problems) {
                 merge(&mut merged, t);
             }
         }
@@ -360,18 +451,18 @@ fn read_merged(path: &Path, chain: &mut HashSet<PathBuf>, depth: usize) -> Optio
 }
 
 /// Reads and parses one file, reporting either failure as a warning.
-fn read_one(path: &Path) -> Option<toml::Table> {
+fn read_one(path: &Path, problems: &mut Vec<String>) -> Option<toml::Table> {
     let raw = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
-            crate::rlog!(Warn, "config read error ({}): {}", path.display(), e);
+            note(problems, format!("cannot read {}: {e}", path.display()));
             return None;
         }
     };
     match toml::from_str(&raw) {
         Ok(t) => Some(t),
         Err(e) => {
-            crate::rlog!(Warn, "config parse error ({}): {}", path.display(), e);
+            note(problems, format!("{}: {e}", path.display()));
             None
         }
     }
@@ -582,6 +673,58 @@ mod tests {
         assert_eq!(cfg.sounds.ring.as_deref(), Some("/tmp/r.wav"));
         assert_eq!(cfg.sounds.busy.as_deref(), Some("off"));
         assert_eq!(cfg.sounds.message, None);
+    }
+
+    #[test]
+    fn a_broken_config_reports_what_went_wrong() {
+        // The picker runs before the log file is opened, so a warning there
+        // reaches nobody. The config has to carry the problem itself.
+        let cfg = load_files(&[("ringo.toml", "include = \"theme.toml\"\n")]);
+        assert_eq!(cfg.problems.len(), 1, "{:?}", cfg.problems);
+        assert!(
+            cfg.problems[0].contains("sequence"),
+            "must say what the file got wrong: {:?}",
+            cfg.problems
+        );
+    }
+
+    #[test]
+    fn an_unparseable_file_is_reported() {
+        let cfg = load_files(&[("ringo.toml", "this is not = = toml\n")]);
+        assert_eq!(cfg.problems.len(), 1);
+    }
+
+    #[test]
+    fn a_broken_include_is_reported_while_the_rest_loads() {
+        let cfg = load_files(&[
+            (
+                "ringo.toml",
+                "include = [\"bad.toml\"]\n[theme]\naccent = \"blue\"\n",
+            ),
+            ("bad.toml", "this is not = = toml\n"),
+        ]);
+        assert_eq!(
+            cfg.theme.accent.0,
+            Color::Blue,
+            "the good part still applies"
+        );
+        assert_eq!(cfg.problems.len(), 1, "and the bad part is named");
+        assert!(cfg.problems[0].contains("bad.toml"));
+    }
+
+    #[test]
+    fn a_clean_config_reports_nothing() {
+        let cfg = load_files(&[("ringo.toml", "[theme]\naccent = \"blue\"\n")]);
+        assert!(cfg.problems.is_empty(), "{:?}", cfg.problems);
+    }
+
+    #[test]
+    fn a_missing_include_is_reported_too() {
+        // Documented as tolerable — a generated theme file may not exist yet —
+        // but the user still gets to know it was skipped.
+        let cfg = load_files(&[("ringo.toml", "include = [\"nope.toml\"]\n")]);
+        assert_eq!(cfg.problems.len(), 1);
+        assert!(cfg.problems[0].contains("nope.toml"));
     }
 
     #[test]
