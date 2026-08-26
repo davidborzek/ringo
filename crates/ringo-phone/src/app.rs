@@ -365,9 +365,77 @@ fn build_subtitle(profile: &profile::Profile, fields: &[String]) -> String {
             "outbound" => profile.outbound.clone().filter(|s| !s.is_empty()),
             "stun_server" => profile.stun_server.clone().filter(|s| !s.is_empty()),
             "media_enc" => Some(profile.media_enc.as_deref().unwrap_or("none").to_string()),
-            _ => None,
+            // Anything the user stored under [metadata] in the profile, e.g.
+            // `metadata.reachable_at`. The profile carries that map already and
+            // the form preserves it; this is the first place it is shown.
+            k => k
+                .strip_prefix("metadata.")
+                .and_then(|key| profile.metadata.get(key))
+                .cloned(),
         })
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("  ·  ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_subtitle;
+    use crate::profile::Profile;
+
+    fn profile_with_metadata(pairs: &[(&str, &str)]) -> Profile {
+        let mut p = Profile {
+            username: "1125452e0".into(),
+            domain: "sipgate.de".into(),
+            ..Default::default()
+        };
+        p.metadata = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        p
+    }
+
+    fn fields(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn metadata_keys_reach_the_subtitle() {
+        // The registration username is a device id, not something anyone dials.
+        // A profile can say how it is actually reached, and this is where that
+        // shows up.
+        let p = profile_with_metadata(&[("reachable_at", "11")]);
+        assert_eq!(
+            build_subtitle(&p, &fields(&["aor", "metadata.reachable_at"])),
+            "sip:1125452e0@sipgate.de  ·  11"
+        );
+    }
+
+    #[test]
+    fn an_absent_metadata_key_is_skipped_not_blank() {
+        let p = profile_with_metadata(&[("reachable_at", "11")]);
+        assert_eq!(
+            build_subtitle(&p, &fields(&["metadata.nope", "metadata.reachable_at"])),
+            "11",
+            "a missing key must not leave a stray separator"
+        );
+    }
+
+    #[test]
+    fn an_unknown_field_is_still_ignored() {
+        // The metadata arm replaced the catch-all, so this has to keep working.
+        let p = profile_with_metadata(&[]);
+        assert_eq!(
+            build_subtitle(&p, &fields(&["nonsense", "domain"])),
+            "sipgate.de"
+        );
+    }
+
+    #[test]
+    fn metadata_is_not_confused_with_a_field_of_its_own_name() {
+        // Bare `metadata` names no key and must resolve to nothing.
+        let p = profile_with_metadata(&[("reachable_at", "11")]);
+        assert_eq!(build_subtitle(&p, &fields(&["metadata"])), "");
+    }
 }

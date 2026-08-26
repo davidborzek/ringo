@@ -25,11 +25,11 @@
     # Keep these tags in sync with `branch = ` in .gitmodules (and re-run
     # `nix flake update re baresip` after bumping).
     re = {
-      url = "github:baresip/re/v4.10.0";
+      url = "github:baresip/re/v4.11.0";
       flake = false;
     };
     baresip = {
-      url = "github:baresip/baresip/v4.10.0";
+      url = "github:baresip/baresip/v4.11.0";
       flake = false;
     };
   };

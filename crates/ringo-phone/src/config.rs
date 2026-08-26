@@ -258,7 +258,9 @@ impl<'de> Deserialize<'de> for PickerOrder {
 pub struct PickerConfig {
     /// Profile fields shown as subtitle next to each entry.
     /// Available: aor, username, domain, display_name, transport,
-    ///            auth_user, outbound, stun_server, media_enc
+    ///            auth_user, outbound, stun_server, media_enc, notes,
+    ///            and `metadata.<key>` for anything under the profile's
+    ///            `[metadata]` table.
     pub info: Vec<String>,
     /// `auto` (default), `full`, `small` or `off`.
     pub logo: LogoMode,

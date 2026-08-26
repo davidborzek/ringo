@@ -56,7 +56,8 @@ phone on the next start, and nothing hand-written gets overwritten.
 ```toml
 [picker]
 # Fields shown next to each profile name in the picker. Available: aor, username,
-# domain, display_name, transport, auth_user, outbound, stun_server, media_enc.
+# domain, display_name, transport, auth_user, outbound, stun_server, media_enc,
+# notes, and metadata.<key> (see below).
 info = ["aor"]   # default
 
 # How much of the RINGO wordmark to show above the search box:
@@ -76,6 +77,26 @@ The recent order is remembered in `~/.local/state/ringo/recent` — one name per
 line, most recent first, written when a profile actually starts. It lives in the
 state directory rather than the config because it is something ringo observes,
 not something you set; deleting the file just resets the order.
+
+A profile can carry free-form key/value pairs that ringo never interprets, and
+the picker can show them:
+
+```toml
+# ~/.config/ringo/profiles/<name>/profile.toml
+[metadata]
+env = "staging"
+```
+
+```toml
+# ~/.config/ringo/ringo.toml
+[picker]
+info = ["aor", "metadata.env"]
+```
+
+This is for whatever tells your profiles apart that the SIP fields do not — the
+environment an account belongs to, the tenant it serves, the extension it
+answers on. A key that a profile does not set is simply left out, so profiles
+can carry different ones.
 
 ## Theme
 
