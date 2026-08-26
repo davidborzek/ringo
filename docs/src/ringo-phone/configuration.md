@@ -59,7 +59,24 @@ phone on the next start, and nothing hand-written gets overwritten.
 # domain, display_name, transport, auth_user, outbound, stun_server, media_enc,
 # notes, and metadata.<key> (see below).
 info = ["aor"]   # default
+
+# How much of the RINGO wordmark to show above the search box:
+#   auto  (default) block letters when the terminal has room, one line if not
+#   full            always the block letters
+#   small           always the one-line wordmark
+#   off             none at all
+logo = "auto"
+
+# Order of the profile list:
+#   recent  (default) most recently started first, then the rest by name
+#   name              always alphabetical
+order = "recent"
 ```
+
+The recent order is remembered in `~/.local/state/ringo/recent` — one name per
+line, most recent first, written when a profile actually starts. It lives in the
+state directory rather than the config because it is something ringo observes,
+not something you set; deleting the file just resets the order.
 
 A profile can carry free-form key/value pairs that ringo never interprets, and
 the picker can show them:

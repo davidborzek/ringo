@@ -138,6 +138,10 @@ pub struct SessionParams {
     pub hooks: Vec<crate::config::Hook>,
     pub profile: crate::profile::Profile,
     pub contacts: Vec<crate::contacts::Contact>,
+    /// Anything wrong with ringo.toml, so the session can say so. Starting a
+    /// profile by name skips the picker, which is where this is otherwise
+    /// shown — without this the phone would just quietly ignore its config.
+    pub config_problems: Vec<String>,
 }
 
 /// The pieces `setup()` returns: the runtime, the assembled [`App`], the
@@ -189,6 +193,7 @@ fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
         }
     };
 
+    let config_problems = p.config_problems;
     let app = App::new(
         p.profile_name,
         p.account_aor,
@@ -205,6 +210,20 @@ fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
             .map(|(k, v)| (k, crate::header::HeaderTemplate::new(v)))
             .collect(),
     );
+
+    // Say it where the hints go: a config that was ignored is worth a line the
+    // user has to dismiss, not a log entry they will never look for. Cleared by
+    // Esc or by opening the command bar, like any other error there.
+    let mut app = app;
+    if let Some(first) = config_problems.first() {
+        let more = config_problems.len() - 1;
+        let extra = if more > 0 {
+            format!(" (+{more} more, see the log)")
+        } else {
+            String::new()
+        };
+        app.command.error = Some(format!("config ignored — {first}{extra}"));
+    }
 
     let aor = app.account_aor.clone();
     app.phone.register(&aor, p.regint.unwrap_or(3600));

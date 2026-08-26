@@ -42,6 +42,9 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     }
 
     let prof = profile::load(name)?;
+    // Only once the profile has parsed: a name that cannot be started is not a
+    // name you used, and it should not climb to the top of the picker.
+    profile::record_recent(name);
     let config = crate::config::load();
 
     let account = account_from(&prof)?;
@@ -67,6 +70,7 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
     );
     let theme = config.theme;
     let hooks = config.hooks;
+    let config_problems = config.problems;
     let params = crate::tui::SessionParams {
         profile_name: name.to_string(),
         account_aor: prof.aor(),
@@ -81,6 +85,7 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
         hooks,
         profile: prof,
         contacts,
+        config_problems,
     };
 
     if headless {
@@ -166,24 +171,74 @@ fn pick_profile_loop(
 ) -> Result<Option<String>> {
     use crate::picker::{PickerAction, PickerItem};
     let mut focus: Option<String> = initial_focus.map(|s| s.to_string());
+    // Something to tell the user on the next draw — a profile that cannot be
+    // started or cloned. Shown above the list next to any config problems, and
+    // gone again after one pass.
+    let mut notice: Option<String> = None;
     loop {
         let config = crate::config::load();
         let theme = &config.theme;
-        let names = profile::list_names().unwrap_or_default();
+        let names = match config.picker.order {
+            crate::config::PickerOrder::Recent => profile::order_by_recent(
+                profile::list_names().unwrap_or_default(),
+                &profile::recent(),
+            ),
+            crate::config::PickerOrder::Name => profile::list_names().unwrap_or_default(),
+        };
+        // Which profiles already have a session. Read once per pass rather than
+        // per row: it is a directory scan, and the list is rebuilt whenever the
+        // picker returns from a form anyway.
+        let running: std::collections::HashSet<String> = crate::control::list_running()
+            .into_iter()
+            .map(|s| s.profile)
+            .collect();
         let items: Vec<PickerItem> = names
             .iter()
             .map(|name| {
-                let subtitle = profile::load(name)
-                    .map(|p| build_subtitle(&p, &config.picker.info))
-                    .unwrap_or_default();
+                // A profile that will not parse must say so here. Swallowing
+                // the error left the row looking like any other, and the
+                // failure only turned up on start.
+                let loaded = profile::load(name);
                 PickerItem {
                     name: name.clone(),
-                    subtitle,
+                    subtitle: loaded
+                        .as_ref()
+                        .map(|p| build_subtitle(p, &config.picker.info))
+                        .unwrap_or_default(),
+                    running: running.contains(name),
+                    broken: loaded.is_err(),
                 }
             })
             .collect();
-        match crate::picker::run(terminal, &items, theme, focus.as_deref())? {
-            PickerAction::Start(name) => return Ok(Some(name)),
+        // The transient notice goes first: it is about what the user just did,
+        // while a config problem has been true since start-up.
+        let notices: Vec<String> = notice
+            .take()
+            .into_iter()
+            .chain(config.problems.iter().cloned())
+            .collect();
+        match crate::picker::run(
+            terminal,
+            &items,
+            theme,
+            config.picker.logo,
+            &notices,
+            focus.as_deref(),
+        )? {
+            PickerAction::Start(name) => {
+                // Starting it would fail in run_one and take the process with
+                // it — from inside the alternate screen, which is no way to
+                // learn that a file has a typo. Stay in the picker instead,
+                // where Ctrl+E opens the file that needs fixing.
+                if items.iter().any(|i| i.name == name && i.broken) {
+                    notice = Some(format!(
+                        "'{name}' cannot be started — its profile.toml does not parse (Ctrl+E to fix it)"
+                    ));
+                    focus = Some(name);
+                    continue;
+                }
+                return Ok(Some(name));
+            }
             PickerAction::Quit => return Ok(None),
             PickerAction::New => {
                 if let Some((name, p)) = crate::form::run_form(
@@ -197,21 +252,37 @@ fn pick_profile_loop(
                     focus = Some(name);
                 }
             }
-            PickerAction::Clone(source) => {
-                let current = profile::load(&source)?;
-                if let Some((name, p)) =
-                    crate::form::run_form(terminal, None, &current, &names, theme)?
-                {
-                    profile::save(&name, &p)?;
-                    focus = Some(name);
+            PickerAction::Clone(source) => match profile::load(&source) {
+                Ok(current) => {
+                    if let Some((name, p)) =
+                        crate::form::run_form(terminal, None, &current, &names, theme)?
+                    {
+                        profile::save(&name, &p)?;
+                        focus = Some(name);
+                    }
                 }
-            }
+                Err(e) => {
+                    notice = Some(format!("cannot clone '{source}': {e}"));
+                    focus = Some(source);
+                }
+            },
             PickerAction::Edit(name) => {
-                let current = profile::load(&name)?;
-                if let Some((_, p)) =
-                    crate::form::run_form(terminal, Some(&name), &current, &[], theme)?
-                {
-                    profile::save(&name, &p)?;
+                match profile::load(&name) {
+                    Ok(current) => {
+                        if let Some((_, p)) =
+                            crate::form::run_form(terminal, Some(&name), &current, &[], theme)?
+                        {
+                            profile::save(&name, &p)?;
+                        }
+                    }
+                    // A form cannot be filled from a file that does not parse,
+                    // and the text is what needs fixing anyway. The row this
+                    // was invoked from says `⚠ unreadable`, so landing in
+                    // $EDITOR follows from what is on screen.
+                    Err(_) => {
+                        let path = profile::profile_dir(&name)?.join("profile.toml");
+                        open_in_editor(terminal, &path)?;
+                    }
                 }
                 focus = Some(name);
             }
@@ -236,11 +307,6 @@ fn pick_profile_loop(
 }
 
 fn open_settings(terminal: &mut crate::tui::Term) -> Result<()> {
-    use crossterm::terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-    };
-    use std::process::Command;
-
     let config_path = crate::config::config_path()
         .ok_or_else(|| anyhow::anyhow!("Cannot determine config path"))?;
 
@@ -252,12 +318,23 @@ fn open_settings(terminal: &mut crate::tui::Term) -> Result<()> {
         )?;
     }
 
+    open_in_editor(terminal, &config_path)
+}
+
+/// Hand a file to `$EDITOR`, giving the terminal back for the duration and
+/// taking it again afterwards.
+fn open_in_editor(terminal: &mut crate::tui::Term, path: &std::path::Path) -> Result<()> {
+    use crossterm::terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    };
+    use std::process::Command;
+
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
-    let status = Command::new(&editor).arg(&config_path).status();
+    let status = Command::new(&editor).arg(path).status();
 
     enable_raw_mode()?;
     execute!(terminal.backend_mut(), EnterAlternateScreen)?;

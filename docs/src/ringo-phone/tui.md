@@ -13,7 +13,25 @@ the call list, and a mode line. Below are the keybindings per mode and overlay.
 | `Ctrl+Y` | Clone selected profile |
 | `Ctrl+D` | Delete selected profile (confirmation) |
 | `↑` / `↓` | Navigate (wrap-around) |
+| `PgUp` / `PgDn` | Move by one screenful |
+| `Home` / `End` | First / last profile |
 | `Esc` | Quit |
+
+Typing filters the list. Every word has to appear somewhere in the row — in the
+profile name or in the subtitle next to it — in any order, so `dev sipgate` finds
+a profile named `[DEV] Channel 01` registered at sipgate.
+
+A `●` marks a profile that already has a session running. Starting a second one
+registers another contact with the provider, and the provider then decides which
+of them a call reaches. A profile whose file cannot be read is marked
+`⚠ unreadable` instead of failing only once you start it. `Ctrl+E` on such a
+profile opens `profile.toml` in `$EDITOR` rather than the form — a form cannot
+be filled from a file that does not parse, and the text is what needs fixing.
+Starting it is refused with a note above the list.
+
+If `ringo.toml` itself could not be loaded, that is shown there too. It is worth
+saying in the picker specifically: the picker runs before the log file is opened,
+so the warning would otherwise reach nobody.
 
 ## Normal mode (default)
 

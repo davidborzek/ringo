@@ -160,7 +160,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
 /// Draw a vertical scrollbar on the right border of a bordered `rect` (between
 /// its top and bottom borders). No-op when everything fits. `total` is the item
 /// / row count, `visible` the viewport size, `position` the top index shown.
-pub(super) fn render_scrollbar(
+pub(crate) fn render_scrollbar(
     f: &mut Frame,
     theme: &Theme,
     rect: Rect,

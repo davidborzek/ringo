@@ -234,6 +234,73 @@ pub fn profile_dir(name: &str) -> Result<PathBuf> {
     Ok(profiles_dir()?.join(name))
 }
 
+// ─── Recently used ───────────────────────────────────────────────────────────
+
+/// How many names to remember. Long enough that the profiles you actually work
+/// with stay at hand, short enough that the file stays a list you could read.
+const MAX_RECENT: usize = 20;
+
+/// Where the order lives. In the state directory rather than the config: it is
+/// something ringo observes about you, not something you configure, and it must
+/// not turn up in a dotfile repo as a diff after every call.
+fn recent_path() -> Result<PathBuf> {
+    Ok(state_dir()?.join("recent"))
+}
+
+/// Profile names most recently started first. Unknown or deleted profiles are
+/// not filtered here — [`order_by_recent`] ignores anything it does not find.
+pub fn recent() -> Vec<String> {
+    let Ok(path) = recent_path() else {
+        return Vec::new();
+    };
+    let Ok(text) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .take(MAX_RECENT)
+        .collect()
+}
+
+/// Move `name` to the front of the recently-used order.
+///
+/// Best effort: a state directory that cannot be written costs the ordering,
+/// nothing else, so this reports no error. One name per line — the format is a
+/// list, and a list is what a plain text file already is.
+pub fn record_recent(name: &str) {
+    let mut names = recent();
+    names.retain(|n| n != name);
+    names.insert(0, name.to_string());
+    names.truncate(MAX_RECENT);
+
+    let Ok(path) = recent_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(path, names.join("\n") + "\n");
+}
+
+/// `names` with the recently used ones first, in that order, and everything
+/// else after them untouched — so the rest stays alphabetical and a profile
+/// does not move around for reasons the user cannot see.
+pub fn order_by_recent(names: Vec<String>, recent: &[String]) -> Vec<String> {
+    // Deduplicated on the way in: record_recent never writes a name twice, but
+    // the file is plain text somebody may have edited, and a duplicate there
+    // would list the profile twice.
+    let mut front: Vec<String> = Vec::new();
+    for name in recent {
+        if names.contains(name) && !front.contains(name) {
+            front.push(name.clone());
+        }
+    }
+    let rest = names.into_iter().filter(|n| !front.contains(n));
+    front.iter().cloned().chain(rest).collect()
+}
+
 // ─── List ────────────────────────────────────────────────────────────────────
 
 pub fn list_names() -> Result<Vec<String>> {
@@ -351,6 +418,59 @@ pub fn save(name: &str, profile: &Profile) -> Result<()> {
     fs::write(dir.join("profile.toml"), toml_str)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod recent_tests {
+    use super::order_by_recent;
+
+    fn v(xs: &[&str]) -> Vec<String> {
+        xs.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn recent_names_come_first_in_their_own_order() {
+        let names = v(&["alpha", "beta", "gamma"]);
+        let recent = v(&["gamma", "alpha"]);
+        assert_eq!(
+            order_by_recent(names, &recent),
+            v(&["gamma", "alpha", "beta"])
+        );
+    }
+
+    #[test]
+    fn the_rest_keeps_the_order_it_came_in() {
+        // list_names sorts; whatever is not recent must stay alphabetical
+        // rather than shuffling for reasons the user cannot see.
+        let names = v(&["alpha", "beta", "gamma", "delta"]);
+        let recent = v(&["gamma"]);
+        assert_eq!(
+            order_by_recent(names, &recent),
+            v(&["gamma", "alpha", "beta", "delta"])
+        );
+    }
+
+    #[test]
+    fn deleted_profiles_in_the_history_are_ignored() {
+        // The file outlives the profiles it names.
+        let names = v(&["alpha", "beta"]);
+        let recent = v(&["long-gone", "beta"]);
+        assert_eq!(order_by_recent(names, &recent), v(&["beta", "alpha"]));
+    }
+
+    #[test]
+    fn no_history_changes_nothing() {
+        let names = v(&["alpha", "beta"]);
+        assert_eq!(order_by_recent(names.clone(), &[]), names);
+    }
+
+    #[test]
+    fn a_name_listed_twice_appears_once() {
+        // record_recent dedupes, but the file is plain text a user may edit.
+        let names = v(&["alpha", "beta"]);
+        let recent = v(&["beta", "beta"]);
+        assert_eq!(order_by_recent(names, &recent), v(&["beta", "alpha"]));
+    }
 }
 
 #[cfg(test)]
