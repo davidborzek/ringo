@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.15.0...ringo-phone-v0.16.0) - 2026-08-31
+
+### Features
+
+- *(ringo-phone)* make the picker legible, and stop it crashing ([#109](https://github.com/davidborzek/ringo/pull/109))
+- *(ringo-phone)* show profile metadata in the picker subtitle ([#107](https://github.com/davidborzek/ringo/pull/107))
+- *(ringo-phone)* register and unregister as commands ([#106](https://github.com/davidborzek/ringo/pull/106))
+- *(ringo-phone)* deafen, and a hint bar that fits ([#104](https://github.com/davidborzek/ringo/pull/104))
+
 ## [0.15.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.14.0...ringo-phone-v0.15.0) - 2026-08-24
 
 ### Bug Fixes
