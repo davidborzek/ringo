@@ -249,6 +249,16 @@ pub struct AgentOverview {
     pub state: Option<AgentState>,
 }
 
+/// Events not worth waking an MCP agent for. Periodic RTCP reports would fire
+/// every few seconds during an established call and crowd out the meaningful
+/// ones from `wait_event`/WS pushes (the current stats are one `agent_status`
+/// call away anyway). Number must match the vendored baresip `bevent` enum
+/// (`BEVENT_CALL_RTCP`); see the table in `server::bevent_name`.
+fn is_noise_event(event: &AppEvent) -> bool {
+    matches!(event, AppEvent::Unknown { class, type_ }
+        if class == "bevent" && type_ == "23")
+}
+
 /// One connected agent: its worker-process handle plus reduced state and a
 /// live event feed.
 pub struct Agent {
@@ -318,6 +328,11 @@ impl Agent {
             loop {
                 match events.recv_timeout(HEADER_POLL_INTERVAL) {
                     Ok(event) => {
+                        // Periodic noise (RTCP) never reaches wait_event/WS —
+                        // it doesn't affect the state fold either.
+                        if is_noise_event(&event) {
+                            continue;
+                        }
                         let _ = bridge_tx.send(event.clone());
                         let mut g = bridge_state.lock().unwrap_or_else(|e| e.into_inner());
                         reduce(&mut g, &event);
@@ -657,6 +672,23 @@ mod tests {
         assert!(overview[0].state.is_none());
         // Nothing is running, so the state fold never started:
         assert!(hub.slots.iter().all(|s| s.agent.blocking_lock().is_none()));
+    }
+
+    #[test]
+    fn periodic_rtcp_events_are_filtered_as_noise() {
+        let rtcp = AppEvent::Unknown {
+            class: "bevent".into(),
+            type_: "23".into(),
+        };
+        let remote_sdp = AppEvent::Unknown {
+            class: "bevent".into(),
+            type_: "29".into(),
+        };
+        assert!(is_noise_event(&rtcp));
+        assert!(!is_noise_event(&remote_sdp), "remote SDP is meaningful");
+        assert!(!is_noise_event(&AppEvent::RegisterOk {
+            account: "a".into()
+        }));
     }
 
     #[test]

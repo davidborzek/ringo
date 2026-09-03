@@ -169,6 +169,41 @@ struct RmHeaderParam {
 
 // Helpers ───────────────────────────────────────────────────────────────────
 
+/// Names for the baresip `bevent` numbers ringo-core passes through as
+/// `AppEvent::Unknown` — everything its backend-neutral mapping doesn't
+/// decode into a named `AppEvent`. The numbers must match the vendored
+/// baresip `enum bevent_type` (crates/ringo-core/vendor/baresip/include/
+/// baresip.h); the pinned vendor version keeps this a stable, tested table.
+fn bevent_name(type_: &str) -> Option<&'static str> {
+    Some(match type_ {
+        "7" => "CREATE",
+        "8" => "SHUTDOWN",
+        "9" => "EXIT",
+        "13" => "CALL_PROGRESS",
+        "14" => "CALL_ANSWERED",
+        "17" => "CALL_TRANSFER",
+        "18" => "CALL_REDIRECT",
+        "19" => "CALL_TRANSFER_FAILED",
+        "21" => "CALL_DTMF_END",
+        "22" => "CALL_RTPESTAB",
+        "23" => "CALL_RTCP",
+        "24" => "CALL_MENC",
+        "25" => "VU_TX",
+        "26" => "VU_RX",
+        "27" => "AUDIO_ERROR",
+        "28" => "CALL_LOCAL_SDP",
+        "29" => "CALL_REMOTE_SDP",
+        "30" => "CALL_HOLD",
+        "31" => "CALL_RESUME",
+        "32" => "REFER",
+        "33" => "MODULE",
+        "34" => "END_OF_FILE",
+        "35" => "CUSTOM",
+        "37" => "SIPSESS_FAILED",
+        _ => return None,
+    })
+}
+
 fn ok_text(msg: impl Into<String>) -> Result<CallToolResult, McpError> {
     Ok(CallToolResult::success(vec![ContentBlock::text(msg)]))
 }
@@ -235,7 +270,13 @@ pub(crate) fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
         }
         Response { ok, data } => json!({"event": "response", "ok": ok, "data": data}),
         Unknown { class, type_ } => {
-            json!({"event": "unknown", "class": class, "type": type_})
+            let mut v = json!({"event": "unknown", "class": class, "type": type_});
+            if class == "bevent" {
+                if let Some(name) = bevent_name(type_) {
+                    v["type_name"] = json!(name);
+                }
+            }
+            v
         }
         BackendConnectFailed { reason } => {
             json!({"event": "backend_connect_failed", "reason": reason})
@@ -570,4 +611,87 @@ pub async fn serve(hub: Arc<Hub>) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("serve MCP over stdio: {e}"))?;
     service.waiting().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_bevents_get_a_readable_name() {
+        let e = ringo_core::event::AppEvent::Unknown {
+            class: "bevent".into(),
+            type_: "29".into(),
+        };
+        let v = event_json(&e);
+        assert_eq!(v["event"], "unknown");
+        assert_eq!(v["type"], "29");
+        assert_eq!(v["type_name"], "CALL_REMOTE_SDP");
+    }
+
+    #[test]
+    fn unknown_non_bevents_stay_unnamed() {
+        let e = ringo_core::event::AppEvent::Unknown {
+            class: "other".into(),
+            type_: "29".into(),
+        };
+        let v = event_json(&e);
+        assert!(v.get("type_name").is_none());
+        let e = ringo_core::event::AppEvent::Unknown {
+            class: "bevent".into(),
+            type_: "999".into(),
+        };
+        assert!(event_json(&e).get("type_name").is_none());
+    }
+
+    #[test]
+    fn bevent_table_matches_the_vendored_baresip_enum() {
+        // The full vendored enum (crates/ringo-core/vendor/baresip), in order:
+        // `None` = already mapped to a named AppEvent by ringo-core (never
+        // surfaces as Unknown); `Some(name)` = what bevent_name must return.
+        let expected: &[Option<&str>] = &[
+            None,                         // 0 REGISTERING (mapped)
+            None,                         // 1 REGISTER_OK (mapped)
+            None,                         // 2 REGISTER_FAIL (mapped)
+            None,                         // 3 UNREGISTERING (mapped)
+            None,                         // 4 FALLBACK_OK (mapped as RegisterOk)
+            None,                         // 5 FALLBACK_FAIL (mapped as RegisterFailed)
+            None,                         // 6 MWI_NOTIFY (mapped)
+            Some("CREATE"),               // 7
+            Some("SHUTDOWN"),             // 8
+            Some("EXIT"),                 // 9
+            None,                         // 10 CALL_INCOMING (mapped)
+            None,                         // 11 CALL_OUTGOING (mapped)
+            None,                         // 12 CALL_RINGING (mapped)
+            Some("CALL_PROGRESS"),        // 13
+            Some("CALL_ANSWERED"),        // 14
+            None,                         // 15 CALL_ESTABLISHED (mapped)
+            None,                         // 16 CALL_CLOSED (mapped)
+            Some("CALL_TRANSFER"),        // 17
+            Some("CALL_REDIRECT"),        // 18
+            Some("CALL_TRANSFER_FAILED"), // 19
+            None,                         // 20 CALL_DTMF_START (mapped)
+            Some("CALL_DTMF_END"),        // 21
+            Some("CALL_RTPESTAB"),        // 22
+            Some("CALL_RTCP"),            // 23
+            Some("CALL_MENC"),            // 24
+            Some("VU_TX"),                // 25
+            Some("VU_RX"),                // 26
+            Some("AUDIO_ERROR"),          // 27
+            Some("CALL_LOCAL_SDP"),       // 28
+            Some("CALL_REMOTE_SDP"),      // 29
+            Some("CALL_HOLD"),            // 30
+            Some("CALL_RESUME"),          // 31
+            Some("REFER"),                // 32
+            Some("MODULE"),               // 33
+            Some("END_OF_FILE"),          // 34
+            Some("CUSTOM"),               // 35
+            None,                         // 36 SIPSESS_CONN (mapped → headers)
+            Some("SIPSESS_FAILED"),       // 37
+        ];
+        for (n, want) in expected.iter().enumerate() {
+            let n = (n as i32).to_string();
+            assert_eq!(bevent_name(&n), *want, "bevent #{n} should be {want:?}");
+        }
+    }
 }
