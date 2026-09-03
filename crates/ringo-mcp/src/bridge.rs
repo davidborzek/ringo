@@ -170,6 +170,12 @@ impl BridgeState {
             .unwrap_or_else(|e| e.into_inner())
             .get(stream_id)
             .cloned();
+        // Also revoke a minted-but-unused token, so closing a stream before
+        // connecting is not an error and the token can't be used afterwards.
+        self.grants
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(stream_id);
         match kill {
             Some(k) => {
                 let _ = k.send(());
@@ -271,6 +277,10 @@ async fn handle_conn(
     };
     let mut ev_sub = agent.subscribe_events();
     let mut announced_rate: Option<u32> = None;
+    // Worker-death watch: without it, a dead worker would just silently stop
+    // the audio while TX keeps erroring into the void per frame.
+    let mut health = tokio::time::interval(Duration::from_secs(1));
+    health.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         tokio::select! {
@@ -346,6 +356,16 @@ async fn handle_conn(
             ev = ev_sub.recv() => {
                 if let Ok(event) = ev {
                     let _ = sink.send(Message::Text(event_text(&event).to_string().into())).await;
+                }
+            }
+
+            // Once a second, check the agent's worker is still alive.
+            _ = health.tick() => {
+                if agent.is_dead() {
+                    let _ = sink.send(Message::Text(
+                        json!({"type": "error", "message": "agent worker is gone"}).to_string().into(),
+                    )).await;
+                    break;
                 }
             }
         }

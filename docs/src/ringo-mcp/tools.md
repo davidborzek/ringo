@@ -56,6 +56,7 @@ sent. Observe outcomes with `wait_event` (preferred) or by polling
 | `send_dtmf` | `agent`, `digit` | One digit: `0-9`, `*`, `#`, `A-F`. |
 | `transfer` | `agent`, `target` | Blind-transfer the current call (same target resolution as `dial`). |
 | `play` | `agent`, `spec` | What the agent transmits: `"silence"`, `"ausine,<freq>"` (e.g. `ausine,425`) or `"aufile,<path>"` (mono WAV). Call-scoped: resets to silence when the agent's last call ends, so the next call won't replay it. |
+| `hold` / `resume` | `agent` | Hold / resume. `agent_status` reflects the local hold optimistically (the `held` phase); peer-initiated hold arrives as `call_hold`/`call_resume` events. |
 
 ## Events
 
@@ -147,6 +148,11 @@ Mints a one-shot token (valid 300 s) and returns the URL:
 `mode` is `"rx"` (call audio → you, e.g. for STT), `"tx"` (you → call, e.g.
 TTS) or `"duplex"`. `tx_rate` is the rate you must send at (default 16000);
 the RX rate arrives before the first audio frame.
+
+An agent's TX path is a single stream: open at most one `tx`/`duplex`
+connection per agent at a time (a second re-arms and flushes the first's
+queued audio; the rate of the latest connection wins). Any number of `rx`
+connections may fan out in parallel.
 
 ### The wire protocol
 

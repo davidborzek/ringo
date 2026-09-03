@@ -285,7 +285,17 @@ impl TelephonyServer {
     ) -> Result<CallToolResult, McpError> {
         let a = self.agent(&agent).await?;
         let s = a.state();
-        let stats = a.media_stats().map(|m| {
+        // The worker queries block on a std channel (bounded by the client's
+        // query timeout) — keep them off the async runtime's threads.
+        let (stats, call_count, received_dtmf) = {
+            let a = Arc::clone(&a);
+            tokio::task::spawn_blocking(move || {
+                (a.media_stats(), a.call_count(), a.received_dtmf())
+            })
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        };
+        let stats = stats.map(|m| {
             json!({
                 "rtt_ms": m.rtt_ms,
                 "jitter_ms": m.jitter_ms,
@@ -301,9 +311,9 @@ impl TelephonyServer {
             "reg_error": s.reg_error,
             "worker_dead": s.worker_dead,
             "calls": s.calls,
-            "call_count": a.call_count(),
+            "call_count": call_count,
             "media_stats": stats,
-            "received_dtmf": a.received_dtmf(),
+            "received_dtmf": received_dtmf,
             "last_call_reason": s.last_call_reason,
             "last_call_error": s.last_call_error,
         }))
@@ -435,7 +445,10 @@ impl TelephonyServer {
         &self,
         Parameters(SaveAudioParam { agent, prefix }): Parameters<SaveAudioParam>,
     ) -> Result<CallToolResult, McpError> {
-        let paths = self.agent(&agent).await?.save_audio(&prefix);
+        let a = self.agent(&agent).await?;
+        let paths = tokio::task::spawn_blocking(move || a.save_audio(&prefix))
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         if paths.is_empty() {
             return Err(McpError::internal_error(
                 "no captured audio to save (no active/recorded call, or record_audio is off)",
@@ -534,10 +547,9 @@ impl TelephonyServer {
         if let Some(call_id) = call_id.as_deref() {
             return match s.headers_of(call_id) {
                 Some(headers) => ok_json(json!({ "call_id": call_id, "headers": headers })),
-                None => Err(McpError::internal_error(
-                    format!("no INVITE headers known for Call-ID `{call_id}`"),
-                    None,
-                )),
+                None => Err(invalid(format!(
+                    "no INVITE headers known for Call-ID `{call_id}`"
+                ))),
             };
         }
         let calls: Vec<serde_json::Value> = s

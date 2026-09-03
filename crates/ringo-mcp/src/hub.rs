@@ -203,6 +203,24 @@ impl Hub {
         bridge.close_stream(stream_id)
     }
 
+    /// Ask every running worker to deregister and exit (see `ProcessClient`'s
+    /// shutdown budget). Called after the MCP client disconnected: the workers'
+    /// event streams then close, which ends the per-agent poll tasks and lets
+    /// the `ProcessClient` drops reap the children. Idempotent.
+    pub fn shutdown(&self) {
+        for slot in &self.slots {
+            // The lock is only held briefly by idle paths (`get` releases it
+            // after the spawn); a spawn in flight is asking for a worker that
+            // will be told to shut down by its own Drop when it lands — or is
+            // already gone by then, which the worker handles gracefully.
+            if let Ok(guard) = slot.agent.try_lock() {
+                if let Some(agent) = guard.as_ref() {
+                    agent.shutdown_worker();
+                }
+            }
+        }
+    }
+
     /// Start the WS bridge listener (once) if it isn't running yet.
     async fn ensure_bridge(self: &Arc<Self>) -> Result<Arc<BridgeState>> {
         let mut guard = self.bridge.lock().await;
@@ -513,6 +531,9 @@ impl Agent {
     /// a fresh uuid at this call, not per future call.
     pub fn add_header(&self, name: &str, value: &str) {
         let rendered = HeaderTemplate::new(value).render(&HeaderContext::for_call());
+        // baresip appends on add — remove the name first so add_header
+        // REPLACES (a second call with the same name must not stack duplicates).
+        self.client.rm_header(name);
         self.client.add_header(name, &rendered);
     }
 
@@ -536,14 +557,26 @@ impl Agent {
         self.client.hangup_all();
     }
 
-    /// Put the current call on hold.
+    /// Put the current call on hold. The phase is set optimistically:
+    /// baresip only reports PEER hold/resume as events, so without this the
+    /// agent's own hold would never show up in `agent_status`.
     pub fn hold(&self) {
         self.client.hold();
+        self.set_current_phase(crate::state::CallPhase::Held);
     }
 
-    /// Resume the held call.
+    /// Resume the held call (see `hold` for the optimistic phase).
     pub fn resume(&self) {
         self.client.resume();
+        self.set_current_phase(crate::state::CallPhase::Established);
+    }
+
+    /// Optimistically set the phase of the most recent (current) call.
+    fn set_current_phase(&self, phase: crate::state::CallPhase) {
+        let mut g = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(call) = g.calls.last_mut() {
+            call.phase = phase;
+        }
     }
 
     /// Mute the outgoing audio (remote party hears silence).
@@ -577,6 +610,11 @@ impl Agent {
     /// DTMF digits received so far on the current call.
     pub fn received_dtmf(&self) -> String {
         self.client.received_dtmf()
+    }
+
+    /// Ask this agent's worker to deregister and exit (server teardown).
+    pub fn shutdown_worker(&self) {
+        self.client.request_shutdown();
     }
 
     /// Number of currently active calls.

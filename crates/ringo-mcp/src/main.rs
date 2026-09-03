@@ -8,25 +8,28 @@
 
 use anyhow::{Context, Result, bail};
 use ringo_mcp::{config, hub, serve};
+use std::sync::Arc;
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
 
     // Internal worker process (spawned by ProcessClient as `<exe> agent`).
-    if args.next().as_deref() == Some("agent") {
+    let first = args.next();
+    if first.as_deref() == Some("agent") {
         return ringo_agent::worker::run();
     }
-    // (`None` was consumed above only when there were no args at all.)
-    let mut first = std::env::args().nth(1);
-    if first.as_deref() == Some("serve") {
-        first = std::env::args().nth(2);
-    }
+    // If argv[1] was `serve`, the options start at argv[2]; otherwise argv[1]
+    // IS the first option — continue with the same iterator, once per arg.
+    let mut next = if first.as_deref() == Some("serve") {
+        args.next()
+    } else {
+        first
+    };
 
     let mut config_path = None;
-    let mut rest = first.into_iter().chain(args);
-    while let Some(arg) = rest.next() {
+    while let Some(arg) = next {
         match arg.as_str() {
-            "--config" => config_path = Some(rest.next().context("--config expects a path")?),
+            "--config" => config_path = Some(args.next().context("--config expects a path")?),
             other if other.starts_with("--config=") => {
                 config_path = Some(other.trim_start_matches("--config=").to_string())
             }
@@ -39,6 +42,7 @@ fn main() -> Result<()> {
                 bail!("unexpected argument `{other}`");
             }
         }
+        next = args.next();
     }
 
     let path = config_path
@@ -54,13 +58,19 @@ fn main() -> Result<()> {
         .build()
         .context("build tokio runtime")?;
     let n = loaded.agents.len();
-    rt.block_on(async move {
-        // Config was validated above (passwords resolved, names/fields checked);
-        // the hub itself spawns nothing — agents start lazily on first tool use.
-        let hub = hub::Hub::new(loaded);
-        eprintln!("ringo-mcp: {n} agent(s) configured (started on first use)");
-        serve(std::sync::Arc::new(hub)).await
-    })
+    let hub = Arc::new(hub::Hub::new(loaded));
+    eprintln!("ringo-mcp: {n} agent(s) configured (started on first use)");
+    rt.block_on(async { serve(Arc::clone(&hub)).await })?;
+
+    // The client is gone: ask the workers to deregister and exit, then give
+    // the runtime a bounded window to drain — the per-agent event-poll tasks
+    // only end once the workers' streams close, so a plain `drop(rt)` could
+    // wait forever and a hard kill would skip the de-REGISTER. The grace
+    // exceeds the worker's shutdown budget (de-REGISTER wait + RE-thread
+    // stop, see ringo-agent's SHUTDOWN_GRACE).
+    hub.shutdown();
+    rt.shutdown_timeout(std::time::Duration::from_secs(35));
+    Ok(())
 }
 
 fn print_usage() {

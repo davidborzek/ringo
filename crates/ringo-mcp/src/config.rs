@@ -50,6 +50,7 @@ pub struct AgentDef {
 /// One `[[agent]]` table: a flat, ergonomic mirror of a
 /// [`ringo_core::account::Account`] plus the agent label.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentEntry {
     /// Unique label every MCP tool uses to address this agent.
     pub name: String,
@@ -108,6 +109,7 @@ pub struct AgentEntry {
 
 /// The optional `[backend]` table: headless-sane defaults, overridable.
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BackendEntry {
     /// Audio driver. Default `aubridge` (headless: no sound hardware, calls
     /// establish without a device; `play` renders tones/files, received audio
@@ -136,6 +138,7 @@ pub struct BackendEntry {
 /// ephemeral, and remote access belongs behind a reverse proxy, not an open
 /// listener.
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BridgeEntry {
     /// Host the WS bridge listens on. Default `127.0.0.1`.
     listen_host: Option<String>,
@@ -515,6 +518,25 @@ password_file = "{}"
         );
         let cfg = load(&p).unwrap();
         assert_eq!(cfg.agents[0].account.password, "hunter2");
+    }
+
+    #[test]
+    fn unknown_keys_are_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("unk.toml");
+        std::fs::write(
+            &p,
+            "[[agent]]\nname = \"a\"\nusername = \"1\"\ndomain = \"x\"\npassword = \"pw\"\nusarname = \"typo\"\n",
+        )
+        .unwrap();
+        // `{:#}` includes the serde cause under the parse-context layer.
+        let err = format!("{:#}", load(&p).unwrap_err());
+        assert!(err.contains("usarname"), "{err}");
+
+        let p = tmp.path().join("unkb.toml");
+        std::fs::write(&p, "[backend]\naudioo_driver = \"aubridge\"\n").unwrap();
+        let err = format!("{:#}", load(&p).unwrap_err());
+        assert!(err.contains("audioo_driver"), "{err}");
     }
 
     #[test]

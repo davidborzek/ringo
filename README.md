@@ -20,6 +20,7 @@ automated call testing, both sharing one engine.
 |-------|------------|------|
 | [`ringo-phone`](crates/ringo-phone) | The **`ringo` softphone** — a ratatui TUI managing multiple SIP profiles, with calls, contacts, transfers, remote control and headless automation | [Guide](https://davidborzek.github.io/ringo/ringo-phone/introduction.html) |
 | [`ringo-flow`](crates/ringo-flow) | A **telephony scenario test runner** — bring up SIP agents from a JavaScript/TypeScript scenario, drive them, and assert call behaviour (incl. audio) | [Guide](https://davidborzek.github.io/ringo/ringo-flow/introduction.html) · [API](https://davidborzek.github.io/ringo/ringo-flow/js-api/) |
+| [`ringo-mcp`](crates/ringo-mcp) | An **MCP server** — exposes SIP agents as tools to LLM clients (dial, DTMF, transfer, INVITE headers, live-audio WebSocket streaming) | [Guide](https://davidborzek.github.io/ringo/ringo-mcp/introduction.html) |
 
 ## Internal crates
 
@@ -27,7 +28,7 @@ Support crates with no stable public API — pin an exact version if you depend 
 
 | Crate | What it is |
 |-------|------------|
-| [`ringo-agent`](crates/ringo-agent) | The **per-agent process backend** — runs a SIP user agent as its own process over a framed stdio protocol (live audio in/out); backs `ringo-flow` |
+| [`ringo-agent`](crates/ringo-agent) | The **per-agent process backend** — runs a SIP user agent as its own process over a framed stdio protocol (live audio in/out); backs `ringo-flow` and `ringo-mcp` |
 | [`ringo-core`](crates/ringo-core) | The **shared engine** — an FFI backend statically linking baresip/libre, plus the call-event model |
 
 ## Requirements

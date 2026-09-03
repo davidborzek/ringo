@@ -50,6 +50,12 @@ impl super::app::App {
                     self.notify("Voicemail", &format!("{} new message(s)", new_count));
                 }
             }
+            // The remote party holds/resumes — mirror it into the call state.
+            AppEvent::CallHold { call_id } => self.handle_call_held(call_id),
+            AppEvent::CallResume { call_id } => self.handle_call_resumed(call_id),
+            // A failed transfer leaves the original call untouched — nothing to
+            // update in the TUI (the transfer mode was left by its own flow).
+            AppEvent::CallTransferFailed { .. } => {}
             // Remote-control responses go back over the socket; there's no TUI echo.
             AppEvent::Response { .. } => {}
             AppEvent::Unknown { .. } => {}
