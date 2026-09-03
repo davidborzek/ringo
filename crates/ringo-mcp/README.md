@@ -88,7 +88,8 @@ the only UA in its process — see the ringo-core `Account` docs).
 | `send_dtmf` | One digit (`0-9`, `*`, `#`, `A-F`) |
 | `transfer` | Blind transfer of the current call |
 | `play` | What the agent transmits: `"silence"`, `"ausine,425"`, `"aufile,<wav>"` (resets to silence when the last call ends) |
-| `wait_event` | Block for the agent's next event (JSON), up to 120 s; optionally filtered by event name(s) |
+| `wait_event` | Block for the agent's next event (JSON), up to 120 s; optional event filter and `after_id` log cursor (no lost events across tool roundtrips) |
+| `agent_events` | Read the agent's event log with id cursors (catch up after looking away) |
 | `agent_stop` | Stop an agent's worker (deregister + exit; restarts on next use) |
 | `call_headers` | SIP headers of received INVITEs, per Call-ID or all (newest first) |
 | `add_header` / `rm_header` | Custom headers on outgoing INVITEs (runtime; `${uuid}` renders once, immediately) |

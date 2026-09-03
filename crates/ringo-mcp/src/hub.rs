@@ -22,6 +22,7 @@ use ringo_agent::{AgentConfig, ProcessClient};
 use ringo_core::AudioFrame;
 use ringo_core::account::{Account, BackendOptions};
 use ringo_core::event::AppEvent;
+use std::collections::VecDeque;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
@@ -37,6 +38,92 @@ const EVENT_CHANNEL_CAPACITY: usize = 256;
 /// concluding the worker rejected the dial locally (some targets produce no
 /// call at all — no event, nothing to wait for).
 const DIAL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How many recent events each agent keeps in its log (the `after_id` cursor
+/// window). Bounded by design: the log makes event loss *explicit*
+/// (`truncated`), not impossible.
+pub(crate) const EVENT_LOG_CAPACITY: usize = 256;
+/// Upper bound on events returned by one `agent_events` call (page with
+/// `after_id` = the last returned id).
+pub(crate) const EVENT_PAGE_LIMIT: usize = 100;
+
+/// A per-agent, bounded event log with monotonically increasing ids — the
+/// `after_id` cursors of `wait_event`/`agent_events` read it oldest-first.
+/// Lives in the agent's [`Slot`], NOT in the worker-backed `Agent`: a cursor
+/// must survive worker respawns (fresh ids would hide behind a stale cursor).
+pub(crate) struct EventLog {
+    entries: Mutex<VecDeque<(u64, AppEvent)>>,
+    next_id: std::sync::atomic::AtomicU64,
+    notify: tokio::sync::Notify,
+}
+
+impl EventLog {
+    /// Test constructor (the real one is wired by `Hub::new`).
+    #[cfg(test)]
+    pub(crate) fn for_tests() -> Self {
+        Self::new()
+    }
+
+    fn new() -> Self {
+        Self {
+            entries: Mutex::new(VecDeque::new()),
+            next_id: std::sync::atomic::AtomicU64::new(1),
+            notify: tokio::sync::Notify::new(),
+        }
+    }
+
+    /// Append an event, assign its id, trim to capacity, wake the cursor
+    /// waiters. Returns the id.
+    pub(crate) fn append(&self, event: AppEvent) -> u64 {
+        let id = self
+            .next_id
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        entries.push_back((id, event));
+        while entries.len() > EVENT_LOG_CAPACITY {
+            entries.pop_front();
+        }
+        drop(entries);
+        self.notify.notify_waiters();
+        id
+    }
+
+    /// The oldest matching entry after `after_id`, oldest first.
+    pub(crate) fn first_after(
+        &self,
+        after_id: u64,
+        pred: impl Fn(&AppEvent) -> bool,
+    ) -> Option<(u64, AppEvent)> {
+        self.entries
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|(id, e)| *id > after_id && pred(e))
+            .cloned()
+    }
+
+    /// Up to [`EVENT_PAGE_LIMIT`] entries after `after_id` (oldest first),
+    /// plus the log bounds and whether `after_id` fell off the ring.
+    pub(crate) fn page_after(&self, after_id: u64) -> (Vec<(u64, AppEvent)>, u64, u64, bool) {
+        let entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        let oldest = entries.front().map(|(id, _)| *id).unwrap_or(0);
+        let newest = entries.back().map(|(id, _)| *id).unwrap_or(0).max(
+            // An empty ring still reports the last assigned id so a client
+            // holding it skips nothing once events flow again.
+            self.next_id
+                .load(std::sync::atomic::Ordering::Relaxed)
+                .saturating_sub(1),
+        );
+        let truncated = after_id + 1 < oldest;
+        let events: Vec<(u64, AppEvent)> = entries
+            .iter()
+            .filter(|(id, _)| *id > after_id)
+            .take(EVENT_PAGE_LIMIT)
+            .cloned()
+            .collect();
+        (events, oldest, newest, truncated)
+    }
+}
 
 /// How often the bridge polls the worker for newly seen inbound INVITE headers
 /// (same cadence as ringo-flow's trace poll).
@@ -169,6 +256,9 @@ struct Slot {
     account: Account,
     options: BackendOptions,
     custom_headers: Vec<(String, String)>,
+    /// The agent's event log (id-cursored) — lives here, not in `Agent`, so
+    /// cursors survive worker respawns.
+    log: Arc<EventLog>,
     agent: AsyncMutex<Option<Arc<Agent>>>,
 }
 
@@ -186,6 +276,7 @@ impl Hub {
                     aor,
                     options: config.backend.clone(),
                     custom_headers: def.custom_headers,
+                    log: Arc::new(EventLog::new()),
                     agent: AsyncMutex::new(None),
                     account: def.account,
                 }
@@ -254,6 +345,7 @@ impl Hub {
                 slot.account.clone(),
                 slot.options.clone(),
                 &slot.custom_headers,
+                Arc::clone(&slot.log),
             )
             .await
             .with_context(|| format!("start agent `{}`", slot.name))?,
@@ -421,7 +513,7 @@ pub struct Agent {
     pub domain: String,
     client: Arc<ProcessClient>,
     state: Arc<Mutex<AgentState>>,
-    events: broadcast::Sender<AppEvent>,
+    events: broadcast::Sender<(u64, AppEvent)>,
     /// The agent's single received-audio tap, lazily started by
     /// [`Agent::rx_frames`] (the worker's tap is single-sink — this Agent owns
     /// the one subscription and fans out from here).
@@ -429,6 +521,8 @@ pub struct Agent {
     /// The agent's single TX writer channel, lazily created by
     /// [`Agent::tx_channel`] (same-thread sequencing — see `TxMsg`).
     tx: AsyncMutex<Option<mpsc::Sender<TxMsg>>>,
+    /// The agent's event log (owned by the hub `Slot`; ids survive respawns).
+    log: Arc<EventLog>,
     /// Config-declared custom-header templates for outgoing INVITEs: static
     /// ones were applied once at connect, dynamic ones are re-rendered per
     /// [`Agent::dial`] (fresh `${uuid}` each call).
@@ -445,6 +539,7 @@ impl Agent {
         account: Account,
         options: BackendOptions,
         custom_headers: &[(String, String)],
+        log: Arc<EventLog>,
     ) -> Result<Self> {
         let custom_headers: Vec<(String, HeaderTemplate)> = custom_headers
             .iter()
@@ -464,7 +559,7 @@ impl Agent {
             .with_context(|| format!("spawn worker for `{label}`"))?;
         let client = Arc::new(client);
 
-        let (events_tx, _) = broadcast::channel::<AppEvent>(EVENT_CHANNEL_CAPACITY);
+        let (events_tx, _) = broadcast::channel::<(u64, AppEvent)>(EVENT_CHANNEL_CAPACITY);
         let state = Arc::new(Mutex::new(AgentState::default()));
 
         // Bridge the worker's blocking std channel into the async world: reduce
@@ -474,6 +569,7 @@ impl Agent {
         let bridge_state = Arc::clone(&state);
         let bridge_tx = events_tx.clone();
         let bridge_client = Arc::clone(&client);
+        let bridge_log = Arc::clone(&log);
         let headers = client.headers_handle();
         tokio::task::spawn_blocking(move || {
             loop {
@@ -485,7 +581,11 @@ impl Agent {
                         if !is_agent_relevant(&event) {
                             continue;
                         }
-                        let _ = bridge_tx.send(event.clone());
+                        // Log first (assigns the id the cursors see), then fan
+                        // out — a cursor waiter waking on the notify finds the
+                        // entry already in the log.
+                        let id = bridge_log.append(event.clone());
+                        let _ = bridge_tx.send((id, event.clone()));
                         let mut g = bridge_state.lock().unwrap_or_else(|e| e.into_inner());
                         reduce(&mut g, &event);
                         // `play` is call-scoped for MCP agents: when the agent's LAST
@@ -529,6 +629,7 @@ impl Agent {
             client,
             state,
             events: events_tx,
+            log,
             rx_tap: AsyncMutex::new(None),
             tx: AsyncMutex::new(None),
             custom_headers,
@@ -549,38 +650,84 @@ impl Agent {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    /// Wait for the agent's next event, or `None` on timeout. Subscribes at
-    /// call time — events that happened before are not replayed (poll
-    /// `agent_status` for state instead).
+    /// Wait for the agent's next event, or `None` on timeout.
+    ///
+    /// **Without** `after_id`: subscribes at call time — events that happened
+    /// before are not replayed (poll `agent_status` for state instead).
+    ///
+    /// **With** `after_id` (a cursor from a previous reply): reads the agent's
+    /// event LOG oldest-first, so events that fired between the caller's
+    /// actions are not lost — the roundtrip gap that swallows a
+    /// `call_established` between `accept` and `wait_event` closes. Returns
+    /// the matched event with its id (the caller's next cursor).
     ///
     /// With `names`, events that don't match one of the given names are
-    /// skipped (still folded into the agent state and visible to other
-    /// waiters) — `None` means any event.
-    pub async fn wait_event(&self, timeout: Duration, names: Option<&[&str]>) -> Option<AppEvent> {
-        let mut rx = self.events.subscribe();
-        tokio::time::timeout(timeout, async {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if names.is_none_or(|n| n.contains(&crate::event_name(&event))) {
-                            return Some(event);
+    /// skipped (still folded into the agent state, logged and visible to
+    /// other waiters) — `None` means any event.
+    pub async fn wait_event(
+        &self,
+        timeout: Duration,
+        names: Option<&[&str]>,
+        after_id: Option<u64>,
+    ) -> Option<(u64, AppEvent)> {
+        match after_id {
+            None => {
+                let mut rx = self.events.subscribe();
+                tokio::time::timeout(timeout, async {
+                    loop {
+                        match rx.recv().await {
+                            Ok((id, event)) => {
+                                if names.is_none_or(|n| n.contains(&crate::event_name(&event))) {
+                                    return Some((id, event));
+                                }
+                            }
+                            // Fell behind the ring: skip the notice, next event
+                            // follows.
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => return None,
                         }
                     }
-                    // Fell behind the ring: skip the notice, next event follows.
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => return None,
-                }
+                })
+                .await
+                .ok()
+                .flatten()
             }
-        })
-        .await
-        .ok()
-        .flatten()
+            Some(cursor) => {
+                let matches =
+                    |e: &AppEvent| names.is_none_or(|n| n.contains(&crate::event_name(e)));
+                // Fast path: the log already holds a match — the very gap this
+                // cursor mode exists for.
+                if let Some(hit) = self.log.first_after(cursor, matches) {
+                    return Some(hit);
+                }
+                // Armed-future pattern: each loop iteration arms the waiter,
+                // THEN checks the log (an append between iterations is caught
+                // by the check, one during the check by the notify).
+                tokio::time::timeout(timeout, async {
+                    loop {
+                        let notified = std::pin::pin!(self.log.notify.notified());
+                        if let Some(hit) = self.log.first_after(cursor, matches) {
+                            return Some(hit);
+                        }
+                        notified.await;
+                    }
+                })
+                .await
+                .ok()
+                .flatten()
+            }
+        }
     }
 
     /// Subscribe to this agent's live event feed (the WS bridge's push
     /// channel; same stream `wait_event` consumes).
-    pub fn subscribe_events(&self) -> broadcast::Receiver<AppEvent> {
+    pub fn subscribe_events(&self) -> broadcast::Receiver<(u64, AppEvent)> {
         self.events.subscribe()
+    }
+
+    /// The agent's event log bounds (oldest/newest id), for `agent_events`.
+    pub(crate) fn event_log_page(&self, after_id: u64) -> (Vec<(u64, AppEvent)>, u64, u64, bool) {
+        self.log.page_after(after_id)
     }
 
     /// Subscribe to the agent's received audio (mono s16 [`AudioFrame`]s).
@@ -660,7 +807,7 @@ impl Agent {
         let confirmed = tokio::time::timeout(confirm_budget, async {
             loop {
                 match rx.recv().await {
-                    Ok(AppEvent::CallOutgoing { call_id, .. }) => return Some(call_id),
+                    Ok((_, AppEvent::CallOutgoing { call_id, .. })) => return Some(call_id),
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     // Worker gone: nothing will ever confirm.
                     Err(broadcast::error::RecvError::Closed) => return None,
@@ -681,14 +828,17 @@ impl Agent {
         tokio::time::timeout(remaining, async {
             loop {
                 match rx.recv().await {
-                    Ok(AppEvent::CallEstablished { call_id }) if call_id == our_id => {
+                    Ok((_, AppEvent::CallEstablished { call_id })) if call_id == our_id => {
                         return DialOutcome::Established {
                             call_id: call_id.clone(),
                         };
                     }
-                    Ok(AppEvent::CallClosed {
-                        call_id, reason, ..
-                    }) if call_id == our_id => {
+                    Ok((
+                        _,
+                        AppEvent::CallClosed {
+                            call_id, reason, ..
+                        },
+                    )) if call_id == our_id => {
                         return DialOutcome::Failed {
                             call_id: call_id.clone(),
                             reason,

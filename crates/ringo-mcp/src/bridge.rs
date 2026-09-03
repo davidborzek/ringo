@@ -352,10 +352,13 @@ async fn handle_conn(
                 }
             }
 
-            // Agent events → client (text), same shape as wait_event results.
+            // Agent events → client (text), same shape as wait_event results
+            // (with the event-log id as the cursor).
             ev = ev_sub.recv() => {
-                if let Ok(event) = ev {
-                    let _ = sink.send(Message::Text(event_text(&event).to_string().into())).await;
+                if let Ok((id, event)) = ev {
+                    let mut v = event_text(&event);
+                    v["id"] = json!(id);
+                    let _ = sink.send(Message::Text(v.to_string().into())).await;
                 }
             }
 

@@ -41,7 +41,7 @@ pub(crate) const TOOL_GROUPS: &[(&str, &[&str])] = &[
     ),
     ("audio", &["play"]),
     ("headers", &["call_headers", "add_header", "rm_header"]),
-    ("events", &["wait_event"]),
+    ("events", &["wait_event", "agent_events"]),
     ("streams", &["stream_open", "stream_close"]),
     ("recording", &["save_audio"]),
     ("lifecycle", &["agent_stop"]),
@@ -237,6 +237,22 @@ struct WaitEventParam {
     /// kind. Valid names are listed by an invalid value's error message.
     #[serde(default)]
     event: Option<EventFilter>,
+    /// Event-log cursor: wait for the first event with a log id AFTER this —
+    /// events that fired since (e.g. during a slow tool roundtrip) are
+    /// delivered from the log, not lost. Read the current position with
+    /// `agent_events`, pass the last seen `id` here; the reply carries the
+    /// matched event's `id` as the next cursor. Omit for live-only semantics.
+    #[serde(default)]
+    after_id: Option<u64>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct AgentEventsParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// Only events with a log id after this one (default 0 = the whole ring).
+    #[serde(default)]
+    after_id: Option<u64>,
 }
 
 /// A `wait_event` filter: one event name, or several (any of them matches).
@@ -659,6 +675,7 @@ impl TelephonyServer {
             agent,
             timeout_ms,
             event,
+            after_id,
         }): Parameters<WaitEventParam>,
     ) -> Result<CallToolResult, McpError> {
         let a = self.agent(&agent).await?;
@@ -680,12 +697,42 @@ impl TelephonyServer {
             .as_deref()
             .map(|v| v.iter().map(String::as_str).collect());
         match a
-            .wait_event(Duration::from_millis(ms), names.as_deref())
+            .wait_event(Duration::from_millis(ms), names.as_deref(), after_id)
             .await
         {
-            Some(e) => ok_json(event_json(&e)),
+            Some((id, e)) => {
+                let mut v = event_json(&e);
+                v["id"] = json!(id);
+                ok_json(v)
+            }
             None => ok_json(json!({"timeout": true})),
         }
+    }
+
+    #[tool(
+        description = "Read the agent's event log (bounded, newest kept) — every event with its id, oldest first. Pass `after_id` (the last seen id) to get only newer events; `truncated: true` means the cursor fell off the ring (events were lost). Use it to catch up after looking away, and to take a cursor for `wait_event`'s `after_id`."
+    )]
+    async fn agent_events(
+        &self,
+        Parameters(AgentEventsParam { agent, after_id }): Parameters<AgentEventsParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let a = self.agent(&agent).await?;
+        let (events, oldest, newest, truncated) = a.event_log_page(after_id.unwrap_or(0));
+        let entries: Vec<serde_json::Value> = events
+            .iter()
+            .map(|(id, e)| {
+                let mut v = event_json(e);
+                v["id"] = json!(id);
+                v
+            })
+            .collect();
+        ok_json(json!({
+            "events": entries,
+            "count": entries.len(),
+            "oldest_id": oldest,
+            "newest_id": newest,
+            "truncated": truncated,
+        }))
     }
 
     #[tool(
@@ -879,6 +926,56 @@ mod tests {
             call_id: "c1".into(),
         });
         assert_eq!(v, json!({"event": "call_transfer_failed", "call_id": "c1"}));
+    }
+
+    #[test]
+    fn event_log_ids_and_cursors() {
+        let log = crate::hub::EventLog::for_tests();
+
+        // Append assigns monotonic ids and the cursor reads oldest-first.
+        let a = log.append(ringo_core::event::AppEvent::RegisterOk {
+            account: "a".into(),
+        });
+        let b = log.append(ringo_core::event::AppEvent::RegisterFailed { reason: "r".into() });
+        assert_eq!(b, a + 1);
+        let (page, oldest, newest, truncated) = log.page_after(0);
+        assert_eq!(page.len(), 2);
+        assert_eq!(oldest, a);
+        assert_eq!(newest, b);
+        assert!(!truncated);
+
+        // after_id = newest → empty, but the bounds report the position.
+        let (page, oldest, _, _) = log.page_after(b);
+        assert!(page.is_empty());
+        assert_eq!(oldest, a);
+
+        // first_after skips non-matching entries.
+        let only_failed = |e: &ringo_core::event::AppEvent| {
+            matches!(e, ringo_core::event::AppEvent::RegisterFailed { .. })
+        };
+        assert_eq!(log.first_after(0, only_failed).unwrap().0, b);
+        assert!(log.first_after(b, only_failed).is_none());
+    }
+
+    #[test]
+    fn event_log_ring_truncates_and_reports() {
+        let log = crate::hub::EventLog::for_tests();
+        let ev = || ringo_core::event::AppEvent::RegisterOk {
+            account: "a".into(),
+        };
+        for _ in 0..(crate::hub::EVENT_LOG_CAPACITY + 10) {
+            log.append(ev());
+        }
+        // A cursor older than the ring's oldest entry is reported as truncated.
+        let (page, oldest, newest, truncated) = log.page_after(0);
+        // Pages are capped; the ring holds more.
+        assert_eq!(page.len(), crate::hub::EVENT_PAGE_LIMIT);
+        assert!(truncated, "cursor 0 fell off the ring");
+        assert_eq!(oldest, 11);
+        assert_eq!(newest, crate::hub::EVENT_LOG_CAPACITY as u64 + 10);
+        // Inside the ring: no truncation.
+        let (_, _, _, truncated) = log.page_after(oldest);
+        assert!(!truncated);
     }
 
     #[test]

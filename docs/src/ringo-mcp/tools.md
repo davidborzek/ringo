@@ -82,7 +82,10 @@ when using `wait_established`.
 Blocks until the agent's *next* event, or a timeout. `timeout_ms` defaults to
 30000, capped at 120000. An optional `event` filter waits for a specific event
 (or any of several) and skips the rest — other waiters and the state fold still
-see them:
+see them. An optional `after_id` cursor switches to log semantics (see
+[The event log](#the-event-log)): events that fired since that id are delivered
+from the log, oldest-first, and the reply carries the matched event's `id` as
+the next cursor:
 
 ```jsonc
 { "agent": "alice", "event": ["call_established", "call_closed"], "timeout_ms": 30000 }
@@ -107,10 +110,29 @@ negotiation, RTP/RTCP mechanics, lifecycle internals) never surface —
 current media stats are one `agent_status` away. A timeout returns
 `{ "timeout": true }`.
 
-Subscribing happens at call time — past events are not replayed (poll
-`agent_status` for state). Events can also arrive *between* tool calls; if an
-expected event never comes, call `wait_event` again — anything that happened
-in between is reflected in `agent_status` regardless.
+Without `after_id`, subscribing happens at call time — past events are not
+replayed (use the event log below instead; `agent_status` has the state).
+
+### The event log
+
+Every agent keeps a bounded log of its events with monotonically increasing
+ids. Read it with `agent_events`:
+
+```jsonc
+{ "agent": "alice", "after_id": 42 }
+// → { "events": [{"id": 43, "event": "call_established", …}, …],
+//     "count": 1, "oldest_id": 12, "newest_id": 43, "truncated": false }
+```
+
+- `after_id` (default 0) returns only newer events, oldest first, at most 100
+  per call — page with the last returned id.
+- `truncated: true` means the cursor fell off the ring (the last 256 events
+  are kept): older events were lost.
+
+The log closes the roundtrip gap: take the cursor (`newest_id`), act
+(`accept`, `dial`, …), then `wait_event` with `after_id` — an event that fired
+*during* the roundtrip is delivered, not lost. The WS bridge's pushed event
+frames carry the same `id`.
 
 ## Headers
 

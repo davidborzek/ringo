@@ -304,3 +304,70 @@ async fn dial_wait_established_outcomes() {
         started.elapsed()
     );
 }
+
+#[tokio::test]
+async fn event_log_cursor_closes_the_roundtrip_race() {
+    let tmp = tempfile::tempdir().unwrap();
+    let p = tmp.path().join("config.toml");
+    std::fs::write(
+        &p,
+        "[[agent]]\nname = \"alice\"\nusername = \"1001\"\ndomain = \"10.255.255.1:5060\"\npassword = \"pw\"\n",
+    )
+    .unwrap();
+    let mut server = Server::start(&p);
+
+    // Take a cursor, then act. The call_outgoing fires while nobody waits —
+    // with the cursor it is NOT lost.
+    let text = server.tool("agent_events", serde_json::json!({"agent": "alice"}));
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    let cursor = v["newest_id"].as_u64().expect("newest_id");
+    let _ = server.tool(
+        "dial",
+        serde_json::json!({"agent": "alice", "target": "1002"}),
+    );
+    std::thread::sleep(Duration::from_millis(1500));
+
+    // The log has the event, tagged with ids.
+    let text = server.tool(
+        "agent_events",
+        serde_json::json!({"agent": "alice", "after_id": cursor}),
+    );
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    let events = v["events"].as_array().expect("events");
+    assert!(
+        events.iter().any(|e| e["event"] == "call_outgoing"),
+        "{v:?}"
+    );
+    assert!(events.iter().all(|e| e["id"].is_u64()), "{v:?}");
+    assert!(!v["truncated"].as_bool().unwrap(), "{v:?}");
+
+    // The SAME event would be lost with live-only semantics — wait_event with
+    // the cursor returns it from the log, immediately, with its id.
+    let text = server.tool(
+        "wait_event",
+        serde_json::json!({
+            "agent": "alice", "timeout_ms": 3000, "after_id": cursor,
+            "event": "call_outgoing"
+        }),
+    );
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    assert_eq!(v["event"], "call_outgoing", "{v:?}");
+    let seen = v["id"].as_u64().expect("id");
+
+    // The next cursor sees nothing new: no duplicates.
+    let text = server.tool(
+        "agent_events",
+        serde_json::json!({"agent": "alice", "after_id": seen}),
+    );
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    assert!(
+        v["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["id"].as_u64().unwrap() > seen),
+        "{v:?}"
+    );
+
+    let _ = server.tool("hangup_all", serde_json::json!({"agent": "alice"}));
+}
