@@ -47,6 +47,7 @@ sent. Observe outcomes with `wait_event` (preferred) or by polling
 
 | Tool | Args | Effect |
 | ---- | ---- | ------ |
+| `agent_stop` | `agent` | Stop the agent's worker (deregister + exit). Idempotent; the agent starts again on its next use. |
 | `dial` | `agent`, `target` | Place an outgoing call. `target` is a full URI, `user@host`, or a bare number/extension (resolved to `sip:<target>@<agent domain>`). Re-renders dynamic header templates (fresh `${uuid}`). |
 | `accept` | `agent` | Accept the currently ringing (incoming) call. |
 | `hangup` | `agent` | Hang up the current call. |
@@ -63,7 +64,13 @@ sent. Observe outcomes with `wait_event` (preferred) or by polling
 ### `wait_event`
 
 Blocks until the agent's *next* event, or a timeout. `timeout_ms` defaults to
-30000, capped at 120000.
+30000, capped at 120000. An optional `event` filter waits for a specific event
+(or any of several) and skips the rest — other waiters and the state fold still
+see them:
+
+```jsonc
+{ "agent": "alice", "event": ["call_established", "call_closed"], "timeout_ms": 30000 }
+```
 
 ```jsonc
 { "agent": "alice", "timeout_ms": 30000 }

@@ -191,6 +191,34 @@ impl Hub {
         bridge.mint_grant(agent.name.clone(), mode, tx_rate).await
     }
 
+    /// Stop a running agent: its worker deregisters and exits. Returns whether
+    /// a worker was actually stopped (`false` = the agent wasn't running).
+    /// The agent starts again on its next use — stopping is the counterpart to
+    /// the lazy start, not a disable.
+    pub async fn stop(&self, name: &str) -> Result<bool> {
+        let slot = self
+            .slots
+            .iter()
+            .find(|s| s.name == name)
+            .with_context(|| {
+                let known: Vec<&str> = self.slots.iter().map(|s| s.name.as_str()).collect();
+                format!("unknown agent `{name}`; known agents: {}", known.join(", "))
+            })?;
+        let mut guard = slot.agent.lock().await;
+        let Some(agent) = guard.take() else {
+            return Ok(false);
+        };
+        // Ask the worker to deregister and exit (non-blocking); the slot is
+        // already empty, so the next use spawns a fresh worker.
+        agent.shutdown_worker();
+        // Dropping the last Arc reaps the child (waits up to the shutdown
+        // grace) — off the async threads. Live WS connections keep their Arc
+        // a moment longer; their health check closes them once the worker is
+        // gone, releasing the final reference.
+        tokio::task::spawn_blocking(move || drop(agent));
+        Ok(true)
+    }
+
     /// Close an open stream by id (the token from `stream_open`).
     pub async fn stream_close(&self, stream_id: &str) -> Result<()> {
         let bridge = self
@@ -419,12 +447,20 @@ impl Agent {
     /// Wait for the agent's next event, or `None` on timeout. Subscribes at
     /// call time — events that happened before are not replayed (poll
     /// `agent_status` for state instead).
-    pub async fn wait_event(&self, timeout: Duration) -> Option<AppEvent> {
+    ///
+    /// With `names`, events that don't match one of the given names are
+    /// skipped (still folded into the agent state and visible to other
+    /// waiters) — `None` means any event.
+    pub async fn wait_event(&self, timeout: Duration, names: Option<&[&str]>) -> Option<AppEvent> {
         let mut rx = self.events.subscribe();
         tokio::time::timeout(timeout, async {
             loop {
                 match rx.recv().await {
-                    Ok(event) => return Some(event),
+                    Ok(event) => {
+                        if names.is_none_or(|n| n.contains(&crate::event_name(&event))) {
+                            return Some(event);
+                        }
+                    }
                     // Fell behind the ring: skip the notice, next event follows.
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => return None,

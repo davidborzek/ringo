@@ -112,7 +112,7 @@ fn write_config(dir: &std::path::Path) -> std::path::PathBuf {
 [[agent]]
 name = "alice"
 username = "1001"
-domain = "127.0.0.1:15099"
+domain = "10.255.255.1:5060"
 password = "pw"
 "#,
     )
@@ -191,4 +191,48 @@ async fn bridge_stream_open_connect_close() {
     // The token is one-shot: a second connect is rejected (404 handshake).
     let second = tokio_tungstenite::connect_async(url).await;
     assert!(second.is_err(), "token must be single-use");
+
+    // agent_stop tears the worker down; the next tool call starts it again.
+    let stopped = server.tool("agent_stop", serde_json::json!({"agent": "alice"}));
+    assert!(stopped.as_str().unwrap().contains("stopped agent `alice`"));
+    let text = server.tool("list_agents", serde_json::json!({}));
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    assert_eq!(
+        v["agents"][0]["running"], false,
+        "slot is empty right after stop"
+    );
+
+    // A later tool call starts the worker again — dial puts a call up
+    // (the agent_status above the respawned worker confirms it), and the
+    // wait_event FILTER is tested deterministically: the filtered wait goes
+    // out first, then the hangup triggers the matching call_closed. (Sending
+    // the wait only after the dial would race the subscribe — events are not
+    // replayed.)
+    let _ = server.tool(
+        "dial",
+        serde_json::json!({"agent": "alice", "target": "1002"}),
+    );
+    let st = server.tool("agent_status", serde_json::json!({"agent": "alice"}));
+    let v: Value = serde_json::from_str(st.as_str().expect("text")).unwrap();
+    assert_eq!(v["call_count"], 1, "the respawned worker took the dial");
+
+    // Filtered wait, then the trigger (the harness's writer thread lets us
+    // park a pending request behind the blocking one).
+    let wait_req = serde_json::json!({
+        "jsonrpc": "2.0", "id": 9, "method": "tools/call",
+        "params": {"name": "wait_event", "arguments": {
+            "agent": "alice", "timeout_ms": 15000, "event": ["call_closed"]}}
+    });
+    server.request(&wait_req.to_string());
+    // Give the server a moment to take the subscription.
+    std::thread::sleep(Duration::from_millis(300));
+    let _ = server.tool("hangup", serde_json::json!({"agent": "alice"}));
+    let text = server.reply();
+    let inner = text["result"]["content"][0]["text"].clone();
+    let v: Value = serde_json::from_str(inner.as_str().expect("text")).unwrap();
+    assert_eq!(
+        v["event"], "call_closed",
+        "filter must deliver the matching event, got {v:?}"
+    );
+    assert_eq!(text["id"], 9);
 }

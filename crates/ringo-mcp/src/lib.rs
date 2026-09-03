@@ -21,4 +21,4 @@ pub mod hub;
 mod server;
 mod state;
 
-pub use server::serve;
+pub use server::{event_name, serve};

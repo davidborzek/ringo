@@ -109,7 +109,52 @@ struct WaitEventParam {
     /// How long to wait, in milliseconds (default 30000, max 120000).
     #[serde(default)]
     timeout_ms: Option<u64>,
+    /// Only wait for this event (or one of these events), e.g. `"call_established"`
+    /// or `["call_established", "call_closed"]` to await a call's outcome either
+    /// way. Non-matching events are skipped. Omit to take the next event of any
+    /// kind. Valid names are listed by an invalid value's error message.
+    #[serde(default)]
+    event: Option<EventFilter>,
 }
+
+/// A `wait_event` filter: one event name, or several (any of them matches).
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum EventFilter {
+    /// One event name.
+    One(String),
+    /// Any of these event names.
+    Any(Vec<String>),
+}
+
+impl EventFilter {
+    fn names(&self) -> Vec<String> {
+        match self {
+            Self::One(n) => vec![n.clone()],
+            Self::Any(v) => v.clone(),
+        }
+    }
+}
+
+/// The names `wait_event`'s filter accepts (== every `event_name` output).
+const KNOWN_EVENT_NAMES: &[&str] = &[
+    "registering",
+    "register_ok",
+    "register_failed",
+    "unregistered",
+    "call_incoming",
+    "call_outgoing",
+    "call_ringing",
+    "call_established",
+    "call_closed",
+    "call_deflected",
+    "call_hold",
+    "call_resume",
+    "call_transfer_failed",
+    "voicemail_status",
+    "response",
+    "backend_connect_failed",
+];
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct SaveAudioParam {
@@ -184,6 +229,31 @@ fn invalid(msg: impl Into<String>) -> McpError {
 }
 
 /// Compact JSON for one event, for `wait_event`.
+/// The `event`-field name for an [`AppEvent`] — the single naming source for
+/// `event_json`, `wait_event`'s optional filter and the WS bridge's pushes.
+pub fn event_name(e: &ringo_core::event::AppEvent) -> &'static str {
+    use ringo_core::event::AppEvent::*;
+    match e {
+        Registering { .. } => "registering",
+        RegisterOk { .. } => "register_ok",
+        RegisterFailed { .. } => "register_failed",
+        Unregistered { .. } => "unregistered",
+        CallIncoming { .. } => "call_incoming",
+        CallOutgoing { .. } => "call_outgoing",
+        CallRinging { .. } => "call_ringing",
+        CallEstablished { .. } => "call_established",
+        CallClosed { .. } => "call_closed",
+        CallDeflected { .. } => "call_deflected",
+        CallHold { .. } => "call_hold",
+        CallResume { .. } => "call_resume",
+        CallTransferFailed { .. } => "call_transfer_failed",
+        VoicemailStatus { .. } => "voicemail_status",
+        Response { .. } => "response",
+        Unknown { .. } => "unknown",
+        BackendConnectFailed { .. } => "backend_connect_failed",
+    }
+}
+
 /// Compact JSON for one event, for `wait_event` (and, with the `event` key
 /// renamed to `type`, the WS bridge's text-frame pushes).
 pub(crate) fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
@@ -424,17 +494,61 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Block until the agent's NEXT event (call_incoming, call_established, call_closed, register_failed, …), then return it as JSON. Returns `{\"timeout\": true}` if nothing happened in time. Use after dial/accept to observe progress."
+        description = "Block until the agent's NEXT event (call_incoming, call_established, call_closed, register_failed, …), then return it as JSON. Optionally pass `event` (a name or an array) to wait for specific events only — others are skipped, e.g. [\"call_established\",\"call_closed\"] awaits a call's outcome either way. Returns `{\"timeout\": true}` if nothing happened in time. Use after dial/accept to observe progress."
     )]
     async fn wait_event(
         &self,
-        Parameters(WaitEventParam { agent, timeout_ms }): Parameters<WaitEventParam>,
+        Parameters(WaitEventParam {
+            agent,
+            timeout_ms,
+            event,
+        }): Parameters<WaitEventParam>,
     ) -> Result<CallToolResult, McpError> {
         let a = self.agent(&agent).await?;
+        // Validate an optional filter up front: a typo must fail loudly, not
+        // silently never match.
+        let filter = event.map(|f| f.names());
+        if let Some(names) = filter.as_deref() {
+            for n in names {
+                if !KNOWN_EVENT_NAMES.contains(&n.as_str()) {
+                    return Err(invalid(format!(
+                        "unknown event `{n}`; valid: {}",
+                        KNOWN_EVENT_NAMES.join(", ")
+                    )));
+                }
+            }
+        }
         let ms = timeout_ms.unwrap_or(DEFAULT_WAIT_MS).min(MAX_WAIT_MS);
-        match a.wait_event(Duration::from_millis(ms)).await {
+        let names: Option<Vec<&str>> = filter
+            .as_deref()
+            .map(|v| v.iter().map(String::as_str).collect());
+        match a
+            .wait_event(Duration::from_millis(ms), names.as_deref())
+            .await
+        {
             Some(e) => ok_json(event_json(&e)),
             None => ok_json(json!({"timeout": true})),
+        }
+    }
+
+    #[tool(
+        description = "Stop an agent's worker process: it deregisters from SIP and exits. Idempotent (`false` = it wasn't running). The agent starts again on its next use — stopping frees the registration/worker without disabling the agent."
+    )]
+    async fn agent_stop(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let stopped = self
+            .hub
+            .stop(&agent)
+            .await
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        if stopped {
+            ok_text(format!(
+                "stopped agent `{agent}` (deregistering; it starts again on next use)"
+            ))
+        } else {
+            ok_text(format!("agent `{agent}` is not running (nothing to stop)"))
         }
     }
 
@@ -608,6 +722,83 @@ mod tests {
             call_id: "c1".into(),
         });
         assert_eq!(v, json!({"event": "call_transfer_failed", "call_id": "c1"}));
+    }
+
+    #[test]
+    fn event_names_match_event_json_and_the_known_list() {
+        use ringo_core::event::AppEvent::*;
+        // Every variant renders with exactly event_name()'s string, and
+        // every wait_event filter name corresponds to a real variant.
+        let cases: Vec<ringo_core::event::AppEvent> = vec![
+            Registering {
+                account: "a".into(),
+            },
+            RegisterOk {
+                account: "a".into(),
+            },
+            RegisterFailed { reason: "r".into() },
+            Unregistered {
+                account: "a".into(),
+            },
+            CallIncoming {
+                call_id: "c".into(),
+                number: "n".into(),
+                display_name: None,
+            },
+            CallOutgoing {
+                call_id: "c".into(),
+                number: "n".into(),
+            },
+            CallRinging {
+                call_id: "c".into(),
+            },
+            CallEstablished {
+                call_id: "c".into(),
+            },
+            CallClosed {
+                call_id: "c".into(),
+                reason: "r".into(),
+                error: false,
+            },
+            CallDeflected {
+                from: "f".into(),
+                display_name: None,
+                target: "t".into(),
+            },
+            CallHold {
+                call_id: "c".into(),
+            },
+            CallResume {
+                call_id: "c".into(),
+            },
+            CallTransferFailed {
+                call_id: "c".into(),
+            },
+            VoicemailStatus {
+                waiting: false,
+                new_count: 0,
+            },
+            Response {
+                ok: true,
+                data: "d".into(),
+            },
+            Unknown {
+                class: "x".into(),
+                type_: "1".into(),
+            },
+            BackendConnectFailed { reason: "r".into() },
+        ];
+        let mut seen: Vec<&str> = Vec::new();
+        for e in &cases {
+            let rendered = event_json(e);
+            let json_name = rendered["event"].as_str().expect("event field");
+            assert_eq!(json_name, event_name(e));
+            seen.push(event_name(e));
+        }
+        // The wait_event filter accepts exactly these (minus "unknown", which
+        // the hub filters before it could ever match).
+        let filterable: Vec<&str> = seen.into_iter().filter(|n| *n != "unknown").collect();
+        assert_eq!(filterable, KNOWN_EVENT_NAMES);
     }
 
     #[test]
