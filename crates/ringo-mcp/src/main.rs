@@ -44,6 +44,18 @@ struct Cli {
     #[arg(long, value_name = "IP", default_value = "127.0.0.1")]
     bridge_host: IpAddr,
 
+    /// Deny dial/transfer targets matching this regex (repeatable; matched
+    /// against the dialed number and the full resolved URI). Always wins
+    /// over --dial-allow
+    #[arg(long = "dial-deny", value_name = "REGEX")]
+    dial_deny: Vec<String>,
+
+    /// Only permit dial/transfer targets matching this regex (repeatable;
+    /// matched against the dialed number and the full resolved URI). Empty =
+    /// unrestricted
+    #[arg(long = "dial-allow", value_name = "REGEX")]
+    dial_allow: Vec<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -68,6 +80,8 @@ fn main() -> Result<()> {
     // Tool surface: validated up front (a typo'd flag must fail loudly).
     let disabled_tools =
         ringo_mcp::resolve_disabled_tools(cli.enabled_tools.as_deref(), &cli.disable)?;
+    // Dial policy: validated (regex-compiled) up front like the tool flags.
+    let dial_policy = hub::DialPolicy::build(cli.dial_deny, cli.dial_allow)?;
     if !cli.bridge_host.is_loopback() {
         anyhow::bail!(
             "--bridge-host `{}` is not a loopback address",
@@ -90,7 +104,7 @@ fn main() -> Result<()> {
         .build()
         .context("build tokio runtime")?;
     let n = loaded.agents.len();
-    let hub = Arc::new(hub::Hub::new(loaded, cli.bridge_host));
+    let hub = Arc::new(hub::Hub::new(loaded, dial_policy, cli.bridge_host));
     eprintln!(
         "ringo-mcp: {n} agent(s) configured (started on first use); {} tool(s) enabled",
         ringo_mcp::total_tool_count() - disabled_tools.len()

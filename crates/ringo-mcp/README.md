@@ -37,9 +37,11 @@ Without `--config`, the path comes from `$RINGO_MCP_CONFIG` or defaults to
 
 Optional flags: `--enabled-tools <LIST>` / `--disable <GROUP|TOOL>` trim the
 tool surface (groups: discovery, call-control, audio, headers, events,
-streams, recording, lifecycle — or individual tool names), `--bridge-host <IP>`
+streams, recording, lifecycle — or individual tool names); `--bridge-host <IP>`
 sets the live-audio bridge bind host (default 127.0.0.1, loopback only);
-`--version` prints the version.
+`--dial-deny <REGEX>` / `--dial-allow <REGEX>` (repeatable, global) restrict
+what `dial`/`transfer` may place a call to — deny always wins, e.g.
+`--dial-deny '^00' --dial-deny '^0900'`; `--version` prints the version.
 
 ## Config
 

@@ -510,7 +510,8 @@ impl TelephonyServer {
         Parameters(DialParam { agent, target }): Parameters<DialParam>,
     ) -> Result<CallToolResult, McpError> {
         let a = self.agent(&agent).await?;
-        a.dial(&target);
+        let resolved = self.hub.check_dial(&target, &a.domain).map_err(invalid)?;
+        a.dial(&resolved);
         ok_text(format!("dialing `{target}` from `{agent}`"))
     }
 
@@ -591,7 +592,9 @@ impl TelephonyServer {
         &self,
         Parameters(TransferParam { agent, target }): Parameters<TransferParam>,
     ) -> Result<CallToolResult, McpError> {
-        self.agent(&agent).await?.transfer(&target);
+        let a = self.agent(&agent).await?;
+        let resolved = self.hub.check_dial(&target, &a.domain).map_err(invalid)?;
+        a.transfer(&resolved);
         ok_text(format!("transferring `{agent}`'s call to `{target}`"))
     }
 

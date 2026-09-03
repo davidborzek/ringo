@@ -17,6 +17,7 @@ use crate::config::LoadedConfig;
 use crate::headers::{HeaderContext, HeaderTemplate};
 use crate::state::{AgentState, reduce};
 use anyhow::{Context, Result};
+use regex::Regex;
 use ringo_agent::{AgentConfig, ProcessClient};
 use ringo_core::AudioFrame;
 use ringo_core::account::{Account, BackendOptions};
@@ -53,10 +54,73 @@ pub(crate) enum TxMsg {
     Audio(Vec<i16>),
 }
 
+/// The global dial policy (`--dial-allow` / `--dial-deny` CLI flags):
+/// restrictions on every target the `dial`/`transfer` tools may place a call
+/// to — the LLM agent must not be able to dial freely (expensive
+/// destinations, premium numbers, …).
+///
+/// Regexes match the dialed number (the user part of the resolved target)
+/// and the full resolved URI — whichever matches counts. Empty =
+/// unrestricted.
+#[derive(Debug, Clone, Default)]
+pub struct DialPolicy {
+    deny: Vec<Regex>,
+    allow: Vec<Regex>,
+}
+
+impl DialPolicy {
+    /// Compile the flag values; invalid regexes fail the startup.
+    pub fn build(deny: Vec<String>, allow: Vec<String>) -> Result<Self> {
+        let compile = |rules: Vec<String>, what: &str| -> Result<Vec<Regex>> {
+            rules
+                .into_iter()
+                .map(|r| {
+                    Regex::new(&r)
+                        .with_context(|| format!("--dial-{what} rule `{r}` is not a valid regex"))
+                })
+                .collect()
+        };
+        Ok(Self {
+            deny: compile(deny, "deny")?,
+            allow: compile(allow, "allow")?,
+        })
+    }
+
+    /// Check a resolved target (`sip:<user>@<host>` or a full URI): `Ok` if
+    /// permitted, `Err` naming the violated rule.
+    pub fn check(&self, resolved: &str) -> std::result::Result<(), String> {
+        let user = resolved
+            .split_once(':')
+            .and_then(|(_, rest)| rest.split_once('@').map(|(u, _)| u.to_string()))
+            .unwrap_or_else(|| resolved.to_string());
+        let user = user.as_str();
+        for rule in &self.deny {
+            if rule.is_match(user) || rule.is_match(resolved) {
+                return Err(format!(
+                    "denied by dial policy (matched deny rule `{}`)",
+                    rule.as_str()
+                ));
+            }
+        }
+        if !self.allow.is_empty()
+            && !self
+                .allow
+                .iter()
+                .any(|r| r.is_match(user) || r.is_match(resolved))
+        {
+            return Err("denied by dial policy (no allow rule matches)".to_string());
+        }
+        Ok(())
+    }
+}
+
 /// All configured agents, addressed by name. Spawn-on-demand; see the module
 /// docs. Cheap to build (`Hub::new` validates nothing, spawns nothing).
 pub struct Hub {
     slots: Vec<Slot>,
+    /// The global dial policy ([dial] in the config) every `dial`/`transfer`
+    /// passes before reaching the worker.
+    dial: DialPolicy,
     /// Loopback host the live-audio WS bridge binds to (ephemeral port).
     bridge_host: IpAddr,
     /// The lazily-started WS bridge (see the `bridge` module); `None` until
@@ -78,10 +142,9 @@ struct Slot {
 }
 
 impl Hub {
-    /// Build the hub from a (already validated) config and the live-audio
-    /// bridge bind host (a CLI flag — the config is agents-only). Spawns
-    /// nothing.
-    pub fn new(config: LoadedConfig, bridge_host: IpAddr) -> Self {
+    /// Build the hub from a (already validated) config and the runtime CLI
+    /// knobs (the config is agents-only). Spawns nothing.
+    pub fn new(config: LoadedConfig, dial: DialPolicy, bridge_host: IpAddr) -> Self {
         let slots = config
             .agents
             .into_iter()
@@ -99,6 +162,7 @@ impl Hub {
             .collect();
         Self {
             slots,
+            dial,
             bridge_host,
             bridge: AsyncMutex::new(None),
         }
@@ -165,6 +229,14 @@ impl Hub {
         );
         *guard = Some(Arc::clone(&agent));
         Ok(agent)
+    }
+
+    /// Resolve `target` for `agent` and check it against the global dial
+    /// policy. Returns the resolved URI on success — the caller dials that.
+    pub fn check_dial(&self, target: &str, domain: &str) -> std::result::Result<String, String> {
+        let resolved = resolve_target(target, domain);
+        self.dial.check(&resolved)?;
+        Ok(resolved)
     }
 
     // ── live-audio bridge ───────────────────────────────────────────────
@@ -531,11 +603,11 @@ impl Agent {
         tx
     }
 
-    /// Dial: resolves a bare number/extension to `sip:<target>@<domain>`,
-    /// re-rendering dynamic header templates first (fresh `${uuid}` per call).
-    pub fn dial(&self, target: &str) {
+    /// Dial the (already policy-checked, resolved) target URI, re-rendering
+    /// dynamic header templates first (fresh `${uuid}` per call).
+    pub fn dial(&self, resolved: &str) {
         self.refresh_dynamic_headers();
-        self.client.dial(&resolve_target(target, &self.domain));
+        self.client.dial(resolved);
     }
 
     /// Re-render the dynamic custom headers for the next outgoing INVITE.
@@ -627,9 +699,10 @@ impl Agent {
         self.client.send_dtmf(digit);
     }
 
-    /// Blind transfer of the current call to `target` (resolved like `dial`).
-    pub fn transfer(&self, target: &str) {
-        self.client.transfer(&resolve_target(target, &self.domain));
+    /// Blind-transfer the current call to the (policy-checked, resolved)
+    /// target URI.
+    pub fn transfer(&self, resolved: &str) {
+        self.client.transfer(resolved);
     }
 
     /// Set the audio the agent transmits: `"silence"`, `"ausine,<freq>"` (a
@@ -739,7 +812,11 @@ mod tests {
 
     #[test]
     fn hub_builds_lazy_and_overview_knows_config_only() {
-        let hub = Hub::new(loaded_config(), std::net::IpAddr::from([127, 0, 0, 1]));
+        let hub = Hub::new(
+            loaded_config(),
+            DialPolicy::default(),
+            std::net::IpAddr::from([127, 0, 0, 1]),
+        );
         let overview = hub.overview();
         assert_eq!(overview.len(), 2);
         assert_eq!(overview[0].name, "alice");
@@ -776,13 +853,58 @@ mod tests {
     }
 
     #[test]
+    fn dial_policy_denies_expensive_targets() {
+        let policy = DialPolicy::build(
+            vec!["^00".into(), "^0900".into()],
+            vec![r"^\d{2,5}$".into()],
+        )
+        .unwrap();
+
+        // Deny wins over allow, matched on the user part of the resolved URI.
+        assert!(policy.check("sip:0044164123@pbx.example.com").is_err());
+        let err = policy.check("sip:0900123@pbx.example.com").unwrap_err();
+        assert!(err.contains("^0900"), "{err}");
+        // Allowlist: an internal extension passes, anything else is denied.
+        assert!(policy.check("sip:1002@pbx.example.com").is_ok());
+        let err = policy.check("sip:1002003@pbx.example.com").unwrap_err();
+        assert!(err.contains("no allow rule"), "{err}");
+        // A full-URI allow rule (domain scoping) matches the resolved form.
+        let domain_only = DialPolicy::build(vec![], vec!["@pbx\\.example\\.com$".into()]).unwrap();
+        assert!(domain_only.check("sip:1002@pbx.example.com").is_ok());
+        assert!(domain_only.check("sip:1002@other.example.net").is_err());
+
+        // Unrestricted by default; invalid regex fails the build.
+        assert!(DialPolicy::default().check("sip:anything@x").is_ok());
+        let err = DialPolicy::build(vec!["[".into()], vec![])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not a valid regex"), "{err}");
+
+        // Hub::check_dial resolves and enforces in one step.
+        let hub = Hub::new(
+            loaded_config(),
+            DialPolicy::build(vec!["^00".into()], vec![]).unwrap(),
+            std::net::IpAddr::from([127, 0, 0, 1]),
+        );
+        assert_eq!(
+            hub.check_dial("1002", "pbx.example.com").unwrap(),
+            "sip:1002@pbx.example.com"
+        );
+        assert!(hub.check_dial("0044164123", "pbx.example.com").is_err());
+    }
+
+    #[test]
     fn hub_carries_custom_header_templates_into_the_slots() {
         let mut cfg = loaded_config();
         cfg.agents[0].custom_headers = vec![
             ("X-Static".into(), "fixed".into()),
             ("X-Session-Tag".into(), "session-${uuid}".into()),
         ];
-        let hub = Hub::new(cfg, std::net::IpAddr::from([127, 0, 0, 1]));
+        let hub = Hub::new(
+            cfg,
+            DialPolicy::default(),
+            std::net::IpAddr::from([127, 0, 0, 1]),
+        );
         let templates = &hub.slots[0].custom_headers;
         assert_eq!(templates.len(), 2);
         assert_eq!(templates[1].1, "session-${uuid}");
@@ -833,7 +955,11 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let hub = Hub::new(loaded_config(), std::net::IpAddr::from([127, 0, 0, 1]));
+        let hub = Hub::new(
+            loaded_config(),
+            DialPolicy::default(),
+            std::net::IpAddr::from([127, 0, 0, 1]),
+        );
         let err = match rt.block_on(hub.get("mallory")) {
             Err(e) => e.to_string(),
             Ok(_) => panic!("unknown agent must fail"),

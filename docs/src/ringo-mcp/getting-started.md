@@ -71,6 +71,23 @@ ringo-mcp --disable headers --disable add_header   # groups and tools mix
 `--disable` subtracts on top of it. Unknown names fail at startup with the
 valid list.
 
+### Restrict what may be dialed
+
+The agent shouldn't be able to dial freely — expensive destinations, premium
+numbers. Two regex flags cover every `dial`/`transfer` target, globally for
+all agents (repeatable flags; each regex is matched against the dialed number
+and the full resolved URI):
+
+```sh
+ringo-mcp --dial-deny '^00' --dial-deny '^0900' --dial-allow '^\d{2,5}$'
+```
+
+`--dial-deny` always wins over `--dial-allow`; an empty allow list means
+unrestricted. A denied call is a tool error naming the matched rule, so the
+LLM can adjust. Invalid regexes fail at startup.
+
+### Other flags
+
 The live-audio bridge bind host is also a flag: `--bridge-host <IP>`
 (default `127.0.0.1`, loopback only; the port is always ephemeral).
 
