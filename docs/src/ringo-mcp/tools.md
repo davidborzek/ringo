@@ -76,13 +76,12 @@ Blocks until the agent's *next* event, or a timeout. `timeout_ms` defaults to
 Event types: `registering`, `register_ok`, `register_failed`,
 `unregistered`, `call_incoming`, `call_outgoing`, `call_ringing`,
 `call_established`, `call_closed` (with `reason` / `error`),
-`call_deflected`, `voicemail_status`, `response`,
-`backend_connect_failed`, plus a curated set of lower-level baresip
-events an agent can act on: `call_hold` / `call_resume` (the **peer**
-held/resumed), `call_transfer` / `call_transfer_failed`, `audio_error`.
-Everything else — SDP negotiation, RTP/RTCP mechanics, lifecycle
-internals — is suppressed as noise (current stats: `agent_status`).
-A timeout returns `{ "timeout": true }`.
+`call_deflected`, `call_hold` / `call_resume` (the **peer** held or
+resumed the call), `call_transfer_failed`, `voicemail_status`,
+`response`, `backend_connect_failed`. Backend-internal events (SDP
+negotiation, RTP/RTCP mechanics, lifecycle internals) never surface —
+current media stats are one `agent_status` away. A timeout returns
+`{ "timeout": true }`.
 
 Subscribing happens at call time — past events are not replayed (poll
 `agent_status` for state). Events can also arrive *between* tool calls; if an

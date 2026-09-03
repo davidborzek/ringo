@@ -70,6 +70,20 @@ pub enum AppEvent {
         display_name: Option<String>,
         target: String,
     },
+    /// The remote party put this call on hold (the call stays up, media
+    /// pauses). Distinct from a local hold: the peer initiated it.
+    CallHold {
+        call_id: String,
+    },
+    /// The remote party resumed a call it had put on hold.
+    CallResume {
+        call_id: String,
+    },
+    /// A transfer this side initiated failed (the original call, if still
+    /// up, is unaffected).
+    CallTransferFailed {
+        call_id: String,
+    },
     VoicemailStatus {
         waiting: bool,
         new_count: u32,

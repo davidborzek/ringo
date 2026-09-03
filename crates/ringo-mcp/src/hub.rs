@@ -249,26 +249,14 @@ pub struct AgentOverview {
     pub state: Option<AgentState>,
 }
 
-/// Whether an unmapped (`Unknown`) baresip event is worth surfacing to an MCP
-/// agent. ringo-core decodes the call-flow-relevant events into named
-/// `AppEvent`s; of the rest, only a curated few carry information an agent can
-/// act on — the others are SDP/transport mechanics (outcomes arrive as their
-/// own events), lifecycle internals or periodic noise (RTCP would fire every
-/// few seconds). Default-deny; numbers must match the vendored baresip
-/// `bevent` enum (see the table in `server::bevent_name`).
+/// Whether an event is worth surfacing to an MCP agent. Everything ringo-core
+/// decodes into a named, backend-neutral `AppEvent` is relevant; `Unknown` (raw,
+/// backend-specific events — SDP negotiation, RTP/RTCP mechanics, lifecycle
+/// internals, periodic reports) never is: their outcomes arrive as named
+/// events, and backend details don't belong in the agent-facing surface.
+/// Debugging the raw stream: `RINGO_AGENT_LOG` / SIP trace.
 fn is_agent_relevant(event: &AppEvent) -> bool {
-    let AppEvent::Unknown { class, type_ } = event else {
-        return true;
-    };
-    class == "bevent"
-        && matches!(
-            type_.as_str(),
-            "17"    // CALL_TRANSFER
-                | "19" // CALL_TRANSFER_FAILED
-                | "27" // AUDIO_ERROR
-                | "30" // CALL_HOLD (peer held us)
-                | "31" // CALL_RESUME (peer resumed)
-        )
+    !matches!(event, AppEvent::Unknown { .. })
 }
 
 /// One connected agent: its worker-process handle plus reduced state and a
@@ -688,33 +676,27 @@ mod tests {
     }
 
     #[test]
-    fn only_curated_unmapped_bevents_reach_the_agent() {
-        let unmapped = |t: &str| AppEvent::Unknown {
+    fn unknown_events_never_reach_the_agent() {
+        // Backend-specific raw events (any class) stay internal.
+        assert!(!is_agent_relevant(&AppEvent::Unknown {
             class: "bevent".into(),
-            type_: t.into(),
-        };
-        // The curated set: peer hold/resume, transfer outcomes, audio errors.
-        for t in ["17", "19", "27", "30", "31"] {
-            assert!(is_agent_relevant(&unmapped(t)), "bevent #{t} should pass");
-        }
-        // Everything else unmapped — SDP/transport mechanics, lifecycle
-        // internals, periodic RTCP — stays internal.
-        for t in [
-            "7", "9", "13", "14", "21", "22", "23", "24", "28", "29", "33", "37",
-        ] {
-            assert!(
-                !is_agent_relevant(&unmapped(t)),
-                "bevent #{t} should be filtered"
-            );
-        }
-        // Named events always pass.
-        assert!(is_agent_relevant(&AppEvent::RegisterOk {
-            account: "a".into()
+            type_: "29".into(),
         }));
-        // Default-deny: unmapped events of any other class stay internal too.
         assert!(!is_agent_relevant(&AppEvent::Unknown {
             class: "other".into(),
             type_: "1".into(),
+        }));
+        // Every named (backend-neutral) event passes.
+        assert!(is_agent_relevant(&AppEvent::RegisterOk {
+            account: "a".into()
+        }));
+        assert!(is_agent_relevant(&AppEvent::CallHold {
+            call_id: "c".into()
+        }));
+        assert!(is_agent_relevant(&AppEvent::CallClosed {
+            call_id: "c".into(),
+            reason: "bye".into(),
+            error: false,
         }));
     }
 

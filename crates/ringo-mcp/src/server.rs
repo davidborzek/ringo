@@ -169,43 +169,6 @@ struct RmHeaderParam {
 
 // Helpers ───────────────────────────────────────────────────────────────────
 
-/// Names for the baresip `bevent` numbers ringo-core passes through as
-/// `AppEvent::Unknown` — everything its backend-neutral mapping doesn't
-/// decode into a named `AppEvent`. Only the ones the hub's `is_agent_relevant`
-/// curates through ever get rendered; the table stays complete so a future
-/// allowlist entry is named immediately. Numbers must match the vendored
-/// baresip `enum bevent_type` (crates/ringo-core/vendor/baresip/include/
-/// baresip.h); the pinned vendor version keeps this a stable, tested table.
-fn bevent_name(type_: &str) -> Option<&'static str> {
-    Some(match type_ {
-        "7" => "CREATE",
-        "8" => "SHUTDOWN",
-        "9" => "EXIT",
-        "13" => "CALL_PROGRESS",
-        "14" => "CALL_ANSWERED",
-        "17" => "CALL_TRANSFER",
-        "18" => "CALL_REDIRECT",
-        "19" => "CALL_TRANSFER_FAILED",
-        "21" => "CALL_DTMF_END",
-        "22" => "CALL_RTPESTAB",
-        "23" => "CALL_RTCP",
-        "24" => "CALL_MENC",
-        "25" => "VU_TX",
-        "26" => "VU_RX",
-        "27" => "AUDIO_ERROR",
-        "28" => "CALL_LOCAL_SDP",
-        "29" => "CALL_REMOTE_SDP",
-        "30" => "CALL_HOLD",
-        "31" => "CALL_RESUME",
-        "32" => "REFER",
-        "33" => "MODULE",
-        "34" => "END_OF_FILE",
-        "35" => "CUSTOM",
-        "37" => "SIPSESS_FAILED",
-        _ => return None,
-    })
-}
-
 fn ok_text(msg: impl Into<String>) -> Result<CallToolResult, McpError> {
     Ok(CallToolResult::success(vec![ContentBlock::text(msg)]))
 }
@@ -267,22 +230,19 @@ pub(crate) fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
             "display_name": display_name,
             "target": target,
         }),
+        CallHold { call_id } => json!({"event": "call_hold", "call_id": call_id}),
+        CallResume { call_id } => json!({"event": "call_resume", "call_id": call_id}),
+        CallTransferFailed { call_id } => {
+            json!({"event": "call_transfer_failed", "call_id": call_id})
+        }
         VoicemailStatus { waiting, new_count } => {
             json!({"event": "voicemail_status", "waiting": waiting, "new_count": new_count})
         }
         Response { ok, data } => json!({"event": "response", "ok": ok, "data": data}),
-        Unknown { class, type_ } => {
-            // Unmapped baresip events only reach here when the hub deemed them
-            // agent-relevant (peer hold/resume, transfer outcomes, audio
-            // errors) — render those with their proper (lowercased) event name
-            // instead of a bare "unknown".
-            if class == "bevent" {
-                if let Some(name) = bevent_name(type_) {
-                    return json!({"event": name.to_lowercase(), "type": type_});
-                }
-            }
-            json!({"event": "unknown", "class": class, "type": type_})
-        }
+        // Never surfaces through wait_event/WS (the hub filters all Unknown),
+        // kept for direct event_json callers — deliberately WITHOUT the raw
+        // backend class/type numbers: backend details don't leak here.
+        Unknown { .. } => json!({"event": "unknown"}),
         BackendConnectFailed { reason } => {
             json!({"event": "backend_connect_failed", "reason": reason})
         }
@@ -623,81 +583,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn curated_bevents_render_with_their_own_name() {
-        let e = ringo_core::event::AppEvent::Unknown {
-            class: "bevent".into(),
-            type_: "30".into(),
-        };
-        let v = event_json(&e);
-        assert_eq!(v["event"], "call_hold");
-        assert_eq!(v["type"], "30");
-        assert!(v.get("type_name").is_none(), "superseded by the event name");
+    fn new_call_flow_events_render_backend_neutral() {
+        let v = event_json(&ringo_core::event::AppEvent::CallHold {
+            call_id: "c1".into(),
+        });
+        assert_eq!(v, json!({"event": "call_hold", "call_id": "c1"}));
+        let v = event_json(&ringo_core::event::AppEvent::CallResume {
+            call_id: "c1".into(),
+        });
+        assert_eq!(v, json!({"event": "call_resume", "call_id": "c1"}));
+        let v = event_json(&ringo_core::event::AppEvent::CallTransferFailed {
+            call_id: "c1".into(),
+        });
+        assert_eq!(v, json!({"event": "call_transfer_failed", "call_id": "c1"}));
     }
 
     #[test]
-    fn non_named_unknowns_keep_the_generic_shape() {
-        let e = ringo_core::event::AppEvent::Unknown {
-            class: "other".into(),
+    fn unknown_renders_without_backend_details() {
+        let v = event_json(&ringo_core::event::AppEvent::Unknown {
+            class: "bevent".into(),
             type_: "29".into(),
-        };
-        let v = event_json(&e);
-        assert_eq!(v["event"], "unknown");
-        assert_eq!(v["class"], "other");
-        let e = ringo_core::event::AppEvent::Unknown {
-            class: "bevent".into(),
-            type_: "999".into(),
-        };
-        assert_eq!(event_json(&e)["event"], "unknown");
-    }
-
-    #[test]
-    fn bevent_table_matches_the_vendored_baresip_enum() {
-        // The full vendored enum (crates/ringo-core/vendor/baresip), in order:
-        // `None` = already mapped to a named AppEvent by ringo-core (never
-        // surfaces as Unknown); `Some(name)` = what bevent_name must return.
-        let expected: &[Option<&str>] = &[
-            None,                         // 0 REGISTERING (mapped)
-            None,                         // 1 REGISTER_OK (mapped)
-            None,                         // 2 REGISTER_FAIL (mapped)
-            None,                         // 3 UNREGISTERING (mapped)
-            None,                         // 4 FALLBACK_OK (mapped as RegisterOk)
-            None,                         // 5 FALLBACK_FAIL (mapped as RegisterFailed)
-            None,                         // 6 MWI_NOTIFY (mapped)
-            Some("CREATE"),               // 7
-            Some("SHUTDOWN"),             // 8
-            Some("EXIT"),                 // 9
-            None,                         // 10 CALL_INCOMING (mapped)
-            None,                         // 11 CALL_OUTGOING (mapped)
-            None,                         // 12 CALL_RINGING (mapped)
-            Some("CALL_PROGRESS"),        // 13
-            Some("CALL_ANSWERED"),        // 14
-            None,                         // 15 CALL_ESTABLISHED (mapped)
-            None,                         // 16 CALL_CLOSED (mapped)
-            Some("CALL_TRANSFER"),        // 17
-            Some("CALL_REDIRECT"),        // 18
-            Some("CALL_TRANSFER_FAILED"), // 19
-            None,                         // 20 CALL_DTMF_START (mapped)
-            Some("CALL_DTMF_END"),        // 21
-            Some("CALL_RTPESTAB"),        // 22
-            Some("CALL_RTCP"),            // 23
-            Some("CALL_MENC"),            // 24
-            Some("VU_TX"),                // 25
-            Some("VU_RX"),                // 26
-            Some("AUDIO_ERROR"),          // 27
-            Some("CALL_LOCAL_SDP"),       // 28
-            Some("CALL_REMOTE_SDP"),      // 29
-            Some("CALL_HOLD"),            // 30
-            Some("CALL_RESUME"),          // 31
-            Some("REFER"),                // 32
-            Some("MODULE"),               // 33
-            Some("END_OF_FILE"),          // 34
-            Some("CUSTOM"),               // 35
-            None,                         // 36 SIPSESS_CONN (mapped → headers)
-            Some("SIPSESS_FAILED"),       // 37
-        ];
-        for (n, want) in expected.iter().enumerate() {
-            let n = (n as i32).to_string();
-            assert_eq!(bevent_name(&n), *want, "bevent #{n} should be {want:?}");
-        }
+        });
+        assert_eq!(v, json!({"event": "unknown"}));
     }
 }

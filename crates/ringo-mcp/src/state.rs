@@ -13,6 +13,8 @@ pub enum CallPhase {
     Ringing,
     /// Audio flowing.
     Established,
+    /// The remote party put the call on hold (call up, media paused).
+    Held,
 }
 
 /// One tracked call.
@@ -93,8 +95,11 @@ pub fn reduce(state: &mut AgentState, event: &AppEvent) {
             state.last_call_reason = Some(reason.clone());
             state.last_call_error = *error;
         }
+        AppEvent::CallHold { call_id } => state.set_phase(call_id, CallPhase::Held),
+        AppEvent::CallResume { call_id } => state.set_phase(call_id, CallPhase::Established),
         // Not state-relevant for the tool surface; surfaced live via wait_event.
         AppEvent::CallDeflected { .. }
+        | AppEvent::CallTransferFailed { .. }
         | AppEvent::VoicemailStatus { .. }
         | AppEvent::Response { .. }
         | AppEvent::Unknown { .. }
@@ -222,6 +227,39 @@ mod tests {
             Some("Connection reset by peer")
         );
         assert!(!s.last_call_error);
+    }
+
+    #[test]
+    fn peer_hold_and_resume_track_the_held_phase() {
+        let mut s = AgentState::default();
+        reduce(
+            &mut s,
+            &AppEvent::CallIncoming {
+                call_id: "c1".into(),
+                number: "1002".into(),
+                display_name: None,
+            },
+        );
+        reduce(
+            &mut s,
+            &AppEvent::CallEstablished {
+                call_id: "c1".into(),
+            },
+        );
+        reduce(
+            &mut s,
+            &AppEvent::CallHold {
+                call_id: "c1".into(),
+            },
+        );
+        assert_eq!(s.calls[0].phase, CallPhase::Held);
+        reduce(
+            &mut s,
+            &AppEvent::CallResume {
+                call_id: "c1".into(),
+            },
+        );
+        assert_eq!(s.calls[0].phase, CallPhase::Established);
     }
 
     #[test]
