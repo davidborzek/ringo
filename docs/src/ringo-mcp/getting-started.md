@@ -54,6 +54,26 @@ them, and a crashed worker is respawned the same way.
 
 See [Configuration](configuration.md) for all fields.
 
+## Trim the tool surface (optional)
+
+Every tool definition costs context in the LLM client — and some setups want
+a locked-down surface. Both flags take **group names**
+(`discovery`, `call-control`, `audio`, `headers`, `events`, `streams`,
+`recording`, `lifecycle`) or individual tool names:
+
+```sh
+ringo-mcp --disable call-control            # observe only, no dialing
+ringo-mcp --enabled-tools discovery,events  # allowlist: just these
+ringo-mcp --disable headers --disable add_header   # groups and tools mix
+```
+
+`--enabled-tools` is an allowlist (everything else is disabled);
+`--disable` subtracts on top of it. Unknown names fail at startup with the
+valid list.
+
+The live-audio bridge bind host is also a flag: `--bridge-host <IP>`
+(default `127.0.0.1`, loopback only; the port is always ephemeral).
+
 ## Wire it into an MCP client
 
 ringo-mcp speaks MCP over stdio. Point your client at the binary:

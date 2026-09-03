@@ -26,6 +26,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "
 toml = "0.9"
 rmcp = { version = "3.2", features = ["transport-io"] }
 uuid = { version = "1", features = ["v4"] }
+clap = { version = "4", features = ["derive"] }
 # The live-audio WebSocket bridge (see `bridge` module): a small server on a
 # loopback listener, plus a client for the integration test.
 tokio-tungstenite = "0.28"

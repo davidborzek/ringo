@@ -21,4 +21,4 @@ pub mod hub;
 mod server;
 mod state;
 
-pub use server::{event_name, serve};
+pub use server::{event_name, resolve_disabled_tools, serve, total_tool_count};

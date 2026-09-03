@@ -1,8 +1,11 @@
 # Configuration
 
 The config is TOML: a list of `[[agent]]` tables plus one optional `[backend]`
-table. The path comes from `--config <path>`, `$RINGO_MCP_CONFIG`, or defaults
-to `~/.config/ringo-mcp/config.toml`.
+table — agents and how they run, nothing else. The path comes from
+`--config <path>`, `$RINGO_MCP_CONFIG`, or defaults to
+`~/.config/ringo-mcp/config.toml`. Runtime knobs are CLI flags instead:
+`--enabled-tools` / `--disable` trim the tool surface, `--bridge-host` sets the
+live-audio bridge bind host (see [Getting started](getting-started.md)).
 
 Everything is validated at server startup — unknown keys, duplicate names,
 empty required fields, bad enum values and unusable password sources fail the
@@ -86,15 +89,6 @@ Applies to every agent. All keys optional; `[[agent]]` fields always win.
 | `sip_cafile` | string | — | Trust this CA bundle for TLS SIP. |
 | `sip_capath` | string | — | Path to a TLS CA directory (`""` disables). |
 | `record_audio` | bool | `false` | Capture full sent+received audio in-process, for the `save_audio` tool. |
-
-## `[bridge]`
-
-The live-audio WebSocket bridge (see [Tool reference](tools.md#live-audio-websocket));
-started lazily by the first `stream_open`.
-
-| Key | Type | Default | Description |
-| --- | ---- | ------- | ----------- |
-| `listen_host` | IP | `127.0.0.1` | Host the WS bridge binds to (port is always ephemeral). Must be a **loopback address** — remote access belongs behind a reverse proxy (TLS + auth), not an open listener. |
 
 ## A full example
 

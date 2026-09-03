@@ -35,6 +35,12 @@ DTMF, transfer, observe call events and media quality.
 Without `--config`, the path comes from `$RINGO_MCP_CONFIG` or defaults to
 `~/.config/ringo-mcp/config.toml`.
 
+Optional flags: `--enabled-tools <LIST>` / `--disable <GROUP|TOOL>` trim the
+tool surface (groups: discovery, call-control, audio, headers, events,
+streams, recording, lifecycle — or individual tool names), `--bridge-host <IP>`
+sets the live-audio bridge bind host (default 127.0.0.1, loopback only);
+`--version` prints the version.
+
 ## Config
 
 ```toml
@@ -76,7 +82,7 @@ the only UA in its process — see the ringo-core `Account` docs).
 | `agent_status` | One agent: registration, calls, media stats, received DTMF (starts the agent if not yet running) |
 | `dial` | Outgoing call (`agent`, `target`: URI, `user@host`, or bare extension) |
 | `accept` / `hangup` / `hangup_all` | Answer / end calls |
-| `hold` / `resume` / `mute` | In-call control |
+| `hold` / `resume` / `mute` | In-call control. `agent_status` reflects local holds (`"held"` phase); peer holds arrive as `call_hold`/`call_resume` events |
 | `send_dtmf` | One digit (`0-9`, `*`, `#`, `A-F`) |
 | `transfer` | Blind transfer of the current call |
 | `play` | What the agent transmits: `"silence"`, `"ausine,425"`, `"aufile,<wav>"` (resets to silence when the last call ends) |
@@ -91,6 +97,17 @@ Call control is fire-and-forget: observe progress with `wait_event`
 (`call_ringing` → `call_established` → `call_closed`) or by polling
 `agent_status`.
 
+### Events
+
+`wait_event` (and the WS bridge's text pushes) speak these event names:
+`registering`, `register_ok`, `register_failed`, `unregistered`,
+`call_incoming`, `call_outgoing`, `call_ringing`, `call_established`,
+`call_closed` (with `reason`/`error`), `call_deflected`, `call_hold` /
+`call_resume` (the **peer** held or resumed), `call_transfer_failed`,
+`voicemail_status`, `response`, `backend_connect_failed`. `wait_event` takes an
+optional `event` filter — a name or an array, e.g.
+`["call_established", "call_closed"]` to await a call's outcome either way.
+
 ## Live audio (WebSocket)
 
 MCP can't stream, so `stream_open` returns a `ws://127.0.0.1:<ephemeral>/s/<token>`
@@ -98,8 +115,8 @@ URL: binary frames are raw mono s16le PCM (both directions; the RX rate is
 announced via an `rx_started` text frame, TX must be sent at the negotiated
 `tx_rate`), text frames are control JSON — `ping`/`pong`, `flush_tx`
 (barge-in: drops queued audio, re-arms the stream) and the agent's call events
-pushed live. One connection per token, 300 s TTL, loopback only (remote goes
-through a reverse proxy). This is the transport for STT/TTS pipelines.
+pushed live. One connection per token, 300 s TTL, loopback only. This is the
+transport for STT/TTS pipelines.
 
 ## Logging
 

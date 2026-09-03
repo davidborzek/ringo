@@ -78,8 +78,10 @@ struct Slot {
 }
 
 impl Hub {
-    /// Build the hub from a (already validated) config. Spawns nothing.
-    pub fn new(config: LoadedConfig) -> Self {
+    /// Build the hub from a (already validated) config and the live-audio
+    /// bridge bind host (a CLI flag — the config is agents-only). Spawns
+    /// nothing.
+    pub fn new(config: LoadedConfig, bridge_host: IpAddr) -> Self {
         let slots = config
             .agents
             .into_iter()
@@ -97,7 +99,7 @@ impl Hub {
             .collect();
         Self {
             slots,
-            bridge_host: config.bridge.listen_host,
+            bridge_host,
             bridge: AsyncMutex::new(None),
         }
     }
@@ -732,13 +734,12 @@ mod tests {
                 },
             ],
             backend: BackendOptions::default(),
-            bridge: Default::default(),
         }
     }
 
     #[test]
     fn hub_builds_lazy_and_overview_knows_config_only() {
-        let hub = Hub::new(loaded_config());
+        let hub = Hub::new(loaded_config(), std::net::IpAddr::from([127, 0, 0, 1]));
         let overview = hub.overview();
         assert_eq!(overview.len(), 2);
         assert_eq!(overview[0].name, "alice");
@@ -781,7 +782,7 @@ mod tests {
             ("X-Static".into(), "fixed".into()),
             ("X-Session-Tag".into(), "session-${uuid}".into()),
         ];
-        let hub = Hub::new(cfg);
+        let hub = Hub::new(cfg, std::net::IpAddr::from([127, 0, 0, 1]));
         let templates = &hub.slots[0].custom_headers;
         assert_eq!(templates.len(), 2);
         assert_eq!(templates[1].1, "session-${uuid}");
@@ -832,7 +833,7 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let hub = Hub::new(loaded_config());
+        let hub = Hub::new(loaded_config(), std::net::IpAddr::from([127, 0, 0, 1]));
         let err = match rt.block_on(hub.get("mallory")) {
             Err(e) => e.to_string(),
             Ok(_) => panic!("unknown agent must fail"),

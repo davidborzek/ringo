@@ -1,52 +1,84 @@
 //! `ringo-mcp` — MCP server binary. See `lib.rs` for the architecture.
 //!
 //! Subcommands:
-//! - *(none)* / `serve` — load the config, spawn the agents, serve MCP on stdio.
+//! - *(none)* — load the config, spawn the agents, serve MCP on stdio.
 //! - `agent` — internal: one worker process, driven by the framed stdio
 //!   protocol (the MCP server spawns *itself* with this argument; not for
 //!   direct use).
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
 use ringo_mcp::{config, hub, serve};
+use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-fn main() -> Result<()> {
-    let mut args = std::env::args().skip(1);
+#[derive(Parser)]
+#[command(
+    name = "ringo-mcp",
+    version,
+    about = "MCP server (stdio) exposing ringo SIP agents",
+    long_about = "An MCP server over stdio that gives LLM agents a telephone: SIP agents \
+                  configured in a TOML file, driven from any MCP client. See the crate README \
+                  for the config format and the full tool reference."
+)]
+struct Cli {
+    /// Config file (default: $RINGO_MCP_CONFIG, or
+    /// ~/.config/ringo-mcp/config.toml)
+    #[arg(long, value_name = "PATH", global = true)]
+    config: Option<PathBuf>,
 
-    // Internal worker process (spawned by ProcessClient as `<exe> agent`).
-    let first = args.next();
-    if first.as_deref() == Some("agent") {
+    /// Comma-separated allowlist of tool groups and/or tool names —
+    /// everything else is disabled
+    #[arg(long, value_name = "LIST", value_delimiter = ',')]
+    enabled_tools: Option<Vec<String>>,
+
+    /// Disable a tool group or a single tool (repeatable; applied on top of
+    /// --enabled-tools). Groups: discovery, call-control, audio, headers,
+    /// events, streams, recording, lifecycle
+    #[arg(long = "disable", value_name = "GROUP|TOOL", value_delimiter = ',')]
+    disable: Vec<String>,
+
+    /// Live-audio WS bridge bind host (loopback only; the port is always
+    /// ephemeral)
+    #[arg(long, value_name = "IP", default_value = "127.0.0.1")]
+    bridge_host: IpAddr,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Internal: run a single agent as a worker process over the framed stdio
+    /// protocol (spawned by the server as `<exe> agent`; not for direct use).
+    #[command(hide = true)]
+    Agent,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // Internal worker process — must run before anything else touches config
+    // or the runtime.
+    if matches!(cli.command, Some(Commands::Agent)) {
         return ringo_agent::worker::run();
     }
-    // If argv[1] was `serve`, the options start at argv[2]; otherwise argv[1]
-    // IS the first option — continue with the same iterator, once per arg.
-    let mut next = if first.as_deref() == Some("serve") {
-        args.next()
-    } else {
-        first
-    };
 
-    let mut config_path = None;
-    while let Some(arg) = next {
-        match arg.as_str() {
-            "--config" => config_path = Some(args.next().context("--config expects a path")?),
-            other if other.starts_with("--config=") => {
-                config_path = Some(other.trim_start_matches("--config=").to_string())
-            }
-            "--help" | "-h" => {
-                print_usage();
-                return Ok(());
-            }
-            other => {
-                print_usage();
-                bail!("unexpected argument `{other}`");
-            }
-        }
-        next = args.next();
+    // Tool surface: validated up front (a typo'd flag must fail loudly).
+    let disabled_tools =
+        ringo_mcp::resolve_disabled_tools(cli.enabled_tools.as_deref(), &cli.disable)?;
+    if !cli.bridge_host.is_loopback() {
+        anyhow::bail!(
+            "--bridge-host `{}` is not a loopback address",
+            cli.bridge_host
+        );
     }
 
-    let path = config_path
-        .map(std::path::PathBuf::from)
+    let path = cli
+        .config
+        .clone()
+        .or_else(|| std::env::var_os("RINGO_MCP_CONFIG").map(PathBuf::from))
         .unwrap_or_else(config::default_path);
     let loaded = config::load(&path)?;
 
@@ -58,9 +90,12 @@ fn main() -> Result<()> {
         .build()
         .context("build tokio runtime")?;
     let n = loaded.agents.len();
-    let hub = Arc::new(hub::Hub::new(loaded));
-    eprintln!("ringo-mcp: {n} agent(s) configured (started on first use)");
-    rt.block_on(async { serve(Arc::clone(&hub)).await })?;
+    let hub = Arc::new(hub::Hub::new(loaded, cli.bridge_host));
+    eprintln!(
+        "ringo-mcp: {n} agent(s) configured (started on first use); {} tool(s) enabled",
+        ringo_mcp::total_tool_count() - disabled_tools.len()
+    );
+    rt.block_on(async { serve(Arc::clone(&hub), disabled_tools).await })?;
 
     // The client is gone: ask the workers to deregister and exit, then give
     // the runtime a bounded window to drain — the per-agent event-poll tasks
@@ -71,14 +106,4 @@ fn main() -> Result<()> {
     hub.shutdown();
     rt.shutdown_timeout(std::time::Duration::from_secs(35));
     Ok(())
-}
-
-fn print_usage() {
-    println!(
-        "ringo-mcp {} — MCP server (stdio) exposing ringo SIP agents\n\n\
-         USAGE:\n  ringo-mcp [serve] [--config <PATH>]\n\n\
-         Config defaults to $RINGO_MCP_CONFIG or ~/.config/ringo-mcp/config.toml.\n\
-         See the crate README for the config format and available tools.",
-        env!("CARGO_PKG_VERSION")
-    );
 }
