@@ -17,7 +17,7 @@ on:
   workflow_call:
     inputs:
       package:
-        description: "Cargo package: ringo-phone or ringo-flow"
+        description: "Cargo package: ringo-phone, ringo-flow or ringo-mcp"
         type: string
         required: true
       ref:
@@ -70,6 +70,10 @@ jobs:
             echo "bin=ringo"   >> "$GITHUB_OUTPUT"
             echo "prefix=ringo" >> "$GITHUB_OUTPUT"
             echo "smoke=docker/smoke-phone.Dockerfile" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.package }}" = "ringo-mcp" ]; then
+            echo "bin=ringo-mcp"   >> "$GITHUB_OUTPUT"
+            echo "prefix=ringo-mcp" >> "$GITHUB_OUTPUT"
+            echo "smoke=docker/smoke-mcp.Dockerfile" >> "$GITHUB_OUTPUT"
           else
             echo "bin=ringo-flow"   >> "$GITHUB_OUTPUT"
             echo "prefix=ringo-flow" >> "$GITHUB_OUTPUT"

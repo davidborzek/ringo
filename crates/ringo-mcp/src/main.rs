@@ -7,7 +7,7 @@
 //!   direct use).
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use ringo_mcp::{config, hub, serve};
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -69,6 +69,12 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
+    // Shell completion: clap_complete invokes us with COMPLETE=<shell> set to
+    // emit the script (e.g. the nix flake's postInstall). Must run before
+    // anything else — without it, a completion invocation would fall through
+    // to serving MCP on stdio and hang the caller.
+    clap_complete::env::CompleteEnv::with_factory(Cli::command).complete();
+
     let cli = Cli::parse();
 
     // Internal worker process — must run before anything else touches config
