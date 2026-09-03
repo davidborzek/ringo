@@ -12,17 +12,20 @@
 //! published on a broadcast channel so any number of concurrent `wait_event`
 //! tool calls can observe them.
 
-use crate::config::{AgentDef, LoadedConfig};
+use crate::bridge::{BridgeState, StreamInfo, StreamMode};
+use crate::config::LoadedConfig;
 use crate::headers::{HeaderContext, HeaderTemplate};
 use crate::state::{AgentState, reduce};
 use anyhow::{Context, Result};
 use ringo_agent::{AgentConfig, ProcessClient};
+use ringo_core::AudioFrame;
 use ringo_core::account::{Account, BackendOptions};
 use ringo_core::event::AppEvent;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{Mutex as AsyncMutex, broadcast};
+use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc};
 
 /// Capacity of the per-agent event broadcast channel. Events that nobody is
 /// waiting for are dropped (the state fold still sees them); `wait_event`
@@ -33,10 +36,32 @@ const EVENT_CHANNEL_CAPACITY: usize = 256;
 /// (same cadence as ringo-flow's trace poll).
 const HEADER_POLL_INTERVAL: Duration = Duration::from_millis(150);
 
+/// Capacity of the per-agent received-audio broadcast (the WS bridge fan-out).
+/// A frame ≈ 20 ms → a lagging consumer is dropped up to ~2.5 s behind and gets
+/// an `rx_lagged` notice instead of stale data.
+const RX_TAP_CAPACITY: usize = 128;
+
+/// Messages for an agent's single TX writer thread (see `Agent::tx_channel`).
+/// One channel serializes both kinds so the worker's same-thread sequencing
+/// rule (StartTxAudio before any audio frame) always holds.
+#[derive(Debug)]
+pub(crate) enum TxMsg {
+    /// (Re-)arm the worker's streamed source at `rate` Hz. Re-arming flushes
+    /// whatever was still queued (barge-in).
+    Start { rate: u32 },
+    /// Mono s16 PCM into the call.
+    Audio(Vec<i16>),
+}
+
 /// All configured agents, addressed by name. Spawn-on-demand; see the module
 /// docs. Cheap to build (`Hub::new` validates nothing, spawns nothing).
 pub struct Hub {
     slots: Vec<Slot>,
+    /// Loopback host the live-audio WS bridge binds to (ephemeral port).
+    bridge_host: IpAddr,
+    /// The lazily-started WS bridge (see the `bridge` module); `None` until
+    /// the first `stream_open`.
+    bridge: AsyncMutex<Option<Arc<BridgeState>>>,
 }
 
 /// One configured agent and its (optional) running instance. The async mutex
@@ -58,7 +83,7 @@ impl Hub {
         let slots = config
             .agents
             .into_iter()
-            .map(|def: AgentDef| {
+            .map(|def: crate::config::AgentDef| {
                 let aor = format!("sip:{}@{}", def.account.username, def.account.domain);
                 Slot {
                     name: def.name,
@@ -70,7 +95,11 @@ impl Hub {
                 }
             })
             .collect();
-        Self { slots }
+        Self {
+            slots,
+            bridge_host: config.bridge.listen_host,
+            bridge: AsyncMutex::new(None),
+        }
     }
 
     /// All configured agents with their current liveness, in config order.
@@ -135,6 +164,75 @@ impl Hub {
         *guard = Some(Arc::clone(&agent));
         Ok(agent)
     }
+
+    // ── live-audio bridge ───────────────────────────────────────────────
+
+    /// Open a live-audio stream for `agent`: mints a one-shot, TTL-bound token
+    /// for the WS bridge, primes the agent's RX tap / TX writer as the mode
+    /// requires, and returns the `ws://` URL plus the stream id.
+    pub async fn stream_open(
+        self: &Arc<Self>,
+        agent: &str,
+        mode: StreamMode,
+        tx_rate: u32,
+    ) -> Result<StreamInfo> {
+        let agent = self.get(agent).await?;
+        // Prime the taps before minting the URL, so the rate is settled by the
+        // time the client connects (rx) and the writer exists before any
+        // inbound audio can race the arming (tx).
+        if mode != StreamMode::Tx {
+            agent.rx_frames().await;
+        }
+        if mode != StreamMode::Rx {
+            agent.tx_channel().await;
+        }
+
+        let bridge = self.ensure_bridge().await?;
+        bridge.mint_grant(agent.name.clone(), mode, tx_rate).await
+    }
+
+    /// Close an open stream by id (the token from `stream_open`).
+    pub async fn stream_close(&self, stream_id: &str) -> Result<()> {
+        let bridge = self
+            .bridge
+            .lock()
+            .await
+            .as_ref()
+            .map(Arc::clone)
+            .context("no stream has ever been opened (bridge not running)")?;
+        bridge.close_stream(stream_id)
+    }
+
+    /// Start the WS bridge listener (once) if it isn't running yet.
+    async fn ensure_bridge(self: &Arc<Self>) -> Result<Arc<BridgeState>> {
+        let mut guard = self.bridge.lock().await;
+        if let Some(b) = guard.as_ref() {
+            return Ok(Arc::clone(b));
+        }
+        let listener = tokio::net::TcpListener::bind((self.bridge_host, 0))
+            .await
+            .with_context(|| format!("bind WS bridge on {}", self.bridge_host))?;
+        let addr: SocketAddr = listener.local_addr()?;
+        let state = Arc::new(BridgeState::new(addr));
+        *guard = Some(Arc::clone(&state));
+
+        // The accept loop must not keep the hub (and its workers) alive after
+        // the server exits — hence the Weak, upgraded per connection.
+        let weak = Arc::downgrade(self);
+        let accept_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            loop {
+                let (stream, _peer) = match listener.accept().await {
+                    Ok(v) => v,
+                    Err(_) => break,
+                };
+                let Some(hub) = weak.upgrade() else { break };
+                crate::bridge::accept(accept_state.clone(), hub, stream);
+            }
+        });
+        eprintln!("ringo-mcp: live-audio bridge listening on ws://{addr}/s/<token>");
+        Ok(state)
+    }
 }
 
 /// One configured agent as seen by `list_agents`: config facts plus, if the
@@ -163,6 +261,13 @@ pub struct Agent {
     client: Arc<ProcessClient>,
     state: Arc<Mutex<AgentState>>,
     events: broadcast::Sender<AppEvent>,
+    /// The agent's single received-audio tap, lazily started by
+    /// [`Agent::rx_frames`] (the worker's tap is single-sink — this Agent owns
+    /// the one subscription and fans out from here).
+    rx_tap: AsyncMutex<Option<broadcast::Sender<AudioFrame>>>,
+    /// The agent's single TX writer channel, lazily created by
+    /// [`Agent::tx_channel`] (same-thread sequencing — see `TxMsg`).
+    tx: AsyncMutex<Option<mpsc::Sender<TxMsg>>>,
     /// Config-declared custom-header templates for outgoing INVITEs: static
     /// ones were applied once at connect, dynamic ones are re-rendered per
     /// [`Agent::dial`] (fresh `${uuid}` each call).
@@ -257,6 +362,8 @@ impl Agent {
             client,
             state,
             events: events_tx,
+            rx_tap: AsyncMutex::new(None),
+            tx: AsyncMutex::new(None),
             custom_headers,
         })
     }
@@ -293,6 +400,63 @@ impl Agent {
         .await
         .ok()
         .flatten()
+    }
+
+    /// Subscribe to this agent's live event feed (the WS bridge's push
+    /// channel; same stream `wait_event` consumes).
+    pub fn subscribe_events(&self) -> broadcast::Receiver<AppEvent> {
+        self.events.subscribe()
+    }
+
+    /// Subscribe to the agent's received audio (mono s16 [`AudioFrame`]s).
+    /// Starts the worker's RX stream lazily, exactly once per agent — the
+    /// worker's tap is single-sink, so this Agent owns the one tap and fans
+    /// out to any number of subscribers from here.
+    pub async fn rx_frames(&self) -> broadcast::Receiver<AudioFrame> {
+        let mut guard = self.rx_tap.lock().await;
+        if let Some(tap) = guard.as_ref() {
+            return tap.subscribe();
+        }
+        let (tap, _) = broadcast::channel(RX_TAP_CAPACITY);
+        let rx = self.client.start_rx_audio();
+        let forwarder = tap.clone();
+        tokio::task::spawn_blocking(move || {
+            // No subscriber ≠ stop: the worker has no StopRxAudio, and a new
+            // subscriber may arrive any time. Frames are dropped by the
+            // broadcast itself when nobody listens.
+            while let Ok(frame) = rx.recv() {
+                let _ = forwarder.send(frame);
+            }
+            // Worker gone: drop the tap so subscribers see the channel close.
+            drop(forwarder);
+        });
+        *guard = Some(tap.clone());
+        tap.subscribe()
+    }
+
+    /// The agent's TX channel: a single writer thread serializes `Start`/`Audio`
+    /// onto the worker's stdin (the worker requires StartTxAudio before any
+    /// audio frame, and the stdin lock is not FIFO across threads — one
+    /// thread does both, in order). Created lazily, once per agent.
+    pub(crate) async fn tx_channel(&self) -> mpsc::Sender<TxMsg> {
+        let mut guard = self.tx.lock().await;
+        if let Some(tx) = guard.as_ref() {
+            return tx.clone();
+        }
+        let (tx, mut rx) = mpsc::channel::<TxMsg>(256);
+        let client = Arc::clone(&self.client);
+        tokio::task::spawn_blocking(move || {
+            while let Some(msg) = rx.blocking_recv() {
+                match msg {
+                    TxMsg::Start { rate } => client.start_tx_audio(rate),
+                    TxMsg::Audio(samples) => client.push_tx_audio(&samples),
+                }
+            }
+            // All senders dropped (agent gone): the thread ends, releasing its
+            // ProcessClient reference so the worker can be reaped.
+        });
+        *guard = Some(tx.clone());
+        tx
     }
 
     /// Dial: resolves a bare number/extension to `sip:<target>@<domain>`,
@@ -478,6 +642,7 @@ mod tests {
                 },
             ],
             backend: BackendOptions::default(),
+            bridge: Default::default(),
         }
     }
 

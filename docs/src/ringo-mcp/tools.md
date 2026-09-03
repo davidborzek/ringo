@@ -121,6 +121,62 @@ Custom headers on the agent's **outgoing** INVITEs, at runtime.
 - Runtime headers persist until the worker restarts (config-declared headers
   are re-applied on respawn).
 
+## Live audio (WebSocket)
+
+MCP can't stream, so raw audio gets its own channel: a small WebSocket
+server (loopback only) next to the stdio control plane.
+
+### `stream_open`
+
+```jsonc
+{ "agent": "alice", "mode": "duplex", "tx_rate": 16000 }
+```
+
+Mints a one-shot token (valid 300 s) and returns the URL:
+
+```jsonc
+{ "url": "ws://127.0.0.1:53712/s/<token>", "stream_id": "<token>",
+  "mode": "duplex", "tx_rate": 16000, "token_ttl_s": 300,
+  "protocol": { … } }
+```
+
+`mode` is `"rx"` (call audio → you, e.g. for STT), `"tx"` (you → call, e.g.
+TTS) or `"duplex"`. `tx_rate` is the rate you must send at (default 16000);
+the RX rate arrives before the first audio frame.
+
+### The wire protocol
+
+- **Binary frames** = raw mono s16le PCM. Server→client: the agent's received
+  audio. Client→server: audio into the call.
+- **Text frames** = control JSON, tagged with `"type"`:
+
+| Direction | Type | Meaning |
+| --------- | ---- | ------- |
+| ← server | `rx_started` | Announces the RX rate (before the first binary frame). |
+| ← server | `rx_lagged` | You fell behind; `dropped` frames were skipped. |
+| ← server | `tx_flushed` | A `flush_tx` completed (queue dropped, stream re-armed). |
+| ← server | `pong` | Reply to `ping`. |
+| ← server | `error` | Protocol/lifecycle error message. |
+| ← server | `call_incoming`, `call_established`, `call_closed`, … | The agent's events, pushed live (same fields as `wait_event`). |
+| → server | `ping` | Keepalive. |
+| → server | `flush_tx` | Barge-in: drop queued TX audio and re-arm the stream. |
+
+This is the transport for STT/TTS pipelines and live listening — ringo-mcp
+moves dumb PCM, the speech processing stays with the consumer:
+
+```
+stream_open(rx) → STT daemon reads PCM from the socket → transcript
+stream_open(tx) → TTS output written into the socket → played into the call
+```
+
+### `stream_close`
+
+```jsonc
+{ "stream_id": "<token from stream_open>" }
+```
+
+Kills the connection (and frees the stream slot).
+
 ## Recording
 
 ### `save_audio`

@@ -83,11 +83,22 @@ the only UA in its process — see the ringo-core `Account` docs).
 | `wait_event` | Block for the agent's next event (JSON), up to 120 s |
 | `call_headers` | SIP headers of received INVITEs, per Call-ID or all (newest first) |
 | `add_header` / `rm_header` | Custom headers on outgoing INVITEs (runtime; `${uuid}` renders once, immediately) |
+| `stream_open` / `stream_close` | Live audio over WebSocket: `ws://` URL carrying raw mono PCM + pushed events (see below) |
 | `save_audio` | Write the current call's audio to WAVs (needs `record_audio`) |
 
 Call control is fire-and-forget: observe progress with `wait_event`
 (`call_ringing` → `call_established` → `call_closed`) or by polling
 `agent_status`.
+
+## Live audio (WebSocket)
+
+MCP can't stream, so `stream_open` returns a `ws://127.0.0.1:<ephemeral>/s/<token>`
+URL: binary frames are raw mono s16le PCM (both directions; the RX rate is
+announced via an `rx_started` text frame, TX must be sent at the negotiated
+`tx_rate`), text frames are control JSON — `ping`/`pong`, `flush_tx`
+(barge-in: drops queued audio, re-arms the stream) and the agent's call events
+pushed live. One connection per token, 300 s TTL, loopback only (remote goes
+through a reverse proxy). This is the transport for STT/TTS pipelines.
 
 ## Logging
 

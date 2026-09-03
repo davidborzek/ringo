@@ -26,6 +26,7 @@ use ringo_core::account::{Account, BackendOptions};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::fmt;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command as OsCommand;
 
@@ -130,6 +131,31 @@ pub struct BackendEntry {
     pub record_audio: Option<bool>,
 }
 
+/// The optional `[bridge]` table: the live-audio WebSocket bridge (see the
+/// `bridge` module). Only the bind host is configurable — the port is always
+/// ephemeral, and remote access belongs behind a reverse proxy, not an open
+/// listener.
+#[derive(Debug, Default, Deserialize)]
+pub struct BridgeEntry {
+    /// Host the WS bridge listens on. Default `127.0.0.1`.
+    listen_host: Option<String>,
+}
+
+/// Validated bridge config.
+#[derive(Debug, Clone, Copy)]
+pub struct BridgeConfig {
+    /// Loopback address the WS bridge binds to.
+    pub listen_host: IpAddr,
+}
+
+impl Default for BridgeConfig {
+    fn default() -> Self {
+        Self {
+            listen_host: IpAddr::from([127, 0, 0, 1]),
+        }
+    }
+}
+
 /// The parsed config file, ready to spawn agents from.
 #[derive(Debug)]
 pub struct LoadedConfig {
@@ -137,6 +163,8 @@ pub struct LoadedConfig {
     pub agents: Vec<AgentDef>,
     /// Backend options with ringo-mcp defaults applied.
     pub backend: BackendOptions,
+    /// The live-audio bridge config.
+    pub bridge: BridgeConfig,
 }
 
 /// Top-level document of the TOML config file.
@@ -146,6 +174,8 @@ struct ConfigDoc {
     agent: Vec<AgentEntry>,
     #[serde(default)]
     backend: BackendEntry,
+    #[serde(default)]
+    bridge: BridgeEntry,
 }
 
 /// Default config path: `$RINGO_MCP_CONFIG`, else `~/.config/ringo-mcp/config.toml`.
@@ -213,7 +243,12 @@ pub fn load(path: &Path) -> Result<LoadedConfig> {
     }
 
     let backend = build_backend(doc.backend);
-    Ok(LoadedConfig { agents, backend })
+    let bridge = build_bridge(doc.bridge, path)?;
+    Ok(LoadedConfig {
+        agents,
+        backend,
+        bridge,
+    })
 }
 
 /// Convert one `[[agent]]` table into a ringo-core [`Account`], resolving the
@@ -307,6 +342,29 @@ fn build_backend(entry: BackendEntry) -> BackendOptions {
         record_audio: entry.record_audio.unwrap_or(false),
         ..Default::default()
     }
+}
+
+/// Validate the `[bridge]` table: the listen host must be a loopback address.
+/// Remote access goes through a reverse proxy in front of ringo-mcp (TLS +
+/// auth), never through an open listener of ours.
+fn build_bridge(entry: BridgeEntry, path: &Path) -> Result<BridgeConfig> {
+    let Some(host) = entry.listen_host else {
+        return Ok(BridgeConfig::default());
+    };
+    let ip: IpAddr = host.parse().with_context(|| {
+        format!(
+            "config `{}`: [bridge] listen_host must be an IP address, got `{host}`",
+            path.display()
+        )
+    })?;
+    if !ip.is_loopback() {
+        bail!(
+            "config `{}`: [bridge] listen_host `{host}` is not a loopback address \
+             (v1 is localhost-only; put a reverse proxy in front for remote access)",
+            path.display()
+        );
+    }
+    Ok(BridgeConfig { listen_host: ip })
 }
 
 /// Accept custom headers both as an array of `[[key, value]]` pairs (the
@@ -457,6 +515,44 @@ password_file = "{}"
         );
         let cfg = load(&p).unwrap();
         assert_eq!(cfg.agents[0].account.password, "hunter2");
+    }
+
+    #[test]
+    fn bridge_listen_host_must_be_loopback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mk = |host: &str| {
+            let p = tmp.path().join("b.toml");
+            std::fs::write(
+                &p,
+                format!(
+                    "[[agent]]\nname = \"a\"\nusername = \"1\"\ndomain = \"x\"\npassword = \"pw\"\n\n[bridge]\nlisten_host = \"{host}\"\n"
+                ),
+            )
+            .unwrap();
+            p
+        };
+
+        let cfg = load(&mk("127.0.0.1")).unwrap();
+        assert_eq!(cfg.bridge.listen_host.to_string(), "127.0.0.1");
+        let cfg = load(&mk("::1")).unwrap();
+        assert_eq!(cfg.bridge.listen_host.to_string(), "::1");
+
+        let err = load(&mk("0.0.0.0")).unwrap_err().to_string();
+        assert!(err.contains("loopback"), "{err}");
+        let err = load(&mk("192.168.1.5")).unwrap_err().to_string();
+        assert!(err.contains("reverse proxy"), "{err}");
+
+        // No [bridge] table → default loopback.
+        let p = tmp.path().join("none.toml");
+        std::fs::write(
+            &p,
+            "[[agent]]\nname = \"a\"\nusername = \"1\"\ndomain = \"x\"\npassword = \"pw\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            load(&p).unwrap().bridge.listen_host.to_string(),
+            "127.0.0.1"
+        );
     }
 
     #[test]

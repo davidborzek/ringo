@@ -14,6 +14,7 @@
 
 #![warn(missing_docs)]
 
+mod bridge;
 pub mod config;
 mod headers;
 pub mod hub;

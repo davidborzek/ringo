@@ -28,6 +28,10 @@ you: "Call the support line, wait for the IVR menu and press 2"
 - **Event-driven, not guesswork** — call control is fire-and-forget; outcomes
   arrive as events (`call_incoming`, `call_established`, `call_closed`) via the
   blocking `wait_event` tool, or by polling `agent_status`.
+- **Live audio over WebSocket** — `stream_open` returns a `ws://` URL that
+  carries raw mono PCM (both directions) plus pushed call events: the
+  transport for STT/TTS pipelines and live listening. Speech processing stays
+  with the consumer — ringo-mcp just moves dumb PCM.
 - **Header round-trip** — declare custom headers with per-call templates
   (`${uuid}`), add them at runtime, and read the headers of received INVITEs
   back out.

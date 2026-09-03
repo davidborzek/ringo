@@ -87,6 +87,15 @@ Applies to every agent. All keys optional; `[[agent]]` fields always win.
 | `sip_capath` | string | — | Path to a TLS CA directory (`""` disables). |
 | `record_audio` | bool | `false` | Capture full sent+received audio in-process, for the `save_audio` tool. |
 
+## `[bridge]`
+
+The live-audio WebSocket bridge (see [Tool reference](tools.md#live-audio-websocket));
+started lazily by the first `stream_open`.
+
+| Key | Type | Default | Description |
+| --- | ---- | ------- | ----------- |
+| `listen_host` | IP | `127.0.0.1` | Host the WS bridge binds to (port is always ephemeral). Must be a **loopback address** — remote access belongs behind a reverse proxy (TLS + auth), not an open listener. |
+
 ## A full example
 
 ```toml

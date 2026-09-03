@@ -120,6 +120,24 @@ struct SaveAudioParam {
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
+struct StreamOpenParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// What the stream carries: `"rx"` (agent → you), `"tx"` (you → agent)
+    /// or `"duplex"`.
+    mode: String,
+    /// Sample rate you will SEND audio at, in Hz (rx/duplex). Default 16000.
+    #[serde(default)]
+    tx_rate: Option<u32>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct StreamCloseParam {
+    /// Stream id from `stream_open`.
+    stream_id: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
 struct CallHeadersParam {
     /// Agent name from the config file.
     agent: String,
@@ -166,7 +184,9 @@ fn invalid(msg: impl Into<String>) -> McpError {
 }
 
 /// Compact JSON for one event, for `wait_event`.
-fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
+/// Compact JSON for one event, for `wait_event` (and, with the `event` key
+/// renamed to `type`, the WS bridge's text-frame pushes).
+pub(crate) fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
     use ringo_core::event::AppEvent::*;
     match e {
         Registering { account } => json!({"event": "registering", "account": account}),
@@ -417,6 +437,57 @@ impl TelephonyServer {
             ));
         }
         ok_json(json!({ "files": paths }))
+    }
+
+    #[tool(
+        description = "Open a live-audio WebSocket stream for an agent and return its URL — MCP can't stream, so raw PCM travels on the socket: binary frames are mono s16le PCM (received audio from the call, rate announced via an `rx_started` text frame; audio you send back at the given tx_rate), text frames are control JSON (`ping`/`pong`, `flush_tx` for barge-in, and the agent's call events pushed live). One connection per URL/token, token valid 300 s. This is the transport for STT/TTS pipelines and live listening."
+    )]
+    async fn stream_open(
+        &self,
+        Parameters(StreamOpenParam {
+            agent,
+            mode,
+            tx_rate,
+        }): Parameters<StreamOpenParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let mode = crate::bridge::StreamMode::parse(&mode).map_err(invalid)?;
+        let tx_rate = tx_rate.unwrap_or(16000);
+        if !(8000..=48000).contains(&tx_rate) {
+            return Err(invalid(format!(
+                "tx_rate must be within 8000..48000 Hz, got {tx_rate}"
+            )));
+        }
+        let info = self
+            .hub
+            .stream_open(&agent, mode, tx_rate)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        ok_json(json!({
+            "url": info.url,
+            "stream_id": info.stream_id,
+            "mode": info.mode,
+            "tx_rate": info.tx_rate,
+            "token_ttl_s": info.token_ttl_s,
+            "protocol": {
+                "binary": "raw mono s16le PCM",
+                "text": ["rx_started", "rx_lagged", "tx_flushed", "pong", "error", "<call events>"],
+                "client_to_server": ["ping", "flush_tx"],
+            },
+        }))
+    }
+
+    #[tool(
+        description = "Close a live-audio stream opened with `stream_open` (takes its stream_id)."
+    )]
+    async fn stream_close(
+        &self,
+        Parameters(StreamCloseParam { stream_id }): Parameters<StreamCloseParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.hub
+            .stream_close(&stream_id)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        ok_text(format!("closed stream `{stream_id}`"))
     }
 
     #[tool(
