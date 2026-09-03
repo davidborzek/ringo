@@ -1,0 +1,31 @@
+[package]
+name = "ringo-mcp"
+description = "MCP server over stdio exposing ringo SIP agents for LLM-driven telephony"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "ringo_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ringo-mcp"
+path = "src/main.rs"
+
+[dependencies]
+ringo-core.workspace = true
+ringo-agent.workspace = true
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+toml = "0.9"
+rmcp = { version = "3.2", features = ["transport-io"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

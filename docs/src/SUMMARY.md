@@ -85,3 +85,11 @@
       - [Mock request](ringo-flow/api/mock-request.md)
     - [Environment](ringo-flow/api/environment.md)
     - [Utilities](ringo-flow/api/utilities.md)
+
+# ringo-mcp
+
+- [Introduction](ringo-mcp/introduction.md)
+- [Getting started](ringo-mcp/getting-started.md)
+- [Configuration](ringo-mcp/configuration.md)
+- [Tool reference](ringo-mcp/tools.md)
+- [Examples](ringo-mcp/examples.md)

@@ -1,0 +1,563 @@
+//! The agent hub: the configured agents and their (lazily spawned) worker
+//! processes.
+//!
+//! Agents are **not** started when the MCP server starts — a client that never
+//! places a call shouldn't hold SIP registrations. Instead each agent's worker
+//! process (one baresip UA, own SIP port and registration) is spawned on the
+//! first tool call that touches it, with per-agent single-flight so concurrent
+//! calls don't double-spawn. A worker that died (crash/exit) is respawned on
+//! the next tool call the same way.
+//!
+//! Events from each worker are folded into a per-agent [`AgentState`] and
+//! published on a broadcast channel so any number of concurrent `wait_event`
+//! tool calls can observe them.
+
+use crate::config::{AgentDef, LoadedConfig};
+use crate::headers::{HeaderContext, HeaderTemplate};
+use crate::state::{AgentState, reduce};
+use anyhow::{Context, Result};
+use ringo_agent::{AgentConfig, ProcessClient};
+use ringo_core::account::{Account, BackendOptions};
+use ringo_core::event::AppEvent;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
+
+/// Capacity of the per-agent event broadcast channel. Events that nobody is
+/// waiting for are dropped (the state fold still sees them); `wait_event`
+/// callers that fall behind get a lag notification, not stale data.
+const EVENT_CHANNEL_CAPACITY: usize = 256;
+
+/// How often the bridge polls the worker for newly seen inbound INVITE headers
+/// (same cadence as ringo-flow's trace poll).
+const HEADER_POLL_INTERVAL: Duration = Duration::from_millis(150);
+
+/// All configured agents, addressed by name. Spawn-on-demand; see the module
+/// docs. Cheap to build (`Hub::new` validates nothing, spawns nothing).
+pub struct Hub {
+    slots: Vec<Slot>,
+}
+
+/// One configured agent and its (optional) running instance. The async mutex
+/// is the single-flight spawn lock for this agent: the first tool call holds
+/// it while spawning; concurrent calls for the same agent wait and then see
+/// the already-running instance.
+struct Slot {
+    name: String,
+    aor: String,
+    account: Account,
+    options: BackendOptions,
+    custom_headers: Vec<(String, String)>,
+    agent: AsyncMutex<Option<Arc<Agent>>>,
+}
+
+impl Hub {
+    /// Build the hub from a (already validated) config. Spawns nothing.
+    pub fn new(config: LoadedConfig) -> Self {
+        let slots = config
+            .agents
+            .into_iter()
+            .map(|def: AgentDef| {
+                let aor = format!("sip:{}@{}", def.account.username, def.account.domain);
+                Slot {
+                    name: def.name,
+                    aor,
+                    options: config.backend.clone(),
+                    custom_headers: def.custom_headers,
+                    agent: AsyncMutex::new(None),
+                    account: def.account,
+                }
+            })
+            .collect();
+        Self { slots }
+    }
+
+    /// All configured agents with their current liveness, in config order.
+    /// Does NOT spawn anything — a pure view over config + running state.
+    pub fn overview(&self) -> Vec<AgentOverview> {
+        self.slots
+            .iter()
+            .map(|s| {
+                let (running, state) = match s.agent.try_lock() {
+                    // Holding the lock = a spawn is in flight: running as far
+                    // as callers are concerned (it will be there momentarily).
+                    Err(_) => (true, None),
+                    Ok(guard) => match guard.as_ref() {
+                        Some(a) => (true, Some(a.state())),
+                        None => (false, None),
+                    },
+                };
+                AgentOverview {
+                    name: s.name.clone(),
+                    aor: s.aor.clone(),
+                    running,
+                    state,
+                }
+            })
+            .collect()
+    }
+
+    /// Get the agent `name`, spawning its worker process if it isn't running
+    /// (first use, or the previous worker died). Concurrent callers for the
+    /// same agent share one spawn (single-flight); different agents spawn
+    /// independently and in parallel.
+    pub async fn get(&self, name: &str) -> Result<Arc<Agent>> {
+        let slot = self
+            .slots
+            .iter()
+            .find(|s| s.name == name)
+            .with_context(|| {
+                let known: Vec<&str> = self.slots.iter().map(|s| s.name.as_str()).collect();
+                format!("unknown agent `{name}`; known agents: {}", known.join(", "))
+            })?;
+
+        // The per-slot lock IS the single-flight: the first caller through
+        // spawns while holding it; everyone else parks here and then finds the
+        // instance already in place.
+        let mut guard = slot.agent.lock().await;
+        if let Some(agent) = guard.as_ref() {
+            if !agent.is_dead() {
+                return Ok(Arc::clone(agent));
+            }
+            eprintln!("ringo-mcp: agent `{name}` worker is gone; respawning");
+        }
+        let agent = Arc::new(
+            Agent::connect(
+                &slot.name,
+                slot.account.clone(),
+                slot.options.clone(),
+                &slot.custom_headers,
+            )
+            .await
+            .with_context(|| format!("start agent `{}`", slot.name))?,
+        );
+        *guard = Some(Arc::clone(&agent));
+        Ok(agent)
+    }
+}
+
+/// One configured agent as seen by `list_agents`: config facts plus, if the
+/// worker is running, its reduced state.
+pub struct AgentOverview {
+    /// Config label (tool-facing name).
+    pub name: String,
+    /// `sip:username@domain` of the configured AOR.
+    pub aor: String,
+    /// `false` = configured but never used since server start (or dead and not
+    /// yet respawned).
+    pub running: bool,
+    /// Reduced state, `None` unless the worker is running.
+    pub state: Option<AgentState>,
+}
+
+/// One connected agent: its worker-process handle plus reduced state and a
+/// live event feed.
+pub struct Agent {
+    /// Config label (tool-facing name).
+    pub name: String,
+    /// `sip:username@domain` of the registered AOR.
+    pub aor: String,
+    /// The agent's SIP domain, used to resolve bare dial targets.
+    pub domain: String,
+    client: Arc<ProcessClient>,
+    state: Arc<Mutex<AgentState>>,
+    events: broadcast::Sender<AppEvent>,
+    /// Config-declared custom-header templates for outgoing INVITEs: static
+    /// ones were applied once at connect, dynamic ones are re-rendered per
+    /// [`Agent::dial`] (fresh `${uuid}` each call).
+    custom_headers: Vec<(String, HeaderTemplate)>,
+}
+
+impl Agent {
+    /// Spawn the worker process and connect its event stream (mirrors
+    /// ringo-flow's `AgentSession::connect`). Blocks until the worker's
+    /// readiness handshake (sub-second; bounded by the client's ready timeout).
+    /// Static (non-template) custom headers are applied to the worker here.
+    async fn connect(
+        name: &str,
+        account: Account,
+        options: BackendOptions,
+        custom_headers: &[(String, String)],
+    ) -> Result<Self> {
+        let custom_headers: Vec<(String, HeaderTemplate)> = custom_headers
+            .iter()
+            .map(|(k, v)| (k.clone(), HeaderTemplate::new(v)))
+            .collect();
+        let aor = format!("sip:{}@{}", account.username, account.domain);
+        let domain = account.domain.clone();
+        let config = AgentConfig {
+            name: name.to_string(),
+            account,
+            options,
+        };
+        let label = name.to_string();
+        let (client, events) = tokio::task::spawn_blocking(move || ProcessClient::spawn(config))
+            .await
+            .context("agent spawn task panicked")?
+            .with_context(|| format!("spawn worker for `{label}`"))?;
+        let client = Arc::new(client);
+
+        let (events_tx, _) = broadcast::channel::<AppEvent>(EVENT_CHANNEL_CAPACITY);
+        let state = Arc::new(Mutex::new(AgentState::default()));
+
+        // Bridge the worker's blocking std channel into the async world: reduce
+        // into the shared state, fan out to any wait_event subscribers, poll for
+        // inbound INVITE headers between events, and reset a stale `play` spec
+        // when the agent's last call ends.
+        let bridge_state = Arc::clone(&state);
+        let bridge_tx = events_tx.clone();
+        let bridge_client = Arc::clone(&client);
+        let headers = client.headers_handle();
+        tokio::task::spawn_blocking(move || {
+            loop {
+                match events.recv_timeout(HEADER_POLL_INTERVAL) {
+                    Ok(event) => {
+                        let _ = bridge_tx.send(event.clone());
+                        let mut g = bridge_state.lock().unwrap_or_else(|e| e.into_inner());
+                        reduce(&mut g, &event);
+                        // `play` is call-scoped for MCP agents: when the agent's LAST
+                        // call ended, stop transmitting the stale spec so the next
+                        // call doesn't replay it (the underlying ausrc is per-UA and
+                        // would otherwise persist, as ringo-flow scenarios want).
+                        if closes_last_call(&event, &g) {
+                            bridge_client.set_audio_source("silence");
+                        }
+                    }
+                    // Poll window: pick up INVITE headers the worker collected.
+                    Err(RecvTimeoutError::Timeout) => {
+                        let invites = headers.lock().unwrap_or_else(|e| e.into_inner()).take();
+                        if let Some(invites) = invites {
+                            let mut g = bridge_state.lock().unwrap_or_else(|e| e.into_inner());
+                            g.merge_invites(invites);
+                        }
+                    }
+                    // Worker event stream closed: the worker exited (or crashed).
+                    Err(RecvTimeoutError::Disconnected) => {
+                        let mut g = bridge_state.lock().unwrap_or_else(|e| e.into_inner());
+                        g.worker_dead = true;
+                        return;
+                    }
+                }
+            }
+        });
+
+        eprintln!("ringo-mcp: agent `{name}` ready ({aor})");
+        // Static headers once at startup; dynamic templates (e.g. `${uuid}`)
+        // are re-added per call by `dial` so each call gets a fresh value.
+        for (key, tpl) in &custom_headers {
+            if !tpl.is_dynamic() {
+                client.add_header(key, tpl.raw());
+            }
+        }
+        Ok(Self {
+            name: name.to_string(),
+            aor,
+            domain,
+            client,
+            state,
+            events: events_tx,
+            custom_headers,
+        })
+    }
+
+    /// Whether the worker's event stream closed (worker exit/crash). A dead
+    /// agent stays dead until the hub respawns it on the next tool call.
+    pub fn is_dead(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .worker_dead
+    }
+
+    /// A snapshot of the reduced state (registration, calls, last close).
+    pub fn state(&self) -> AgentState {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Wait for the agent's next event, or `None` on timeout. Subscribes at
+    /// call time — events that happened before are not replayed (poll
+    /// `agent_status` for state instead).
+    pub async fn wait_event(&self, timeout: Duration) -> Option<AppEvent> {
+        let mut rx = self.events.subscribe();
+        tokio::time::timeout(timeout, async {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => return Some(event),
+                    // Fell behind the ring: skip the notice, next event follows.
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                }
+            }
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    /// Dial: resolves a bare number/extension to `sip:<target>@<domain>`,
+    /// re-rendering dynamic header templates first (fresh `${uuid}` per call).
+    pub fn dial(&self, target: &str) {
+        self.refresh_dynamic_headers();
+        self.client.dial(&resolve_target(target, &self.domain));
+    }
+
+    /// Re-render the dynamic custom headers for the next outgoing INVITE.
+    /// `uarmheader` removes *all* headers of a name, so for any key with a
+    /// dynamic template we remove and re-add *every* header of that key —
+    /// including static ones declared for the same key (same approach as
+    /// ringo-phone, so duplicate History-Info-style entries survive).
+    fn refresh_dynamic_headers(&self) {
+        let dynamic_keys: std::collections::HashSet<&str> = self
+            .custom_headers
+            .iter()
+            .filter(|(_, tpl)| tpl.is_dynamic())
+            .map(|(key, _)| key.as_str())
+            .collect();
+        if dynamic_keys.is_empty() {
+            return;
+        }
+        let ctx = HeaderContext::for_call();
+        for key in &dynamic_keys {
+            self.client.rm_header(key);
+        }
+        for (key, tpl) in &self.custom_headers {
+            if dynamic_keys.contains(key.as_str()) {
+                self.client.add_header(key, &tpl.render(&ctx));
+            }
+        }
+    }
+
+    /// Add (or overwrite) a custom header on the agent's outgoing INVITEs.
+    /// The value is a template rendered once, now — e.g. `"session-${uuid}"` gets
+    /// a fresh uuid at this call, not per future call.
+    pub fn add_header(&self, name: &str, value: &str) {
+        let rendered = HeaderTemplate::new(value).render(&HeaderContext::for_call());
+        self.client.add_header(name, &rendered);
+    }
+
+    /// Remove ALL headers with this name from the agent's outgoing INVITEs.
+    pub fn rm_header(&self, name: &str) {
+        self.client.rm_header(name);
+    }
+
+    /// Accept the currently ringing (incoming) call.
+    pub fn accept(&self) {
+        self.client.accept();
+    }
+
+    /// Hang up the current call.
+    pub fn hangup(&self) {
+        self.client.hangup();
+    }
+
+    /// Hang up all calls.
+    pub fn hangup_all(&self) {
+        self.client.hangup_all();
+    }
+
+    /// Put the current call on hold.
+    pub fn hold(&self) {
+        self.client.hold();
+    }
+
+    /// Resume the held call.
+    pub fn resume(&self) {
+        self.client.resume();
+    }
+
+    /// Mute the outgoing audio (remote party hears silence).
+    pub fn mute(&self) {
+        self.client.mute();
+    }
+
+    /// Send one DTMF digit on the current call.
+    pub fn send_dtmf(&self, digit: char) {
+        self.client.send_dtmf(digit);
+    }
+
+    /// Blind transfer of the current call to `target` (resolved like `dial`).
+    pub fn transfer(&self, target: &str) {
+        self.client.transfer(&resolve_target(target, &self.domain));
+    }
+
+    /// Set the audio the agent transmits: `"silence"`, `"ausine,<freq>"` (a
+    /// tone) or `"aufile,<path>"` (a WAV file). See ringo's ausrc module.
+    /// Call-scoped: automatically resets to `silence` once the agent's last
+    /// call has ended, so the next call doesn't replay it.
+    pub fn play(&self, spec: &str) {
+        self.client.set_audio_source(spec);
+    }
+
+    /// RTP quality stats of the current call, if a call is up.
+    pub fn media_stats(&self) -> Option<ringo_core::event::MediaStats> {
+        self.client.media_stats()
+    }
+
+    /// DTMF digits received so far on the current call.
+    pub fn received_dtmf(&self) -> String {
+        self.client.received_dtmf()
+    }
+
+    /// Number of currently active calls.
+    pub fn call_count(&self) -> u32 {
+        self.client.call_count()
+    }
+
+    /// Write the call's sent+received audio to WAV files under `prefix`;
+    /// returns the created paths. Requires `record_audio` in `[backend]`.
+    pub fn save_audio(&self, prefix: &str) -> Vec<String> {
+        self.client.save_audio(prefix)
+    }
+}
+
+/// Resolve a dial/transfer target: full URIs pass through, `user@host` gets a
+/// `sip:` prefix, and a bare number/extension becomes `sip:<target>@<domain>`.
+fn resolve_target(target: &str, domain: &str) -> String {
+    if target.starts_with("sip:") || target.starts_with("sips:") {
+        target.to_string()
+    } else if target.contains('@') {
+        format!("sip:{target}")
+    } else {
+        format!("sip:{target}@{domain}")
+    }
+}
+
+/// Whether this event ended the agent's last remaining call (post-reduce
+/// state) — the trigger for resetting a stale `play` spec to silence.
+fn closes_last_call(event: &AppEvent, state: &AgentState) -> bool {
+    matches!(event, AppEvent::CallClosed { .. }) && state.calls.is_empty()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolves_bare_numbers_and_uris() {
+        assert_eq!(
+            resolve_target("1002", "pbx.example.com"),
+            "sip:1002@pbx.example.com"
+        );
+        assert_eq!(
+            resolve_target("1002@other.example.com", "pbx.example.com"),
+            "sip:1002@other.example.com"
+        );
+        assert_eq!(
+            resolve_target("sip:1002@other.example.com", "pbx.example.com"),
+            "sip:1002@other.example.com"
+        );
+        assert_eq!(
+            resolve_target("sips:1002@other.example.com", "pbx.example.com"),
+            "sips:1002@other.example.com"
+        );
+    }
+
+    fn loaded_config() -> LoadedConfig {
+        LoadedConfig {
+            agents: vec![
+                crate::config::AgentDef {
+                    name: "alice".into(),
+                    account: Account {
+                        username: "1001".into(),
+                        domain: "pbx.example.com".into(),
+                        password: "pw".into(),
+                        ..Default::default()
+                    },
+                    custom_headers: Vec::new(),
+                },
+                crate::config::AgentDef {
+                    name: "bob".into(),
+                    account: Account {
+                        username: "1002".into(),
+                        domain: "pbx.example.com".into(),
+                        password: "pw".into(),
+                        ..Default::default()
+                    },
+                    custom_headers: Vec::new(),
+                },
+            ],
+            backend: BackendOptions::default(),
+        }
+    }
+
+    #[test]
+    fn hub_builds_lazy_and_overview_knows_config_only() {
+        let hub = Hub::new(loaded_config());
+        let overview = hub.overview();
+        assert_eq!(overview.len(), 2);
+        assert_eq!(overview[0].name, "alice");
+        assert_eq!(overview[0].aor, "sip:1001@pbx.example.com");
+        assert!(!overview[0].running, "nothing spawned without a tool call");
+        assert!(overview[0].state.is_none());
+        // Nothing is running, so the state fold never started:
+        assert!(hub.slots.iter().all(|s| s.agent.blocking_lock().is_none()));
+    }
+
+    #[test]
+    fn hub_carries_custom_header_templates_into_the_slots() {
+        let mut cfg = loaded_config();
+        cfg.agents[0].custom_headers = vec![
+            ("X-Static".into(), "fixed".into()),
+            ("X-Session-Tag".into(), "session-${uuid}".into()),
+        ];
+        let hub = Hub::new(cfg);
+        let templates = &hub.slots[0].custom_headers;
+        assert_eq!(templates.len(), 2);
+        assert_eq!(templates[1].1, "session-${uuid}");
+    }
+
+    #[test]
+    fn closes_last_call_only_after_the_final_call_ended() {
+        let mut s = AgentState::default();
+        reduce(
+            &mut s,
+            &AppEvent::CallOutgoing {
+                call_id: "c1".into(),
+                number: "1002".into(),
+            },
+        );
+        reduce(
+            &mut s,
+            &AppEvent::CallOutgoing {
+                call_id: "c2".into(),
+                number: "1003".into(),
+            },
+        );
+        let closed = |id: &str| AppEvent::CallClosed {
+            call_id: id.into(),
+            reason: "ok".into(),
+            error: false,
+        };
+
+        // First of two calls closes: another call remains — must NOT reset.
+        reduce(&mut s, &closed("c1"));
+        assert!(!closes_last_call(&closed("c1"), &s));
+
+        // Last remaining call closes: reset.
+        reduce(&mut s, &closed("c2"));
+        assert!(closes_last_call(&closed("c2"), &s));
+
+        // Non-close events never reset.
+        assert!(!closes_last_call(
+            &AppEvent::CallEstablished {
+                call_id: "c3".into()
+            },
+            &s
+        ));
+    }
+
+    #[test]
+    fn get_rejects_unknown_agents_with_known_names() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let hub = Hub::new(loaded_config());
+        let err = match rt.block_on(hub.get("mallory")) {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("unknown agent must fail"),
+        };
+        assert!(err.contains("unknown agent `mallory`"), "{err}");
+        assert!(err.contains("alice, bob"), "{err}");
+    }
+}
