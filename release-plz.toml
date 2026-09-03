@@ -55,5 +55,9 @@ name = "ringo-phone"
 git_tag_name = "ringo-phone-v{{ version }}"
 
 [[package]]
+name = "ringo-mcp"
+git_tag_name = "ringo-mcp-v{{ version }}"
+
+[[package]]
 name = "ringo-flow"
 git_tag_name = "ringo-flow-v{{ version }}"

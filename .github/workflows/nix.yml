@@ -175,6 +175,7 @@ jobs:
 
       - run: nix build --print-build-logs --out-link result-phone .#ringo-phone
       - run: nix build --print-build-logs --out-link result-flow .#ringo-flow
+      - run: nix build --print-build-logs --out-link result-mcp .#ringo-mcp
 
       # Same smoke test the release binaries get: the wrapper links and runs.
       # Every runner is native to its target, so this also catches a package
@@ -183,3 +184,4 @@ jobs:
         run: |
           ./result-phone/bin/ringo --help
           ./result-flow/bin/ringo-flow --help
+          ./result-mcp/bin/ringo-mcp --help

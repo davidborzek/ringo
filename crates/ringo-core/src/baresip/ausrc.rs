@@ -123,12 +123,17 @@ pub(super) fn set_generator(key: &str, spec: &str) {
 /// Switch the UA's audio source to live-streamed mono s16 PCM at `rate` Hz, fed
 /// via [`push_audio`]. Until samples arrive (or on underrun) the source renders
 /// silence; queued audio is emitted in real time by the render thread.
+///
+/// Re-arming starts a FRESH, empty queue: whatever a previous arm still had
+/// queued is dropped (barge-in flush semantics — a stream producer re-arms to
+/// cut off stale audio instead of waiting out the queue cap). No in-tree
+/// consumer relies on the old keep-queued-on-re-arm behavior (streamed TX is
+/// the ringo-mcp bridge's job).
 pub(super) fn start_audio_stream(key: &str, rate: u32) {
     stream_in()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .entry(key.to_string())
-        .or_default();
+        .insert(key.to_string(), Arc::new(Mutex::new(VecDeque::new())));
     let mut map = registry().lock().unwrap_or_else(|e| e.into_inner());
     let version = map.get(key).map(|e| e.version + 1).unwrap_or(0);
     map.insert(

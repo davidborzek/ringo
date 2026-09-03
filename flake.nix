@@ -1,5 +1,5 @@
 {
-  description = "ringo — terminal SIP softphone (ringo-phone) and scenario runner (ringo-flow)";
+  description = "ringo — terminal SIP softphone (ringo-phone), scenario runner (ringo-flow) and MCP server (ringo-mcp)";
 
   # Building ringo means compiling OpenSSL, libre and libbaresip before the Rust
   # code — ten minutes or so, more on a small machine. This cache holds the
@@ -159,6 +159,12 @@
             bin = "ringo-flow";
             audio = false;
           };
+          ringo-mcp = mkRingo {
+            inherit pkgs;
+            crate = "ringo-mcp";
+            bin = "ringo-mcp";
+            audio = false;
+          };
           default = ringo-phone;
         }
       );
@@ -183,6 +189,7 @@
       overlays.default = final: _prev: {
         ringo-phone = self.packages.${final.stdenv.hostPlatform.system}.ringo-phone;
         ringo-flow = self.packages.${final.stdenv.hostPlatform.system}.ringo-flow;
+        ringo-mcp = self.packages.${final.stdenv.hostPlatform.system}.ringo-mcp;
       };
 
       nixosModules = rec {

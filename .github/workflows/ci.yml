@@ -94,6 +94,13 @@ jobs:
       package: ringo-flow
       upload: false
 
+  build-mcp:
+    name: Build (ringo-mcp)
+    uses: ./.github/workflows/build-binaries.yml
+    with:
+      package: ringo-mcp
+      upload: false
+
   # Build the ringo-flow Docker image on both arches (no push) so image build
   # breakage — e.g. the aarch64 outline-atomics link error — is caught in the PR
   # instead of only at release time. Native runners (no QEMU); the release uses

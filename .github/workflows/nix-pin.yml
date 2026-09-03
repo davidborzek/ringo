@@ -29,6 +29,11 @@ on:
         type: string
         required: false
         default: ""
+      mcp_tag:
+        description: "ringo-mcp tag (ringo-mcp-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
     inputs:
       phone_tag:
@@ -38,6 +43,11 @@ on:
         default: ""
       flow_tag:
         description: "ringo-flow tag (ringo-flow-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
+      mcp_tag:
+        description: "ringo-mcp tag (ringo-mcp-vX.Y.Z); empty if not released"
         type: string
         required: false
         default: ""
@@ -66,7 +76,7 @@ jobs:
       # released — the same choice the docs job makes.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.flow_tag != '' && inputs.flow_tag || inputs.phone_tag }}
+          ref: ${{ inputs.flow_tag != '' && inputs.flow_tag || inputs.mcp_tag != '' && inputs.mcp_tag || inputs.phone_tag }}
 
       - uses: cachix/install-nix-action@v31
 
@@ -80,9 +90,10 @@ jobs:
         env:
           PHONE_TAG: ${{ inputs.phone_tag }}
           FLOW_TAG: ${{ inputs.flow_tag }}
+          MCP_TAG: ${{ inputs.mcp_tag }}
           SYSTEM: ${{ matrix.system }}
         run: |
-          for tag in "$PHONE_TAG" "$FLOW_TAG"; do
+          for tag in "$PHONE_TAG" "$FLOW_TAG" "$MCP_TAG"; do
             # release-plz releases the crates independently, so one of the two
             # is routinely empty.
             [ -n "$tag" ] || continue
