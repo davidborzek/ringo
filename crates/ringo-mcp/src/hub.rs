@@ -249,14 +249,26 @@ pub struct AgentOverview {
     pub state: Option<AgentState>,
 }
 
-/// Events not worth waking an MCP agent for. Periodic RTCP reports would fire
-/// every few seconds during an established call and crowd out the meaningful
-/// ones from `wait_event`/WS pushes (the current stats are one `agent_status`
-/// call away anyway). Number must match the vendored baresip `bevent` enum
-/// (`BEVENT_CALL_RTCP`); see the table in `server::bevent_name`.
-fn is_noise_event(event: &AppEvent) -> bool {
-    matches!(event, AppEvent::Unknown { class, type_ }
-        if class == "bevent" && type_ == "23")
+/// Whether an unmapped (`Unknown`) baresip event is worth surfacing to an MCP
+/// agent. ringo-core decodes the call-flow-relevant events into named
+/// `AppEvent`s; of the rest, only a curated few carry information an agent can
+/// act on — the others are SDP/transport mechanics (outcomes arrive as their
+/// own events), lifecycle internals or periodic noise (RTCP would fire every
+/// few seconds). Default-deny; numbers must match the vendored baresip
+/// `bevent` enum (see the table in `server::bevent_name`).
+fn is_agent_relevant(event: &AppEvent) -> bool {
+    let AppEvent::Unknown { class, type_ } = event else {
+        return true;
+    };
+    class == "bevent"
+        && matches!(
+            type_.as_str(),
+            "17"    // CALL_TRANSFER
+                | "19" // CALL_TRANSFER_FAILED
+                | "27" // AUDIO_ERROR
+                | "30" // CALL_HOLD (peer held us)
+                | "31" // CALL_RESUME (peer resumed)
+        )
 }
 
 /// One connected agent: its worker-process handle plus reduced state and a
@@ -328,9 +340,10 @@ impl Agent {
             loop {
                 match events.recv_timeout(HEADER_POLL_INTERVAL) {
                     Ok(event) => {
-                        // Periodic noise (RTCP) never reaches wait_event/WS —
-                        // it doesn't affect the state fold either.
-                        if is_noise_event(&event) {
+                        // Unmapped baresip events surface only if an agent can
+                        // act on them (see `is_agent_relevant`); the state fold
+                        // ignores Unknown either way.
+                        if !is_agent_relevant(&event) {
                             continue;
                         }
                         let _ = bridge_tx.send(event.clone());
@@ -675,19 +688,33 @@ mod tests {
     }
 
     #[test]
-    fn periodic_rtcp_events_are_filtered_as_noise() {
-        let rtcp = AppEvent::Unknown {
+    fn only_curated_unmapped_bevents_reach_the_agent() {
+        let unmapped = |t: &str| AppEvent::Unknown {
             class: "bevent".into(),
-            type_: "23".into(),
+            type_: t.into(),
         };
-        let remote_sdp = AppEvent::Unknown {
-            class: "bevent".into(),
-            type_: "29".into(),
-        };
-        assert!(is_noise_event(&rtcp));
-        assert!(!is_noise_event(&remote_sdp), "remote SDP is meaningful");
-        assert!(!is_noise_event(&AppEvent::RegisterOk {
+        // The curated set: peer hold/resume, transfer outcomes, audio errors.
+        for t in ["17", "19", "27", "30", "31"] {
+            assert!(is_agent_relevant(&unmapped(t)), "bevent #{t} should pass");
+        }
+        // Everything else unmapped — SDP/transport mechanics, lifecycle
+        // internals, periodic RTCP — stays internal.
+        for t in [
+            "7", "9", "13", "14", "21", "22", "23", "24", "28", "29", "33", "37",
+        ] {
+            assert!(
+                !is_agent_relevant(&unmapped(t)),
+                "bevent #{t} should be filtered"
+            );
+        }
+        // Named events always pass.
+        assert!(is_agent_relevant(&AppEvent::RegisterOk {
             account: "a".into()
+        }));
+        // Default-deny: unmapped events of any other class stay internal too.
+        assert!(!is_agent_relevant(&AppEvent::Unknown {
+            class: "other".into(),
+            type_: "1".into(),
         }));
     }
 

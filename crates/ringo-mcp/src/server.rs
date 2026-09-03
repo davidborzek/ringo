@@ -171,7 +171,9 @@ struct RmHeaderParam {
 
 /// Names for the baresip `bevent` numbers ringo-core passes through as
 /// `AppEvent::Unknown` — everything its backend-neutral mapping doesn't
-/// decode into a named `AppEvent`. The numbers must match the vendored
+/// decode into a named `AppEvent`. Only the ones the hub's `is_agent_relevant`
+/// curates through ever get rendered; the table stays complete so a future
+/// allowlist entry is named immediately. Numbers must match the vendored
 /// baresip `enum bevent_type` (crates/ringo-core/vendor/baresip/include/
 /// baresip.h); the pinned vendor version keeps this a stable, tested table.
 fn bevent_name(type_: &str) -> Option<&'static str> {
@@ -270,13 +272,16 @@ pub(crate) fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
         }
         Response { ok, data } => json!({"event": "response", "ok": ok, "data": data}),
         Unknown { class, type_ } => {
-            let mut v = json!({"event": "unknown", "class": class, "type": type_});
+            // Unmapped baresip events only reach here when the hub deemed them
+            // agent-relevant (peer hold/resume, transfer outcomes, audio
+            // errors) — render those with their proper (lowercased) event name
+            // instead of a bare "unknown".
             if class == "bevent" {
                 if let Some(name) = bevent_name(type_) {
-                    v["type_name"] = json!(name);
+                    return json!({"event": name.to_lowercase(), "type": type_});
                 }
             }
-            v
+            json!({"event": "unknown", "class": class, "type": type_})
         }
         BackendConnectFailed { reason } => {
             json!({"event": "backend_connect_failed", "reason": reason})
@@ -618,30 +623,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unknown_bevents_get_a_readable_name() {
+    fn curated_bevents_render_with_their_own_name() {
         let e = ringo_core::event::AppEvent::Unknown {
             class: "bevent".into(),
-            type_: "29".into(),
+            type_: "30".into(),
         };
         let v = event_json(&e);
-        assert_eq!(v["event"], "unknown");
-        assert_eq!(v["type"], "29");
-        assert_eq!(v["type_name"], "CALL_REMOTE_SDP");
+        assert_eq!(v["event"], "call_hold");
+        assert_eq!(v["type"], "30");
+        assert!(v.get("type_name").is_none(), "superseded by the event name");
     }
 
     #[test]
-    fn unknown_non_bevents_stay_unnamed() {
+    fn non_named_unknowns_keep_the_generic_shape() {
         let e = ringo_core::event::AppEvent::Unknown {
             class: "other".into(),
             type_: "29".into(),
         };
         let v = event_json(&e);
-        assert!(v.get("type_name").is_none());
+        assert_eq!(v["event"], "unknown");
+        assert_eq!(v["class"], "other");
         let e = ringo_core::event::AppEvent::Unknown {
             class: "bevent".into(),
             type_: "999".into(),
         };
-        assert!(event_json(&e).get("type_name").is_none());
+        assert_eq!(event_json(&e)["event"], "unknown");
     }
 
     #[test]
