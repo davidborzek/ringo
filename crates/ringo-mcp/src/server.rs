@@ -187,6 +187,15 @@ struct DialParam {
     /// SIP URI, `user@host`, or bare number/extension (resolved to
     /// `sip:<target>@<agent domain>`).
     target: String,
+    /// Block until the call is established (or fails / the timeout expires)
+    /// instead of returning immediately. Default false (fire-and-forget).
+    #[serde(default)]
+    wait_established: bool,
+    /// Overall wait budget in ms for `wait_established` (default 60000, max
+    /// 120000). A timeout does NOT cancel the call — it keeps ringing, and the
+    /// reply carries its call_id.
+    #[serde(default)]
+    timeout_ms: Option<u64>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -507,12 +516,44 @@ impl TelephonyServer {
     )]
     async fn dial(
         &self,
-        Parameters(DialParam { agent, target }): Parameters<DialParam>,
+        Parameters(DialParam {
+            agent,
+            target,
+            wait_established,
+            timeout_ms,
+        }): Parameters<DialParam>,
     ) -> Result<CallToolResult, McpError> {
+        if timeout_ms.is_some() && !wait_established {
+            return Err(invalid(
+                "timeout_ms only applies together with wait_established",
+            ));
+        }
         let a = self.agent(&agent).await?;
         let resolved = self.hub.check_dial(&target, &a.domain).map_err(invalid)?;
-        a.dial(&resolved);
-        ok_text(format!("dialing `{target}` from `{agent}`"))
+        if !wait_established {
+            a.dial(&resolved);
+            return ok_text(format!("dialing `{target}` from `{agent}`"));
+        }
+
+        let ms = timeout_ms.unwrap_or(DEFAULT_WAIT_MS).min(MAX_WAIT_MS);
+        let outcome = a.dial_and_wait(&resolved, Duration::from_millis(ms)).await;
+        match outcome {
+            crate::hub::DialOutcome::Established { call_id } => ok_json(json!({
+                "established": true, "call_id": call_id,
+            })),
+            crate::hub::DialOutcome::Failed { call_id, reason } => ok_json(json!({
+                "established": false, "call_id": call_id, "reason": reason,
+            })),
+            crate::hub::DialOutcome::StillRinging { call_id } => ok_json(json!({
+                "established": false, "call_id": call_id,
+                "state": "ringing",
+                "waited_ms": ms,
+            })),
+            crate::hub::DialOutcome::NoCall => ok_json(json!({
+                "established": false,
+                "error": "dial produced no call within 10 s (locally rejected? check the target)",
+            })),
+        }
     }
 
     #[tool(

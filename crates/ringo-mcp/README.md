@@ -82,7 +82,7 @@ the only UA in its process — see the ringo-core `Account` docs).
 | --- | --- |
 | `list_agents` | All configured agents: name, AOR, running, registration, calls |
 | `agent_status` | One agent: registration, calls, media stats, received DTMF (starts the agent if not yet running) |
-| `dial` | Outgoing call (`agent`, `target`: URI, `user@host`, or bare extension) |
+| `dial` | Outgoing call (`agent`, `target`: URI, `user@host`, or bare extension); optional `wait_established` blocks until the outcome (established / failed with reason / still-ringing with call_id) |
 | `accept` / `hangup` / `hangup_all` | Answer / end calls |
 | `hold` / `resume` / `mute` | In-call control. `agent_status` reflects local holds (`"held"` phase); peer holds arrive as `call_hold`/`call_resume` events |
 | `send_dtmf` | One digit (`0-9`, `*`, `#`, `A-F`) |

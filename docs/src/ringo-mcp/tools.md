@@ -43,7 +43,23 @@ DTMF, the last close reason. Poll this after `dial`/`accept` to check progress.
 
 Call control is fire-and-forget: the tools return as soon as the command is
 sent. Observe outcomes with `wait_event` (preferred) or by polling
-`agent_status`.
+`agent_status` — **or** make `dial` itself block with
+`wait_established: true` (and an optional `timeout_ms`, default 60000,
+max 120000). The dial then returns the outcome directly:
+
+```jsonc
+{"established": true, "call_id": "…"}                          // up
+{"established": false, "call_id": "…", "reason": "486 Busy…"}   // failed
+{"established": false, "call_id": "…", "state": "ringing", "waited_ms": 60000}
+{"established": false, "error": "dial produced no call within 10 s …"}
+```
+
+A timeout does **not** cancel the call — it keeps ringing, and the reply
+carries its `call_id` (hang up or keep waiting via `wait_event`). A target
+the worker rejects locally produces no call at all; the 10 s confirm
+deadline surfaces that instead of blocking the full budget. Concurrent dials
+on one agent attribute to the first `call_outgoing` — dial one at a time
+when using `wait_established`.
 
 | Tool | Args | Effect |
 | ---- | ---- | ------ |

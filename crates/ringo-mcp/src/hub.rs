@@ -25,13 +25,18 @@ use ringo_core::event::AppEvent;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc};
 
 /// Capacity of the per-agent event broadcast channel. Events that nobody is
 /// waiting for are dropped (the state fold still sees them); `wait_event`
 /// callers that fall behind get a lag notification, not stale data.
 const EVENT_CHANNEL_CAPACITY: usize = 256;
+
+/// How long `dial_and_wait` waits for the `call_outgoing` confirmation before
+/// concluding the worker rejected the dial locally (some targets produce no
+/// call at all — no event, nothing to wait for).
+const DIAL_CONFIRM_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How often the bridge polls the worker for newly seen inbound INVITE headers
 /// (same cadence as ringo-flow's trace poll).
@@ -41,6 +46,32 @@ const HEADER_POLL_INTERVAL: Duration = Duration::from_millis(150);
 /// A frame ≈ 20 ms → a lagging consumer is dropped up to ~2.5 s behind and gets
 /// an `rx_lagged` notice instead of stale data.
 const RX_TAP_CAPACITY: usize = 128;
+
+/// The outcome of a `dial` with `wait_established`.
+#[derive(Debug, Clone)]
+pub enum DialOutcome {
+    /// The call is up.
+    Established {
+        /// The established call's SIP Call-ID.
+        call_id: String,
+    },
+    /// The call ended before it was established (busy, declined, …).
+    Failed {
+        /// The failed call's SIP Call-ID.
+        call_id: String,
+        /// Why it ended, as the backend reports it.
+        reason: String,
+    },
+    /// The wait budget expired with the call still ringing — the call itself
+    /// continues; the caller decides (hangup or keep waiting).
+    StillRinging {
+        /// The still-ringing call's SIP Call-ID.
+        call_id: String,
+    },
+    /// The worker produced no call within [`DIAL_CONFIRM_TIMEOUT`] — the dial
+    /// was likely rejected locally.
+    NoCall,
+}
 
 /// Messages for an agent's single TX writer thread (see `Agent::tx_channel`).
 /// One channel serializes both kinds so the worker's same-thread sequencing
@@ -608,6 +639,76 @@ impl Agent {
     pub fn dial(&self, resolved: &str) {
         self.refresh_dynamic_headers();
         self.client.dial(resolved);
+    }
+
+    /// Dial and block for the outcome (`dial`'s `wait_established`): the
+    /// subscription happens BEFORE the dial command is sent (same task →
+    /// ordered), so the confirmation can't race the subscription. Events
+    /// still reach every other consumer — the broadcast fan-out is shared,
+    /// nothing is swallowed.
+    ///
+    /// Call attribution: the FIRST `call_outgoing` after the subscribe is
+    /// ours (single-client heuristic; concurrent dials on the same agent are
+    /// ambiguous, see the tool docs). `call_id`s of other calls are skipped.
+    pub async fn dial_and_wait(&self, resolved: &str, timeout: Duration) -> DialOutcome {
+        let mut rx = self.events.subscribe();
+        self.dial(resolved);
+        let deadline = Instant::now() + timeout;
+
+        // Phase 1: our call id arrives with the outgoing event.
+        let confirm_budget = DIAL_CONFIRM_TIMEOUT.min(timeout);
+        let confirmed = tokio::time::timeout(confirm_budget, async {
+            loop {
+                match rx.recv().await {
+                    Ok(AppEvent::CallOutgoing { call_id, .. }) => return Some(call_id),
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    // Worker gone: nothing will ever confirm.
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                    Ok(_) => {}
+                }
+            }
+        })
+        .await;
+        let our_id = match confirmed {
+            Ok(Some(id)) => id,
+            _ => return DialOutcome::NoCall,
+        };
+
+        // Phase 2: established / closed for OUR call, or the overall budget
+        // (the call keeps ringing past it — no auto-cancel by design).
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let other_id = our_id.clone();
+        tokio::time::timeout(remaining, async {
+            loop {
+                match rx.recv().await {
+                    Ok(AppEvent::CallEstablished { call_id }) if call_id == our_id => {
+                        return DialOutcome::Established {
+                            call_id: call_id.clone(),
+                        };
+                    }
+                    Ok(AppEvent::CallClosed {
+                        call_id, reason, ..
+                    }) if call_id == our_id => {
+                        return DialOutcome::Failed {
+                            call_id: call_id.clone(),
+                            reason,
+                        };
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => {
+                        return DialOutcome::Failed {
+                            call_id: other_id,
+                            reason: "agent worker is gone".to_string(),
+                        };
+                    }
+                    Ok(_) => {}
+                }
+            }
+        })
+        .await
+        .unwrap_or(DialOutcome::StillRinging {
+            call_id: our_id.clone(),
+        })
     }
 
     /// Re-render the dynamic custom headers for the next outgoing INVITE.

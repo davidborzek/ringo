@@ -236,3 +236,71 @@ async fn bridge_stream_open_connect_close() {
     );
     assert_eq!(text["id"], 9);
 }
+
+#[tokio::test]
+async fn dial_wait_established_outcomes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let p = tmp.path().join("config.toml");
+    std::fs::write(
+        &p,
+        "[[agent]]\nname = \"alice\"\nusername = \"1001\"\ndomain = \"10.255.255.1:5060\"\npassword = \"pw\"\n\
+         \n[[agent]]\nname = \"bob\"\nusername = \"1002\"\ndomain = \"127.0.0.1:15099\"\npassword = \"pw\"\n",
+    )
+    .unwrap();
+    let mut server = Server::start(&p);
+
+    // timeout_ms without wait_established is a parameter error.
+    server.request(
+        &serde_json::json!({
+            "jsonrpc": "2.0", "id": 20, "method": "tools/call",
+            "params": {"name": "dial", "arguments": {"agent": "alice", "target": "1002", "timeout_ms": 5000}}
+        })
+        .to_string(),
+    );
+    let reply = server.reply();
+    assert_eq!(reply["error"]["code"], -32602, "{reply}");
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("wait_established"),
+        "{reply}"
+    );
+
+    // A blackhole target rings forever: with a short budget the dial returns
+    // still-ringing (the call CONTINUES — no auto-cancel) with its call_id.
+    let text = server.tool(
+        "dial",
+        serde_json::json!({"agent": "alice", "target": "2001", "wait_established": true, "timeout_ms": 4000}),
+    );
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    assert_eq!(v["established"], false, "{v}");
+    assert_eq!(v["state"], "ringing", "{v}");
+    assert!(v["call_id"].as_str().is_some_and(|s| !s.is_empty()), "{v}");
+    // …and the call is really still up for the caller to manage.
+    let st = server.tool("agent_status", serde_json::json!({"agent": "alice"}));
+    let v: Value = serde_json::from_str(st.as_str().expect("text")).unwrap();
+    assert_eq!(v["call_count"], 1, "{v}");
+    let _ = server.tool("hangup_all", serde_json::json!({"agent": "alice"}));
+
+    // A locally-rejected target (baresip refuses loopback peers: "no laddr")
+    // produces NO call at all — the confirm deadline surfaces it instead of
+    // blocking out the full budget.
+    let started = std::time::Instant::now();
+    let text = server.tool(
+        "dial",
+        serde_json::json!({"agent": "bob", "target": "3001", "wait_established": true, "timeout_ms": 60000}),
+    );
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    assert_eq!(v["established"], false, "{v}");
+    assert!(
+        v["error"].as_str().is_some_and(|e| e.contains("no call")),
+        "{v}"
+    );
+    // The 10 s confirm deadline, not the 60 s budget.
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "NoCall must surface at the confirm deadline, took {:?}",
+        started.elapsed()
+    );
+}
