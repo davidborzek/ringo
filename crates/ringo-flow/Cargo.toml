@@ -43,7 +43,7 @@ ringo-flow-macros.workspace = true
 inventory = "0.3"
 # `serve` mode only (the `server` feature):
 toml = { version = "1", optional = true }
-croner = { version = "3", optional = true }
+croner = { version = "4", optional = true }
 tracing = { version = "0.1", optional = true }
 tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter", "json"] }
 
