@@ -39,7 +39,7 @@ pub(crate) const TOOL_GROUPS: &[(&str, &[&str])] = &[
             "transfer",
         ],
     ),
-    ("audio", &["play"]),
+    ("audio", &["play", "speak"]),
     ("headers", &["call_headers", "add_header", "rm_header"]),
     ("events", &["wait_event", "agent_events"]),
     ("streams", &["stream_open", "stream_close"]),
@@ -247,6 +247,36 @@ struct WaitEventParam {
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
+struct SpeakParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// The text to speak into the call (synthesized by the configured voice).
+    text: String,
+}
+
+/// The speak-WAV cache dir (`$XDG_CACHE_HOME/ringo-mcp/tts`).
+fn speech_cache_dir() -> std::path::PathBuf {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let dir = base.join("ringo-mcp").join("tts");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// A short stable hash for cache filenames.
+fn short_hash(text: &str) -> String {
+    // FNV-1a, 64-bit — no dependency, fine for a cache name.
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in text.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{h:016x}")
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
 struct AgentEventsParam {
     /// Agent name from the config file.
     agent: String,
@@ -351,6 +381,45 @@ struct RmHeaderParam {
 }
 
 // Helpers ───────────────────────────────────────────────────────────────────
+
+impl TelephonyServer {
+    #[cfg(feature = "speech")]
+    async fn speak_impl(&self, agent: String, text: String) -> Result<CallToolResult, McpError> {
+        let a = self.agent(&agent).await?;
+        let tts = self
+            .hub
+            .tts()
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let holder = Arc::clone(&tts);
+        let text_for_synth = text.clone();
+        let synth = tokio::task::spawn_blocking(move || holder.synth(&text_for_synth))
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let duration = synth.duration();
+        let dir = speech_cache_dir();
+        let file = dir.join(format!("{}-{}hz.wav", short_hash(&text), synth.sample_rate));
+        let path = file.to_string_lossy().into_owned();
+        {
+            let p = file.clone();
+            let samples = synth.samples;
+            let rate = synth.sample_rate;
+            tokio::task::spawn_blocking(move || ringo_speech::write_mono_wav(&p, &samples, rate))
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        }
+        a.play(&format!("aufile,{path}"));
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            serde_json::json!({
+                "duration_ms": duration.as_millis() as u64,
+                "file": path,
+            })
+            .to_string(),
+        )]))
+    }
+}
 
 fn ok_text(msg: impl Into<String>) -> Result<CallToolResult, McpError> {
     Ok(CallToolResult::success(vec![ContentBlock::text(msg)]))
@@ -733,6 +802,28 @@ impl TelephonyServer {
             "newest_id": newest,
             "truncated": truncated,
         }))
+    }
+
+    #[tool(
+        description = "Speak text into the agent's call using the configured voice (text-to-speech, then played like `play`). Requires a build with the `speech` feature and `[speech]` in the config."
+    )]
+    async fn speak(
+        &self,
+        Parameters(SpeakParam { agent, text }): Parameters<SpeakParam>,
+    ) -> Result<CallToolResult, McpError> {
+        #[cfg(feature = "speech")]
+        {
+            self.speak_impl(agent, text).await
+        }
+        #[cfg(not(feature = "speech"))]
+        {
+            let _ = (agent, text);
+            Err(McpError::internal_error(
+                "this ringo-mcp was built without the `speech` feature — \
+                 rebuild with `--features speech`",
+                None,
+            ))
+        }
     }
 
     #[tool(

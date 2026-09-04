@@ -25,6 +25,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net", "macros"] }
 toml = "0.9"
 rmcp = { version = "3.2", features = ["transport-io"] }
+
+# Opt-in speech (TTS): ringo-speech with the offline sherpa-onnx backend.
+# The default build stays lean — no ML runtime, no onnxruntime.
+ringo-speech = { workspace = true, optional = true }
 uuid = { version = "1", features = ["v4"] }
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
@@ -33,6 +37,9 @@ regex = "1"
 # loopback listener, plus a client for the integration test.
 tokio-tungstenite = "0.28"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+
+[features]
+speech = ["dep:ringo-speech", "ringo-speech/sherpa"]
 
 [dev-dependencies]
 tempfile = "3"

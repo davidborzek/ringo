@@ -106,6 +106,31 @@ pub struct AgentEntry {
     pub custom_headers: Vec<(String, String)>,
 }
 
+/// The optional `[speech]` table: text-to-speech for the `speak` tool.
+/// Requires a build with the `speech` feature (which pulls the offline
+/// sherpa-onnx backend); a config section without the feature fails the
+/// startup with a clear message instead of surprising at call time.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpeechEntry {
+    /// Directory of the TTS voice (VITS/piper layout: `model.onnx`,
+    /// `tokens.txt`, `espeak-ng-data/`). E.g. a downloaded
+    /// `vits-piper-de_DE-thorsten-medium`.
+    pub tts_model: Option<String>,
+    /// Synthesis speed factor (1.0 = natural).
+    #[serde(default)]
+    pub speed: Option<f32>,
+}
+
+/// Validated speech config.
+#[derive(Debug, Clone, Default)]
+pub struct SpeechConfig {
+    /// The TTS voice directory, `None` = `speak` unavailable.
+    pub tts_model: Option<std::path::PathBuf>,
+    /// Speed factor, default 1.0.
+    pub speed: f32,
+}
+
 /// The optional `[backend]` table: headless-sane defaults, overridable.
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -139,6 +164,8 @@ pub struct LoadedConfig {
     pub agents: Vec<AgentDef>,
     /// Backend options with ringo-mcp defaults applied.
     pub backend: BackendOptions,
+    /// Speech (TTS) configuration, from `[speech]`.
+    pub speech: SpeechConfig,
 }
 
 /// Top-level document of the TOML config file.
@@ -148,6 +175,8 @@ struct ConfigDoc {
     agent: Vec<AgentEntry>,
     #[serde(default)]
     backend: BackendEntry,
+    #[serde(default)]
+    speech: SpeechEntry,
 }
 
 /// Default config path: `$RINGO_MCP_CONFIG`, else `~/.config/ringo-mcp/config.toml`.
@@ -215,7 +244,12 @@ pub fn load(path: &Path) -> Result<LoadedConfig> {
     }
 
     let backend = build_backend(doc.backend);
-    Ok(LoadedConfig { agents, backend })
+    let speech = build_speech(doc.speech, path)?;
+    Ok(LoadedConfig {
+        agents,
+        backend,
+        speech,
+    })
 }
 
 /// Convert one `[[agent]]` table into a ringo-core [`Account`], resolving the
@@ -292,6 +326,46 @@ fn expand_tilde(p: &str) -> PathBuf {
         }
     }
     PathBuf::from(p)
+}
+
+/// Validate the `[speech]` table: the voice dir must exist when given.
+#[cfg(feature = "speech")]
+fn build_speech(entry: SpeechEntry, path: &Path) -> Result<SpeechConfig> {
+    let tts_model = entry
+        .tts_model
+        .map(|p| {
+            let p = std::path::PathBuf::from(expand_tilde(&p));
+            if !p.is_dir() {
+                bail!(
+                    "config `{}`: [speech] tts_model `{}` is not a directory",
+                    path.display(),
+                    p.display()
+                );
+            }
+            Ok(p)
+        })
+        .transpose()?;
+    Ok(SpeechConfig {
+        tts_model,
+        speed: entry.speed.unwrap_or(1.0),
+    })
+}
+
+/// Without the feature, a `[speech]` section means a config/build mismatch —
+/// fail loudly instead of silently ignoring it.
+#[cfg(not(feature = "speech"))]
+fn build_speech(entry: SpeechEntry, path: &Path) -> Result<SpeechConfig> {
+    if entry.tts_model.is_some() || entry.speed.is_some() {
+        bail!(
+            "config `{}` has a [speech] section, but this ringo-mcp was built \
+             without the `speech` feature — rebuild with `--features speech`",
+            path.display()
+        );
+    }
+    Ok(SpeechConfig {
+        tts_model: None,
+        speed: 1.0,
+    })
 }
 
 /// Apply ringo-mcp defaults to the `[backend]` table.
@@ -459,6 +533,40 @@ password_file = "{}"
         );
         let cfg = load(&p).unwrap();
         assert_eq!(cfg.agents[0].account.password, "hunter2");
+    }
+
+    #[test]
+    fn speech_section_validates_the_voice_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let voice = tmp.path().join("voice");
+        std::fs::create_dir(&voice).unwrap();
+
+        let mk = |body: String| {
+            let p = tmp.path().join("s.toml");
+            std::fs::write(&p, body).unwrap();
+            p
+        };
+        let base = "[[agent]]\nname = \"a\"\nusername = \"1\"\ndomain = \"x\"\npassword = \"pw\"\n";
+
+        // A missing dir fails loudly.
+        let err = format!(
+            "{:#}",
+            load(&mk(format!(
+                "{base}\n[speech]\ntts_model = \"{}\"",
+                tmp.path().join("nope").display()
+            )))
+            .unwrap_err()
+        );
+        assert!(err.contains("not a directory"), "{err}");
+
+        // A present dir passes with speed defaulting.
+        let cfg = load(&mk(format!(
+            "{base}\n[speech]\ntts_model = \"{}\"",
+            voice.display()
+        )))
+        .unwrap();
+        assert_eq!(cfg.speech.tts_model, Some(voice));
+        assert!((cfg.speech.speed - 1.0).abs() < f32::EPSILON);
     }
 
     #[test]

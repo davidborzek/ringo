@@ -236,6 +236,11 @@ impl DialPolicy {
 /// docs. Cheap to build (`Hub::new` validates nothing, spawns nothing).
 pub struct Hub {
     slots: Vec<Slot>,
+    speech: crate::config::SpeechConfig,
+    /// The configured TTS engine (feature `speech`), loaded lazily on first
+    /// `speak` and shared thereafter.
+    #[cfg(feature = "speech")]
+    tts: AsyncMutex<Option<Arc<ringo_speech::SynthesizerHolder>>>,
     /// The global dial policy ([dial] in the config) every `dial`/`transfer`
     /// passes before reaching the worker.
     dial: DialPolicy,
@@ -284,10 +289,38 @@ impl Hub {
             .collect();
         Self {
             slots,
+            speech: config.speech,
+            #[cfg(feature = "speech")]
+            tts: AsyncMutex::new(None),
             dial,
             bridge_host,
             bridge: AsyncMutex::new(None),
         }
+    }
+
+    /// The TTS engine (feature `speech`), loaded lazily from the configured
+    /// voice; errors when `speak` is unavailable (no [speech] section).
+    #[cfg(feature = "speech")]
+    pub async fn tts(&self) -> Result<Arc<ringo_speech::SynthesizerHolder>> {
+        let mut guard = self.tts.lock().await;
+        if let Some(t) = guard.as_ref() {
+            return Ok(Arc::clone(t));
+        }
+        let model = self.speech.tts_model.clone().with_context(
+            || "the `speak` tool is unavailable: no [speech] tts_model in the config",
+        )?;
+        let speed = self.speech.speed;
+        let holder = tokio::task::spawn_blocking(move || {
+            ringo_speech::load_tts(&ringo_speech::TtsConfig {
+                model_dir: model,
+                speed,
+            })
+        })
+        .await
+        .context("TTS load task panicked")??;
+        let holder = Arc::new(holder);
+        *guard = Some(Arc::clone(&holder));
+        Ok(holder)
     }
 
     /// All configured agents with their current liveness, in config order.
@@ -1058,6 +1091,7 @@ mod tests {
                 },
             ],
             backend: BackendOptions::default(),
+            speech: Default::default(),
         }
     }
 

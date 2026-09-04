@@ -1,0 +1,26 @@
+[package]
+name = "ringo-speech"
+description = "Speech synthesis/recognition for ringo agents (TTS for prompts, VAD/ASR building blocks)"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "ringo_speech"
+path = "src/lib.rs"
+
+[features]
+# The sherpa-onnx backend: offline TTS (VITS/piper voices), Silero VAD, ASR.
+# Pulls the official first-party `sherpa-onnx` crate, whose sys layer downloads
+# prebuilt static archives (onnxruntime et al.) at build time.
+default = []
+sherpa = ["dep:sherpa-onnx"]
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+sherpa-onnx = { version = "1.13", optional = true }
+tempfile = "3"
