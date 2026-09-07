@@ -57,6 +57,7 @@ profiles in the TUI alongside the managed ones.
 | `package` | flake's `ringo-phone` | Package providing the `ringo` binary. |
 | `settings` | `{}` | Contents of `~/.config/ringo/ringo.toml`. See [Configuration](configuration.md). |
 | `profiles.<name>` | `{}` | Declarative SIP profiles (see below). |
+| `desktopEntry.enable` | `true` | Create an application-menu entry that opens ringo in a terminal (see below). |
 
 Each `profiles.<name>`:
 
@@ -69,6 +70,43 @@ Each `profiles.<name>`:
 | `mutable` | `false` | If `true`, seed the profile once then leave it to the TUI; if `false`, Nix rewrites it on every switch (see above). |
 
 Set at most one of `passwordFile` / `passwordCommand` / `password` per profile.
+
+## Desktop entry
+
+ringo is a TUI, so launching it from an application menu needs a terminal.
+The module therefore generates `~/.local/share/applications/ringo.desktop`
+with `Terminal=true` — the freedesktop convention for "run this in a
+terminal". GNOME, KDE and friends open it in their configured terminal
+emulator. On a headless machine, or wherever you don't want the entry, opt
+out:
+
+```nix
+programs.ringo.desktopEntry.enable = false;
+```
+
+The generated entry sets every field (`exec`, `categories`, …) with
+`mkDefault`, so you can tweak it through Home-Manager's
+`xdg.desktopEntries.ringo` without `mkForce`. For example, to skip the
+profile picker and always open your `work` profile:
+
+```nix
+xdg.desktopEntries.ringo = {
+  exec = "ringo start work";
+};
+```
+
+On standalone window managers where nothing interprets `Terminal=true`, wrap
+the terminal yourself instead:
+
+```nix
+xdg.desktopEntries.ringo = {
+  exec = "foot -e ringo";   # or kitty, alacritty, …
+  terminal = false;
+};
+```
+
+`exec` defaults to the package's store path, since application launchers
+don't inherit your shell's `PATH`.
 
 ## Secrets
 

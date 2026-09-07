@@ -159,6 +159,27 @@ in
       default = { };
       description = "Declarative SIP profiles, keyed by profile name.";
     };
+
+    desktopEntry = {
+      # Not mkEnableOption: the entry is the natural default on a desktop —
+      # only opt out where an app-menu entry is pointless or unwanted.
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        example = false;
+        description = ''
+          Whether to create an application-menu entry that opens the ringo TUI
+          in a terminal (on by default; set to `false` to opt out, e.g. on a
+          headless machine).
+
+          The entry is generated with the freedesktop `Terminal=true`
+          convention: GNOME, KDE and friends launch it in their configured
+          terminal emulator. On standalone window managers, the launcher must
+          support `Terminal=true` (e.g. via xdg-terminal-exec) — or set `exec`
+          yourself (see {option}`xdg.desktopEntries.ringo`).
+        '';
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -179,6 +200,29 @@ in
     }) cfg.profiles;
 
     home.packages = [ cfg.package ];
+
+    # Application-menu entry. Built on Home-Manager's xdg.desktopEntries (so
+    # it lands in ~/.local/share/applications/ringo.desktop), which users can
+    # also use to tweak the entry: every field below is set with mkDefault, so
+    # `xdg.desktopEntries.ringo.<field> = …` overrides it without mkForce.
+    #
+    # terminal = true tells the desktop environment to wrap Exec in its
+    # terminal emulator — ringo is a TUI, there is no window to map otherwise.
+    # exec points at the store path (launchers don't inherit the shell's PATH).
+    xdg.desktopEntries.ringo =
+      lib.mkIf (cfg.desktopEntry.enable && cfg.package != null && pkgs.stdenv.hostPlatform.isLinux)
+        {
+          name = lib.mkDefault "ringo";
+          genericName = lib.mkDefault "SIP Softphone";
+          comment = lib.mkDefault "Terminal SIP softphone built on baresip";
+          exec = lib.mkDefault "${cfg.package}/bin/ringo";
+          terminal = lib.mkDefault true;
+          icon = lib.mkDefault "call-start";
+          categories = lib.mkDefault [
+            "Network"
+            "Telephony"
+          ];
+        };
 
     # ringo hardcodes ~/.config/ringo (it ignores XDG_CONFIG_HOME), so target
     # the literal path via home.file rather than xdg.configFile.
