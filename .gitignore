@@ -1,4 +1,5 @@
 /target
+/target-linux*
 .claude
 
 # TypeDoc / npm tooling for the JS API docs (devDeps only; run `npm run docs:js`)

@@ -8,10 +8,12 @@ name: Build binaries
 # Single binary per target — audio auto-detected by build.rs (Linux → pulse via
 # pkg-config; macOS → coreaudio system framework).
 #
-# Both Linux targets build in a debian:bullseye container (glibc 2.31) for
-# maximum compatibility and smoke-test in debian:bookworm-slim — x86_64 on the
-# x86 runner, aarch64 natively on the free public arm64 runner. No cross-compile,
-# no multiarch apt (Ubuntu's arm64 packages aren't on the default mirrors).
+# Both Linux targets build in a debian:bookworm container (glibc 2.36) — the
+# oldest Debian still served intact by deb.debian.org; bullseye went EOL on
+# 2026-08-31 and its security pool started 404ing — and smoke-test in
+# debian:bookworm-slim: x86_64 on the x86 runner, aarch64 natively on the free
+# public arm64 runner. No cross-compile, no multiarch apt (Ubuntu's arm64
+# packages aren't on the default mirrors).
 
 on:
   workflow_call:
@@ -90,7 +92,7 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake pkg-config spandsp opus
 
-      # Linux (x86_64 + aarch64): native build inside the bullseye container on
+      # Linux (x86_64 + aarch64): native build inside the bookworm container on
       # the matching-arch runner. docker pulls the host-arch base, so the binary
       # is native for that arch — no cross-compile, no multiarch apt.
       - name: Build (Linux container)

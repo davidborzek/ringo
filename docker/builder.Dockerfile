@@ -1,4 +1,9 @@
-FROM debian:bullseye-slim
+# bookworm (glibc 2.36) is the oldest Debian whose apt pool is still intact on
+# deb.debian.org: bullseye went EOL on 2026-08-31, and bullseye-security pool
+# files were removed from the mirror while the index still listed them — apt
+# installs 404 on them, which broke CI. This raises the glibc floor of the
+# release binaries from 2.31 to 2.36.
+FROM debian:bookworm-slim
 # apt output is kept: when a mirror or a suite goes away, the exit code alone
 # ("exit code: 100") says nothing, and the build log is the only place the
 # reason ever shows up.
