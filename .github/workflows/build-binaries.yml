@@ -95,11 +95,23 @@ jobs:
       # Linux (x86_64 + aarch64): native build inside the bookworm container on
       # the matching-arch runner. docker pulls the host-arch base, so the binary
       # is native for that arch — no cross-compile, no multiarch apt.
+      #
+      # bookworm's compiler emits aarch64 outline-atomics (e.g.
+      # __aarch64_ldadd4_acq_rel) into the static C deps (libre, OpenSSL); rust
+      # links with -nodefaultlibs, so libgcc (which defines them) is never
+      # pulled in and the link fails. Same fix as crates/ringo-flow/Dockerfile:
+      # compile the C deps with -mno-outline-atomics on arm64 so the symbols
+      # are never emitted. amd64's compiler rejects the flag — arm64 only.
       - name: Build (Linux container)
         if: runner.os == 'Linux'
         run: |
           docker build -t ringo-builder -f docker/builder.Dockerfile .
+          cflags=""
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            cflags="-mno-outline-atomics"
+          fi
           docker run --rm -v "$PWD:/work" \
+            -e CFLAGS="$cflags" \
             -e HOST_UID=$(id -u) -e HOST_GID=$(id -g) \
             ringo-builder sh -c \
             'CARGO_TARGET_DIR=/work/target-linux cargo build --release -p ${{ inputs.package }} && chown -R $HOST_UID:$HOST_GID /work/target-linux'
