@@ -32,7 +32,7 @@ rhai = { version = "1", features = ["sync", "metadata", "internals"] }
 # blocking waiters (until/verifyAudio) become JS Promises and `Promise.all`
 # runs them concurrently; `loader` enables ES-module `import` of helper files;
 # classes/properties/macro back the embedding.
-rquickjs = { version = "0.12", features = ["classes", "properties", "macro", "futures", "loader"] }
+rquickjs = { version = "0.13", features = ["classes", "properties", "macro", "futures", "loader"] }
 # Drives the QuickJS async event loop on the (non-tokio) scenario thread, so the
 # engine's existing sync `block_on` verbs keep working without a nested-runtime panic.
 futures-executor = "0.3"
