@@ -310,6 +310,11 @@ fn build_vendored() {
 }
 
 fn enabled_audio_modules() -> Vec<&'static str> {
+    // Build scripts execute on the HOST, so cfg!(target_os = …) is the host
+    // platform — wrong for cross builds. CARGO_CFG_TARGET_OS is what cargo
+    // passes for the actual build target.
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
     let mut mods = vec![];
     if cfg!(feature = "pulse") {
         mods.push("pulse");
@@ -317,22 +322,26 @@ fn enabled_audio_modules() -> Vec<&'static str> {
     if cfg!(feature = "alsa") {
         mods.push("alsa");
     }
-    if cfg!(feature = "coreaudio") {
+    // coreaudio is macOS-only: the feature exists on all platforms (so
+    // `--all-features` — e.g. cargo-semver-checks in release-plz — can turn it
+    // on on Linux), but the module can only build and link against Apple
+    // frameworks. On non-Apple targets it is ignored: an explicit pulse/alsa
+    // or the auto-detect below still applies, else the build goes headless.
+    if cfg!(feature = "coreaudio") && target_os == "macos" {
         mods.push("coreaudio");
     }
 
     // No explicit audio features plus default-audio → auto-detect, unless
     // RINGO_NO_AUDIO is set as an escape hatch for packaging.
     if mods.is_empty() && cfg!(feature = "default-audio") && env::var("RINGO_NO_AUDIO").is_err() {
-        #[cfg(target_os = "macos")]
-        {
-            mods.push("coreaudio");
-        }
-        #[cfg(target_os = "linux")]
-        {
-            if pkg_config::probe_library("libpulse").is_ok() {
-                mods.push("pulse");
+        match target_os.as_str() {
+            "macos" => mods.push("coreaudio"),
+            "linux" => {
+                if pkg_config::probe_library("libpulse").is_ok() {
+                    mods.push("pulse");
+                }
             }
+            _ => {}
         }
     }
 
