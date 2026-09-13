@@ -106,7 +106,10 @@ xdg.desktopEntries.ringo = {
 ```
 
 `exec` defaults to the package's store path, since application launchers
-don't inherit your shell's `PATH`.
+don't inherit your shell's `PATH`. The icon defaults to the ringo logo
+shipped inside the package
+(`$out/share/icons/hicolor/scalable/apps/ringo.svg`), likewise referenced by
+store path — so it resolves without any icon-theme setup.
 
 ## Secrets
 

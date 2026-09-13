@@ -54,13 +54,15 @@
       # Shared derivation builder. `crate` is the workspace member / cargo
       # package; `bin` is the produced executable; `audio` toggles the
       # default-audio (PulseAudio) backend — on for the phone, off (headless
-      # aubridge) for flow.
+      # aubridge) for flow. `icon` (optional) is installed into hicolor under
+      # the binary's name, so desktop entries can reference it.
       mkRingo =
         {
           pkgs,
           crate,
           bin,
           audio,
+          icon ? null,
         }:
         let
           lib = pkgs.lib;
@@ -122,14 +124,20 @@
           # SIP peer / audio device; build the binary only.
           doCheck = false;
 
-          # Generate + install shell completions from the built binary
-          # (clap's COMPLETE=<shell> emits the script). Skipped on cross builds.
-          postInstall = lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
-            installShellCompletion --cmd ${bin} \
-              --fish <(COMPLETE=fish $out/bin/${bin}) \
-              --bash <(COMPLETE=bash $out/bin/${bin}) \
-              --zsh <(COMPLETE=zsh $out/bin/${bin})
-          '';
+          # Install the icon and generate + install shell completions from the
+          # built binary (clap's COMPLETE=<shell> emits the script). The icon is
+          # unconditional (a file copy, works on cross builds); completions need
+          # to execute the binary, so they are skipped on cross builds.
+          postInstall =
+            lib.optionalString (icon != null) ''
+              install -Dm644 ${icon} $out/share/icons/hicolor/scalable/apps/${bin}.svg
+            ''
+            + lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
+              installShellCompletion --cmd ${bin} \
+                --fish <(COMPLETE=fish $out/bin/${bin}) \
+                --bash <(COMPLETE=bash $out/bin/${bin}) \
+                --zsh <(COMPLETE=zsh $out/bin/${bin})
+            '';
 
           meta = {
             inherit (cargoToml.package) description;
@@ -152,6 +160,9 @@
             crate = "ringo-phone";
             bin = "ringo";
             audio = true;
+            # The docs logo doubles as the application icon; the Home-Manager
+            # module's desktop entry points at the installed store path.
+            icon = ./docs/src/logo.svg;
           };
           ringo-flow = mkRingo {
             inherit pkgs;

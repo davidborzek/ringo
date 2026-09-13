@@ -208,7 +208,9 @@ in
     #
     # terminal = true tells the desktop environment to wrap Exec in its
     # terminal emulator — ringo is a TUI, there is no window to map otherwise.
-    # exec points at the store path (launchers don't inherit the shell's PATH).
+    # exec points at the store path (launchers don't inherit the shell's PATH);
+    # icon likewise points at the packaged ringo logo by store path, so it
+    # resolves without icon-theme/XDG_DATA_DIRS setup.
     xdg.desktopEntries.ringo =
       lib.mkIf (cfg.desktopEntry.enable && cfg.package != null && pkgs.stdenv.hostPlatform.isLinux)
         {
@@ -217,7 +219,7 @@ in
           comment = lib.mkDefault "Terminal SIP softphone built on baresip";
           exec = lib.mkDefault "${cfg.package}/bin/ringo";
           terminal = lib.mkDefault true;
-          icon = lib.mkDefault "call-start";
+          icon = lib.mkDefault "${cfg.package}/share/icons/hicolor/scalable/apps/ringo.svg";
           categories = lib.mkDefault [
             "Network"
             "Telephony"

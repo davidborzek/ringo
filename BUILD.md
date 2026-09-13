@@ -7,6 +7,27 @@ ringo-flow (tone/file generation, received-audio capture for `verify-audio` and
 `--save-audio`) is handled in-process by ringo's own baresip ausrc/auplay module
 — no libsndfile.
 
+## Nix dev shell
+
+The flake's dev shell inherits the full build environment (cmake, pkg-config,
+bindgen, perl, opus, spandsp, zlib, libpulseaudio, cargo, rustc) from the
+actual package, so it can never drift from the build — plus `rustfmt`, `clippy`
+and `rust-analyzer`:
+
+```bash
+nix develop
+```
+
+With [direnv](https://direnv.net/) the shell loads automatically on `cd`:
+
+```bash
+direnv allow   # once; the committed .envrc + nix-direnv do the rest
+```
+
+The `.envrc` uses the system's nix-direnv when installed and bootstraps a
+pinned copy otherwise. Everything below (the manual dependency setup) is only
+needed without Nix.
+
 ## Build-time dependencies
 
 ### Required (all platforms)
