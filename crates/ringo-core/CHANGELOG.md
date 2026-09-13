@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1](https://github.com/davidborzek/ringo/compare/ringo-core-v0.16.0...ringo-core-v0.16.1) - 2026-09-13
+
+### Bug Fixes
+
+- *(ringo-core)* collapse the if in the build.rs target match into a guard
+- *(ringo-core)* only enable the coreaudio module on Apple targets
+- *(deps)* update rust dependencies (non-major) ([#120](https://github.com/davidborzek/ringo/pull/120))
+
 ## [0.16.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.15.0...ringo-core-v0.16.0) - 2026-08-31
 
 ### Features

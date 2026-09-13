@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.3](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.14.2...ringo-flow-v0.14.3) - 2026-09-13
+
+### Bug Fixes
+
+- *(deps)* update rust dependencies (non-major) ([#120](https://github.com/davidborzek/ringo/pull/120))
+- *(deps)* update rust crate croner to v4 ([#114](https://github.com/davidborzek/ringo/pull/114))
+
 ## [0.14.1](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.14.0...ringo-flow-v0.14.1) - 2026-08-24
 
 ### Documentation
