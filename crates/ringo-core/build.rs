@@ -336,11 +336,7 @@ fn enabled_audio_modules() -> Vec<&'static str> {
     if mods.is_empty() && cfg!(feature = "default-audio") && env::var("RINGO_NO_AUDIO").is_err() {
         match target_os.as_str() {
             "macos" => mods.push("coreaudio"),
-            "linux" => {
-                if pkg_config::probe_library("libpulse").is_ok() {
-                    mods.push("pulse");
-                }
-            }
+            "linux" if pkg_config::probe_library("libpulse").is_ok() => mods.push("pulse"),
             _ => {}
         }
     }
