@@ -2379,7 +2379,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-flow"
-version = "0.14.3"
+version = "0.14.4"
 dependencies = [
  "anyhow",
  "axum",
@@ -2417,7 +2417,7 @@ dependencies = [
 
 [[package]]
 name = "ringo-phone"
-version = "0.16.1"
+version = "0.16.2"
 dependencies = [
  "anyhow",
  "cargo-husky",
