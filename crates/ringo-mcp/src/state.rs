@@ -97,6 +97,7 @@ pub fn reduce(state: &mut AgentState, event: &AppEvent) {
         }
         AppEvent::CallHold { call_id } => state.set_phase(call_id, CallPhase::Held),
         AppEvent::CallResume { call_id } => state.set_phase(call_id, CallPhase::Established),
+        AppEvent::UtteranceFinished { .. } => {}
         // Not state-relevant for the tool surface; surfaced live via wait_event.
         AppEvent::CallDeflected { .. }
         | AppEvent::CallTransferFailed { .. }

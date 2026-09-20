@@ -84,6 +84,11 @@ pub enum AppEvent {
     CallTransferFailed {
         call_id: String,
     },
+    /// A speech-to-text utterance was recognized from the agent's received
+    /// audio. Produced by the parent-side speech layer (not the worker).
+    UtteranceFinished {
+        text: String,
+    },
     VoicemailStatus {
         waiting: bool,
         new_count: u32,

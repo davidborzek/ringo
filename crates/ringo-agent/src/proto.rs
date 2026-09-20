@@ -369,6 +369,9 @@ pub enum WireEvent {
     CallTransferFailed {
         call_id: String,
     },
+    UtteranceFinished {
+        text: String,
+    },
     VoicemailStatus {
         waiting: bool,
         new_count: u32,
@@ -438,6 +441,7 @@ impl From<&AppEvent> for WireEvent {
             AppEvent::CallTransferFailed { call_id } => Self::CallTransferFailed {
                 call_id: call_id.clone(),
             },
+            AppEvent::UtteranceFinished { text } => Self::UtteranceFinished { text: text.clone() },
             AppEvent::CallDeflected {
                 from,
                 display_name,
@@ -499,6 +503,7 @@ impl From<WireEvent> for AppEvent {
             WireEvent::CallHold { call_id } => AppEvent::CallHold { call_id },
             WireEvent::CallResume { call_id } => AppEvent::CallResume { call_id },
             WireEvent::CallTransferFailed { call_id } => AppEvent::CallTransferFailed { call_id },
+            WireEvent::UtteranceFinished { text } => AppEvent::UtteranceFinished { text },
             WireEvent::CallDeflected {
                 from,
                 display_name,

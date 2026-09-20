@@ -554,6 +554,8 @@ pub struct Agent {
     /// The agent's single TX writer channel, lazily created by
     /// [`Agent::tx_channel`] (same-thread sequencing — see `TxMsg`).
     tx: AsyncMutex<Option<mpsc::Sender<TxMsg>>>,
+    /// Whether the STT recognition task has been started for this agent.
+    stt_started: std::sync::atomic::AtomicBool,
     /// The agent's event log (owned by the hub `Slot`; ids survive respawns).
     log: Arc<EventLog>,
     /// Config-declared custom-header templates for outgoing INVITEs: static
@@ -665,6 +667,7 @@ impl Agent {
             log,
             rx_tap: AsyncMutex::new(None),
             tx: AsyncMutex::new(None),
+            stt_started: std::sync::atomic::AtomicBool::new(false),
             custom_headers,
         })
     }
@@ -1010,6 +1013,56 @@ impl Agent {
     /// Ask this agent's worker to deregister and exit (server teardown).
     pub fn shutdown_worker(&self) {
         self.client.request_shutdown();
+    }
+
+    /// Start the STT recognition task (once per agent): subscribes to the
+    /// agent's received audio, feeds it to the recognizer, and appends each
+    /// utterance to the event log + broadcast.
+    #[cfg(feature = "speech")]
+    pub async fn start_stt(&self, stt: ringo_speech::RecognizerHolder) {
+        if self
+            .stt_started
+            .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            return; // already running
+        }
+        let mut rx = self.rx_frames().await;
+        let log = Arc::clone(&self.log);
+        let events = self.events.clone();
+        tokio::spawn(async move {
+            let mut stt = stt;
+            loop {
+                let frame =
+                    match tokio::time::timeout(std::time::Duration::from_secs(30), rx.recv()).await
+                    {
+                        Ok(Ok(frame)) => frame,
+                        Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+                        Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
+                        Err(_) => continue, // timeout, check for closed below
+                    };
+                // VAD is cheap; ASR (Whisper) is CPU-heavy → blocking.
+                let (samples, rate) = (frame.samples, frame.rate);
+                let utterances = {
+                    // VAD is cheap (~ms); the ASR decode is the heavy part.
+                    // For now, feed inline — Silero+tiny-whisper on a modern
+                    // CPU handles a 20ms frame in <10ms. If profiling shows
+                    // contention, move to a dedicated channel + thread.
+                    stt.feed(&frame.samples, frame.rate)
+                };
+                let utterances = match utterances {
+                    Ok(u) => u,
+                    Err(_) => break,
+                };
+                for u in utterances {
+                    let event = ringo_core::event::AppEvent::UtteranceFinished {
+                        text: u.text.clone(),
+                    };
+                    let id = log.append(event.clone());
+                    let _ = events.send((id, event.clone()));
+                    eprintln!("ringo-mcp: utterance: {}", u.text);
+                }
+            }
+        });
     }
 
     /// Number of currently active calls.

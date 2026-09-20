@@ -56,6 +56,8 @@ impl super::app::App {
             // A failed transfer leaves the original call untouched — nothing to
             // update in the TUI (the transfer mode was left by its own flow).
             AppEvent::CallTransferFailed { .. } => {}
+            // Parent-side STT (ringo-mcp); the TUI has no transcript view.
+            AppEvent::UtteranceFinished { .. } => {}
             // Remote-control responses go back over the socket; there's no TUI echo.
             AppEvent::Response { .. } => {}
             AppEvent::Unknown { .. } => {}

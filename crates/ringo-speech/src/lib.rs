@@ -12,6 +12,9 @@
 mod wav;
 
 #[cfg(feature = "sherpa")]
+mod sherpa_stt;
+
+#[cfg(feature = "sherpa")]
 mod sherpa_tts;
 
 pub use wav::{wav_duration, write_mono_wav};
@@ -66,6 +69,78 @@ impl Synthesized {
             return std::time::Duration::ZERO;
         }
         std::time::Duration::from_secs_f64(self.samples.len() as f64 / self.sample_rate as f64)
+    }
+}
+
+/// A recognized utterance (one complete speech segment).
+#[derive(Debug, Clone)]
+pub struct Utterance {
+    /// The transcribed text.
+    pub text: String,
+    /// The utterance's audio duration in ms.
+    pub duration_ms: u64,
+}
+
+/// A speech-to-text recognizer: feed audio, get utterances.
+///
+/// The recognizer maintains VAD state internally; call [`Recognizer::feed`]
+/// with each incoming audio chunk. Utterances are emitted when the VAD detects
+/// a complete speech segment (speech + trailing silence).
+pub trait Recognizer: Send {
+    /// Feed a chunk of mono s16 PCM; returns any utterances that completed.
+    fn feed(&mut self, pcm: &[i16], sample_rate: u32) -> Vec<Utterance>;
+
+    /// Flush any pending speech (e.g. at the end of a call).
+    fn flush(&mut self) -> Vec<Utterance>;
+}
+
+/// An owned STT engine behind the vendor-agnostic trait.
+pub struct RecognizerHolder(pub(crate) Box<dyn Recognizer>);
+
+impl std::fmt::Debug for RecognizerHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Recognizer")
+    }
+}
+
+impl RecognizerHolder {
+    /// Feed a chunk (delegates to the engine).
+    pub fn feed(&mut self, pcm: &[i16], rate: u32) -> Vec<Utterance> {
+        self.0.feed(pcm, rate)
+    }
+
+    /// Flush pending speech.
+    pub fn flush(&mut self) -> Vec<Utterance> {
+        self.0.flush()
+    }
+}
+
+/// Neutral STT configuration.
+#[derive(Debug, Clone)]
+pub struct SttConfig {
+    /// The VAD model file (e.g. silero_vad.onnx).
+    pub vad_model: std::path::PathBuf,
+    /// The ASR model directory (e.g. a whisper-tiny dir with encoder/decoder/tokens).
+    pub asr_model_dir: std::path::PathBuf,
+    /// Recognition language ("de", "en", ...; "auto" for auto-detect).
+    pub language: String,
+}
+
+/// Load an STT engine. The backend is chosen at compile time (feature
+/// `sherpa`); callers see only [`Recognizer`].
+pub fn load_stt(config: &SttConfig) -> anyhow::Result<RecognizerHolder> {
+    #[cfg(feature = "sherpa")]
+    {
+        Ok(RecognizerHolder(Box::new(sherpa_stt::SherpaStt::load(
+            &config.vad_model,
+            &config.asr_model_dir,
+            &config.language,
+        )?)))
+    }
+    #[cfg(not(feature = "sherpa"))]
+    {
+        let _ = config;
+        anyhow::bail!("no STT backend compiled in — rebuild ringo-speech with the `sherpa` feature")
     }
 }
 

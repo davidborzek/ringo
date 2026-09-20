@@ -457,6 +457,7 @@ pub fn event_name(e: &ringo_core::event::AppEvent) -> &'static str {
         VoicemailStatus { .. } => "voicemail_status",
         Response { .. } => "response",
         Unknown { .. } => "unknown",
+        UtteranceFinished { .. } => "utterance_finished",
         BackendConnectFailed { .. } => "backend_connect_failed",
     }
 }
@@ -520,6 +521,7 @@ pub(crate) fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
         // kept for direct event_json callers — deliberately WITHOUT the raw
         // backend class/type numbers: backend details don't leak here.
         Unknown { .. } => json!({"event": "unknown"}),
+        UtteranceFinished { text } => json!({"event": "utterance_finished", "text": text}),
         BackendConnectFailed { reason } => {
             json!({"event": "backend_connect_failed", "reason": reason})
         }
