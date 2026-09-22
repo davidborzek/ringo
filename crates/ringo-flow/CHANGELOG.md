@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.4](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.14.3...ringo-flow-v0.14.4) - 2026-09-22
+
+### Bug Fixes
+
+- *(deps)* update rust crate rquickjs to 0.14 ([#124](https://github.com/davidborzek/ringo/pull/124))
+
 ## [0.14.3](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.14.2...ringo-flow-v0.14.3) - 2026-09-13
 
 ### Bug Fixes
