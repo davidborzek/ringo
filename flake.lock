@@ -3,16 +3,16 @@
     "baresip": {
       "flake": false,
       "locked": {
-        "lastModified": 1787569773,
-        "narHash": "sha256-GMR1XteY8IjbebRzD4FxCRqbrwP3kPbV8oW/+L85eLs=",
+        "lastModified": 1790790056,
+        "narHash": "sha256-YwbUFAN3Vt9FsjYX8G91O8GgE6+Eh+CUMTSeV/sWHWE=",
         "owner": "baresip",
         "repo": "baresip",
-        "rev": "3d30821f099925d24167f8a99e93ba4d1be98599",
+        "rev": "9cfab81550acc4bd38d6580d79b45cc6eea65cd6",
         "type": "github"
       },
       "original": {
         "owner": "baresip",
-        "ref": "v4.11.0",
+        "ref": "v4.12.0",
         "repo": "baresip",
         "type": "github"
       }
@@ -36,16 +36,16 @@
     "re": {
       "flake": false,
       "locked": {
-        "lastModified": 1787569409,
-        "narHash": "sha256-cG7etDjpWdOhZ2dUhkXxlKpDpEoUG/7z8KkQXgSSVbw=",
+        "lastModified": 1790790028,
+        "narHash": "sha256-lZ/C2+ymPMYq0K0PiuOr/aEpHAWMOZZFBE6wNO/hGcM=",
         "owner": "baresip",
         "repo": "re",
-        "rev": "ceefe9ff499aa1bcfb6255aff1737434dd385322",
+        "rev": "65555dad439de9d6a81b3ee6092b9c096585249b",
         "type": "github"
       },
       "original": {
         "owner": "baresip",
-        "ref": "v4.11.0",
+        "ref": "v4.12.0",
         "repo": "re",
         "type": "github"
       }
