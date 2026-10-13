@@ -64,8 +64,8 @@ when using `wait_established`.
 | Tool | Args | Effect |
 | ---- | ---- | ------ |
 | `agent_stop` | `agent` | Stop the agent's worker (deregister + exit). Idempotent; the agent starts again on its next use. |
-| `dial` | `agent`, `target` | Place an outgoing call. `target` is a full URI, `user@host`, or a bare number/extension (resolved to `sip:<target>@<agent domain>`); `tel:`/`callto:` and number separators are stripped. Subject to the `--dial-allow`/`--dial-deny` policy. Re-renders dynamic header templates (fresh `${uuid}`). |
-| `accept` | `agent` | Accept the currently ringing (incoming) call. |
+| `dial` | `agent`, `target`, `record?` | Place an outgoing call. `target` is a full URI, `user@host`, or a bare number/extension (resolved to `sip:<target>@<agent domain>`); `tel:`/`callto:` and number separators are stripped. Subject to the `--dial-allow`/`--dial-deny` policy. Re-renders dynamic header templates (fresh `${uuid}`). `record: true` records this call (see [Recording](#recording)). |
+| `accept` | `agent`, `record?` | Accept the currently ringing (incoming) call. `record: true` records this call (see [Recording](#recording)). |
 | `hangup` | `agent` | Hang up the current call. |
 | `hangup_all` | `agent` | Hang up all calls. |
 | `hold` / `resume` | `agent` | Hold / resume. |
@@ -172,15 +172,44 @@ Custom headers on the agent's **outgoing** INVITEs, at runtime.
 
 ## Recording
 
+Recording captures a call's sent + received audio in-process (headless
+agents capture both sides; hold/resume does not cut a recording). Turn it on
+per call — `record_start` before or at the call start, or `record: true` on
+`dial`/`accept` — or for every call with `record_audio = true` in `[backend]`.
+One recording per agent; parallel calls mix into it.
+
+### `record_start` / `record_stop`
+
+```jsonc
+{ "agent": "alice" }
+// → "recording started for `alice` (save with `save_audio`; …)"
+```
+
+`record_start` arms recording now and starts a fresh recording (a previous
+recording is cleared); arm before or at the start of a call to capture all of
+it. `record_stop` disarms; the recorded audio is kept for `save_audio` until
+the next recording or call starts. A per-call recording (`record_start` /
+`record: true`) is disarmed automatically when the agent's last call ends —
+the audio stays saveable.
+
 ### `save_audio`
 
 ```jsonc
 { "agent": "alice", "prefix": "call" }
-// → { "files": ["call-a1b2…-01.wav"] }
+// → { "files": [
+//       { "path": "call-sent.wav", "kind": "sent",
+//         "duration_ms": 42000, "truncated": false },
+//       { "path": "call-recv.wav", "kind": "recv",
+//         "duration_ms": 42000, "truncated": false } ] }
 ```
 
-Writes the current call's sent + received audio as WAVs. Requires
-`record_audio = true` in `[backend]`.
+Writes the recorded sent + received audio as `<prefix>-sent.wav` /
+`<prefix>-recv.wav`, each with its duration. `truncated: true` means the call
+was longer than the 600 s retention cap — the WAV holds only the newest audio.
+Works during and after the call, until the next recording or call starts.
+Errors clearly when recording was never on for the agent (call `record_start`,
+pass `record: true`, or set `record_audio = true` in `[backend]`), and when
+recording is on but nothing has been captured yet.
 
 ## Trace
 

@@ -23,7 +23,7 @@ pub mod worker;
 pub(crate) mod client;
 pub(crate) mod proto;
 
-pub use client::ProcessClient;
+pub use client::{ProcessClient, SavedAudio};
 pub use proto::AgentConfig;
 /// Re-exported so a consumer of [`ProcessClient::start_rx_audio`] can name the
 /// streamed frame type without also depending on `ringo-core`.

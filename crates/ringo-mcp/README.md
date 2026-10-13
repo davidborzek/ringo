@@ -67,7 +67,7 @@ dtmf_mode = "info"   # SIP-INFO DTMF — reliable when the audio source is idle
 [backend]
 audio_driver = "aubridge"   # headless default (no sound hardware needed)
 # max_calls, local_timeout_s, sip_cafile, sip_capath, user_agent,
-# hold_other_calls (default false), record_audio (for save_audio)
+# hold_other_calls (default false), record_audio (record every call by default)
 ```
 
 Multiple agents = multiple UAs, one process each. Each registers its own AOR;
@@ -81,8 +81,8 @@ the only UA in its process — see the ringo-core `Account` docs).
 | --- | --- |
 | `list_agents` | All configured agents: name, AOR, running, registration, calls |
 | `agent_status` | One agent: registration, calls, media stats, received DTMF (starts the agent if not yet running) |
-| `dial` | Outgoing call (`agent`, `target`: URI, `user@host`, or bare extension); optional `wait_established` blocks until the outcome (established / failed with reason / still-ringing with call_id) |
-| `accept` / `hangup` / `hangup_all` | Answer / end calls |
+| `dial` | Outgoing call (`agent`, `target`: URI, `user@host`, or bare extension; optional `record: true` records the call); optional `wait_established` blocks until the outcome (established / failed with reason / still-ringing with call_id) |
+| `accept` / `hangup` / `hangup_all` | Answer (optional `record: true`) / end calls |
 | `hold` / `resume` / `mute` | In-call control. `agent_status` reflects local holds (`"held"` phase); peer holds arrive as `call_hold`/`call_resume` events |
 | `send_dtmf` | One digit (`0-9`, `*`, `#`, `A-F`) |
 | `transfer` | Blind transfer of the current call |
@@ -92,7 +92,8 @@ the only UA in its process — see the ringo-core `Account` docs).
 | `agent_stop` | Stop an agent's worker (deregister + exit; restarts on next use) |
 | `call_headers` | SIP headers of received INVITEs, per Call-ID or all (newest first) |
 | `add_header` / `rm_header` | Custom headers on outgoing INVITEs (runtime; `${uuid}` renders once, immediately) |
-| `save_audio` | Write the current call's audio to WAVs (needs `record_audio`) |
+| `record_start` / `record_stop` | Record an agent's calls (sent + received; `record_start` starts fresh, `record_stop` keeps the audio for `save_audio`) |
+| `save_audio` | Write the recorded audio to WAVs (paths, durations, truncation flag) |
 | `sip_trace` | Recent SIP messages of an agent (plaintext, also TLS), filterable by Call-ID |
 
 Call control is fire-and-forget: observe progress with `wait_event`

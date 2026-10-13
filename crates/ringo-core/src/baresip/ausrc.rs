@@ -369,8 +369,9 @@ unsafe extern "C" fn alloc_handler(
         arg: arg as usize,
     };
 
-    // Reset the sent-audio buffer so a save sees only this call.
-    reset_buffer(tx_buffers(), &key, srate);
+    // Arm the sent-audio buffer for this stream (keeps samples when full
+    // capture is on — see alloc_buffer).
+    alloc_buffer(tx_buffers(), &key, srate);
 
     let key_thread = key.clone();
     let thread = match std::thread::Builder::new()
@@ -637,13 +638,22 @@ unsafe impl Send for WriteCb {}
 struct AudioBuf {
     srate: u32,
     samples: VecDeque<i16>,
+    /// Holds a finished recording (capture was disarmed): no more samples are
+    /// appended, so the 3 s verify cap can't trim it before it is saved.
+    /// Cleared by the next arm or stream (re)alloc.
+    frozen: bool,
 }
 
 /// Seconds of audio retained per UA for verification (the verify window tail).
 const VERIFY_RETAIN_SECS: usize = 3;
+/// Cap on a full-call recording: only the newest [`RECORDING_MAX_SECS`] seconds
+/// are retained per UA (older audio is dropped; a save flags it truncated).
+/// Public via `ringo_core::RECORDING_MAX_SECS` so callers can flag truncation
+/// against the same cap.
+pub const RECORDING_MAX_SECS: u64 = 600;
 /// Seconds retained when full capture is on (`--save-audio`); bounds a runaway
 /// call. Test calls are far shorter.
-const FULL_RETAIN_SECS: usize = 600;
+const FULL_RETAIN_SECS: usize = RECORDING_MAX_SECS as usize;
 
 /// Whether to retain the whole call (for `--save-audio`) vs. just the verify
 /// window. Set once per process from `BackendOptions.record_audio`.
@@ -665,6 +675,28 @@ pub(super) fn set_full_capture(on: bool) {
     FULL_CAPTURE.store(on, Ordering::Release);
 }
 
+/// Arm or disarm full-call capture for `key`. Arming starts a fresh recording
+/// (the UA's buffered samples are cleared, the srate stays); disarming returns
+/// to the 3 s verify window (sent side no longer captured) but KEEPS the
+/// buffers until the next arm/alloc, so a save after hangup still works.
+pub(super) fn arm_capture(key: &str, full: bool) {
+    let was_full = FULL_CAPTURE.swap(full, Ordering::AcqRel);
+    for buffers in [tx_buffers(), rx_buffers()] {
+        if let Some(buf) = buffers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(key)
+        {
+            if full {
+                buf.samples.clear();
+                buf.frozen = false;
+            } else if was_full {
+                buf.frozen = true;
+            }
+        }
+    }
+}
+
 fn retain_secs() -> usize {
     if FULL_CAPTURE.load(Ordering::Acquire) {
         FULL_RETAIN_SECS
@@ -673,16 +705,59 @@ fn retain_secs() -> usize {
     }
 }
 
-/// Reset a UA's buffer in `buffers` to empty at `srate` (called on (re)alloc so
-/// a verify/save sees only the current call).
+/// Reset a UA's buffer in `buffers` to empty at `srate` (called when a stream
+/// (re)alloc must start fresh — see [`alloc_buffer`]).
 fn reset_buffer(buffers: &Mutex<HashMap<String, AudioBuf>>, key: &str, srate: u32) {
     buffers.lock().unwrap_or_else(|e| e.into_inner()).insert(
         key.to_string(),
         AudioBuf {
             srate,
             samples: VecDeque::new(),
+            frozen: false,
         },
     );
+}
+
+/// Prepare a UA's buffer for a (re)allocated stream: create it at the negotiated
+/// `srate` if absent, reset it if the rate changed (mixing rates would corrupt
+/// the WAV), otherwise keep the samples.
+fn prepare_buffer(buffers: &Mutex<HashMap<String, AudioBuf>>, key: &str, srate: u32) {
+    let mut map = buffers.lock().unwrap_or_else(|e| e.into_inner());
+    match map.get_mut(key) {
+        None => {
+            map.insert(
+                key.to_string(),
+                AudioBuf {
+                    srate,
+                    samples: VecDeque::new(),
+                    frozen: false,
+                },
+            );
+        }
+        Some(buf) if buf.srate != srate => {
+            crate::rlog!(
+                Info,
+                "ringo ausrc: key={key} srate {} -> {srate}, resetting buffer",
+                buf.srate
+            );
+            buf.srate = srate;
+            buf.samples.clear();
+            buf.frozen = false;
+        }
+        _ => {}
+    }
+}
+
+/// Buffer policy on stream (re)alloc: with full capture on, samples survive
+/// (a re-INVITE hold/resume must not wipe a running recording); with it off,
+/// reset — the verify window reflects only the current stream, and a disarmed
+/// recording is bounded by the next call.
+fn alloc_buffer(buffers: &Mutex<HashMap<String, AudioBuf>>, key: &str, srate: u32) {
+    if FULL_CAPTURE.load(Ordering::Acquire) {
+        prepare_buffer(buffers, key, srate);
+    } else {
+        reset_buffer(buffers, key, srate);
+    }
 }
 
 /// The retained received mono samples for `key` and their sample rate.
@@ -708,6 +783,9 @@ fn capture_mono(buffers: &Mutex<HashMap<String, AudioBuf>>, key: &str, samples: 
     let Some(buf) = map.get_mut(key) else {
         return;
     };
+    if buf.frozen {
+        return;
+    }
     buf.samples.extend(samples.iter().copied());
     let cap = (buf.srate as usize * retain_secs()).max(1);
     while buf.samples.len() > cap {
@@ -785,8 +863,9 @@ unsafe extern "C" fn play_alloc_handler(
     }
     let ch = prm.ch;
 
-    // The device key (= account username) identifies this UA's RX buffer. Reset
-    // it on (re)alloc so a verify reads only the current call's received audio.
+    // The device key (= account username) identifies this UA's RX buffer.
+    // Arm it for this stream (reset while full capture is off, keep samples
+    // while it is on — see alloc_buffer).
     let key = if dev.is_null() {
         String::new()
     } else {
@@ -795,7 +874,7 @@ unsafe extern "C" fn play_alloc_handler(
             .into_owned()
     };
     if !key.is_empty() {
-        reset_buffer(rx_buffers(), &key, srate);
+        alloc_buffer(rx_buffers(), &key, srate);
     }
 
     let cell = unsafe { mem_zalloc(std::mem::size_of::<*mut PlayState>(), Some(play_destructor)) };
@@ -1002,5 +1081,90 @@ mod tests {
         // Teardown drops the per-UA queue.
         remove_generator(key);
         assert!(stream_queue(key).is_none());
+    }
+
+    #[test]
+    fn prepare_buffer_creates_keeps_and_resets_on_rate_change() {
+        let key = "ringo-test-prepare";
+        // Missing → created empty at the negotiated rate.
+        prepare_buffer(rx_buffers(), key, 8000);
+        assert_eq!(buffer_window(rx_buffers(), key), Some((vec![], 8000)));
+        capture_mono(rx_buffers(), key, &[1, 2, 3]);
+        // Same rate → samples survive (a hold/resume re-alloc must not wipe).
+        prepare_buffer(rx_buffers(), key, 8000);
+        assert_eq!(
+            buffer_window(rx_buffers(), key),
+            Some((vec![1, 2, 3], 8000))
+        );
+        // Different rate → reset (mixing rates would corrupt the WAV).
+        prepare_buffer(rx_buffers(), key, 16000);
+        assert_eq!(buffer_window(rx_buffers(), key), Some((vec![], 16000)));
+        remove_generator(key);
+    }
+
+    // FULL_CAPTURE is a process-global static shared by parallel tests, so
+    // every test that toggles it lives in this ONE test fn.
+    #[test]
+    fn arm_capture_scopes_retention_and_allocs() {
+        let key = "ringo-test-arm";
+        let srate = 8000u32;
+        let sec = srate as usize;
+
+        // Armed: a re-arm clears the previous recording (fresh start), the
+        // buffers keep their srate, and retention is capped at 600 s.
+        arm_capture(key, true);
+        prepare_buffer(tx_buffers(), key, srate);
+        prepare_buffer(rx_buffers(), key, srate);
+        capture_mono(tx_buffers(), key, &vec![7i16; sec * 601]);
+        assert_eq!(
+            buffer_window(tx_buffers(), key).unwrap().0.len(),
+            sec * FULL_RETAIN_SECS
+        );
+        arm_capture(key, true);
+        assert_eq!(
+            (
+                buffer_window(tx_buffers(), key),
+                buffer_window(rx_buffers(), key)
+            ),
+            (Some((vec![], srate)), Some((vec![], srate)))
+        );
+
+        // With capture on, a (re)alloc keeps samples (hold/resume survives).
+        capture_mono(rx_buffers(), key, &[3]);
+        alloc_buffer(rx_buffers(), key, srate);
+        assert_eq!(buffer_window(rx_buffers(), key), Some((vec![3], srate)));
+
+        // Disarmed mid-call: the recording is kept as is — audio still
+        // arriving must neither append to it nor trim it to the 3 s window…
+        let long = vec![3i16; sec * 10];
+        capture_mono(rx_buffers(), key, &long[1..]);
+        arm_capture(key, false);
+        capture_mono(rx_buffers(), key, &vec![5i16; sec * 4]);
+        assert_eq!(
+            buffer_window(rx_buffers(), key),
+            Some((long.clone(), srate))
+        );
+        // …and a second disarm doesn't change that.
+        arm_capture(key, false);
+        assert_eq!(
+            buffer_window(rx_buffers(), key).unwrap().0.len(),
+            long.len()
+        );
+        // The next stream (re)alloc starts fresh with the 3 s verify window.
+        alloc_buffer(rx_buffers(), key, srate);
+        assert_eq!(buffer_window(rx_buffers(), key), Some((vec![], srate)));
+        capture_mono(rx_buffers(), key, &vec![5i16; sec * 4]);
+        assert_eq!(
+            buffer_window(rx_buffers(), key).unwrap().0.len(),
+            sec * VERIFY_RETAIN_SECS
+        );
+        // A new arm unfreezes and clears.
+        arm_capture(key, false);
+        arm_capture(key, true);
+        assert_eq!(buffer_window(rx_buffers(), key), Some((vec![], srate)));
+
+        // Leave the process-global flag off for the other tests.
+        arm_capture(key, false);
+        remove_generator(key);
     }
 }

@@ -97,12 +97,18 @@ impl Server {
 
     /// Call a tool and return its content text.
     fn tool(&mut self, name: &str, args: Value) -> Value {
+        let reply = self.tool_reply(name, args);
+        reply["result"]["content"][0]["text"].clone()
+    }
+
+    /// Call a tool and return the full JSON-RPC reply (errors included).
+    fn tool_reply(&mut self, name: &str, args: Value) -> Value {
         let req = format!(
             r#"{{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{{"name":"{name}","arguments":{}}}}}"#,
             serde_json::to_string(&args).unwrap()
         );
         self.request(&req);
-        self.reply()["result"]["content"][0]["text"].clone()
+        self.reply()
     }
 }
 
@@ -383,6 +389,49 @@ fn sip_trace_returns_sent_messages_filterable_by_call_id() {
     );
 
     let _ = server.tool("hangup_all", serde_json::json!({"agent": "alice"}));
+}
+
+/// A tool error surfaces as a JSON-RPC error; its message tells the caller
+/// what to do.
+fn tool_error_message(reply: &Value) -> String {
+    reply["error"]["message"]
+        .as_str()
+        .unwrap_or_else(|| panic!("expected a JSON-RPC error, got {reply:?}"))
+        .to_string()
+}
+
+#[test]
+fn save_audio_without_and_with_recording() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = write_config(tmp.path());
+    let mut server = Server::start(&config);
+
+    // Without recording: a clear error naming the ways out (must mention
+    // `record`, so the model learns how to turn recording on).
+    let reply = server.tool_reply(
+        "save_audio",
+        serde_json::json!({"agent": "alice", "prefix": "rec"}),
+    );
+    let msg = tool_error_message(&reply);
+    assert!(msg.contains("record"), "{msg}");
+    assert!(msg.contains("record_start"), "{msg}");
+
+    // record_start arms recording; with no call there is no audio yet — a
+    // DIFFERENT error than "recording is off".
+    let started = server.tool("record_start", serde_json::json!({"agent": "alice"}));
+    assert!(started.as_str().unwrap().contains("recording started"));
+    let reply = server.tool_reply(
+        "save_audio",
+        serde_json::json!({"agent": "alice", "prefix": "rec"}),
+    );
+    let msg = tool_error_message(&reply);
+    assert!(msg.contains("no audio"), "{msg}");
+    assert!(!msg.contains("recording is off"), "{msg}");
+
+    // record_stop disarms (idempotent), keeping whatever was recorded.
+    let stopped = server.tool("record_stop", serde_json::json!({"agent": "alice"}));
+    assert!(stopped.as_str().unwrap().contains("recording stopped"));
+    let _ = server.tool("record_stop", serde_json::json!({"agent": "alice"}));
 }
 
 #[cfg(unix)]

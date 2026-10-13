@@ -11,6 +11,7 @@
 
 use crate::proto::{
     self, AgentConfig, Command, FromWorker, Query, QueryEnvelope, ReplyResult, ToWorker,
+    WireSavedAudio,
 };
 use anyhow::{Context, Result};
 use ringo_core::AudioFrame;
@@ -37,6 +38,41 @@ const READY_TIMEOUT: Duration = Duration::from_secs(10);
 /// Must exceed the worker's de-REGISTER wait (see `UNREGISTER_TIMEOUT`) plus its
 /// RE-thread shutdown, or we'd kill it mid-deregister and leak the binding.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
+/// One WAV written by [`ProcessClient::save_audio_detailed`]: which side of
+/// the call it holds, how much audio it contains, and whether the recording
+/// hit the retention cap (only the newest
+/// `ringo_core::RECORDING_MAX_SECS` seconds are kept).
+#[derive(Debug, Clone)]
+pub struct SavedAudio {
+    /// The WAV file path written.
+    pub path: String,
+    /// Which side of the call: `"sent"` or `"recv"`.
+    pub kind: String,
+    /// Recorded duration in milliseconds.
+    pub duration_ms: u64,
+    /// Captured mono samples at `srate`.
+    pub samples: usize,
+    /// Sample rate in Hz.
+    pub srate: u32,
+    /// Whether the recording reached the retention cap (the WAV holds only
+    /// the newest audio).
+    pub truncated: bool,
+}
+
+impl From<WireSavedAudio> for SavedAudio {
+    fn from(w: WireSavedAudio) -> Self {
+        let duration_ms = w.samples as u64 * 1000 / w.srate.max(1) as u64;
+        Self {
+            path: w.path,
+            kind: w.kind,
+            duration_ms,
+            samples: w.samples,
+            srate: w.srate,
+            truncated: w.truncated,
+        }
+    }
+}
 
 /// Handle to one agent worker process. Spawn it with [`ProcessClient::spawn`],
 /// then drive it: fire-and-forget call-control commands, blocking queries (media
@@ -395,6 +431,13 @@ impl ProcessClient {
             spec: spec.to_string(),
         });
     }
+    /// Arm or disarm full-call recording for the agent's UA: arming starts a
+    /// fresh recording (a previous one is cleared); disarming keeps what was
+    /// recorded until the next arm/call. Fire-and-forget like the worker's
+    /// other recording-free commands.
+    pub fn set_recording(&self, on: bool) {
+        self.cmd(Command::SetRecording { on });
+    }
     /// Arm a fixed response (status `scode`/`reason` + extra `headers`) for the
     /// next inbound INVITE instead of accepting it.
     pub fn arm_invite_response(&self, scode: u16, reason: &str, headers: Vec<String>) {
@@ -436,10 +479,21 @@ impl ProcessClient {
     /// Ask the worker to write its captured audio to `<prefix>-sent.wav` /
     /// `<prefix>-recv.wav`; returns the paths written.
     pub fn save_audio(&self, prefix: &str) -> Vec<String> {
+        self.save_audio_detailed(prefix)
+            .into_iter()
+            .map(|f| f.path)
+            .collect()
+    }
+    /// Like [`Self::save_audio`], but returns what each written WAV contains
+    /// (side, duration, whether the retention cap truncated it) — the honest
+    /// form for callers that report recordings.
+    pub fn save_audio_detailed(&self, prefix: &str) -> Vec<SavedAudio> {
         match self.query(Query::SaveAudio {
             prefix: prefix.to_string(),
         }) {
-            Some(ReplyResult::Saved(paths)) => paths,
+            Some(ReplyResult::SavedAudio(files)) => {
+                files.into_iter().map(SavedAudio::from).collect()
+            }
             _ => Vec::new(),
         }
     }

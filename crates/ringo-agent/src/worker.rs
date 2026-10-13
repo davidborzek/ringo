@@ -14,7 +14,7 @@
 use crate::audio;
 use crate::proto::{
     self, Command, FromWorker, Headers, Query, QueryEnvelope, Ready, Reply, ReplyResult,
-    RxAudioStarted, ToWorker, WireEvent, WireMediaStats,
+    RxAudioStarted, ToWorker, WireEvent, WireMediaStats, WireSavedAudio,
 };
 use anyhow::{Context, Result, bail};
 use ringo_core::backend::{Backend, BaresipBackend};
@@ -193,6 +193,9 @@ pub fn run() -> Result<()> {
                         ));
                     }
                 }
+                Ok(ToWorker::Cmd(Command::SetRecording { on })) => {
+                    ringo_core::set_recording(&username, on);
+                }
                 Ok(ToWorker::Cmd(cmd)) => dispatch(phone.as_ref(), cmd),
                 Ok(ToWorker::Query(QueryEnvelope { id, query })) => {
                     let result = answer(phone.as_ref(), &username, query);
@@ -345,15 +348,19 @@ fn dispatch(phone: &dyn Phone, cmd: Command) {
             headers,
         } => phone.arm_invite_response(scode, &reason, headers),
         Command::DisarmInviteResponse => phone.disarm_invite_response(),
-        // Audio-stream control + shutdown are handled in the run loop, before
-        // dispatch (they need the username / writer, not just the phone).
-        Command::StartTxAudio { .. } | Command::StartRxAudio | Command::Shutdown => {}
+        // Audio-stream control + recording + shutdown are handled in the run
+        // loop, before dispatch (they need the username / writer, not just the
+        // phone).
+        Command::StartTxAudio { .. }
+        | Command::StartRxAudio
+        | Command::SetRecording { .. }
+        | Command::Shutdown => {}
     }
 }
 
 /// Answer one query. WAV writing runs here (on the worker's own in-process
-/// captured buffer) so only the resulting paths cross the pipe; tone analysis
-/// now happens on the parent over the streamed RX audio.
+/// captured buffer) so only the resulting files (plus their sizes) cross the
+/// pipe; tone analysis now happens on the parent over the streamed RX audio.
 fn answer(phone: &dyn Phone, username: &str, query: Query) -> ReplyResult {
     match query {
         Query::MediaStats => ReplyResult::MediaStats(phone.media_stats().map(WireMediaStats::from)),
@@ -370,13 +377,21 @@ fn answer(phone: &dyn Phone, username: &str, query: Query) -> ReplyResult {
                 if samples.is_empty() {
                     continue;
                 }
+                let truncated =
+                    samples.len() >= srate as usize * ringo_core::RECORDING_MAX_SECS as usize;
                 let path = format!("{prefix}-{tag}.wav");
                 match audio::write_wav(std::path::Path::new(&path), &samples, srate) {
-                    Ok(()) => written.push(path),
+                    Ok(()) => written.push(WireSavedAudio {
+                        path,
+                        kind: tag.into(),
+                        samples: samples.len(),
+                        srate,
+                        truncated,
+                    }),
                     Err(e) => ringo_core::rlog!(Warn, "save {path}: {e}"),
                 }
             }
-            ReplyResult::Saved(written)
+            ReplyResult::SavedAudio(written)
         }
         Query::CallCount => ReplyResult::CallCount(ringo_core::call_count() as u32),
     }

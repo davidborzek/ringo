@@ -17,10 +17,11 @@ use crate::headers::{HeaderContext, HeaderTemplate};
 use crate::state::{AgentState, reduce};
 use anyhow::{Context, Result};
 use regex::Regex;
-use ringo_agent::{AgentConfig, ProcessClient};
+use ringo_agent::{AgentConfig, ProcessClient, SavedAudio};
 use ringo_core::account::{Account, BackendOptions};
 use ringo_core::event::AppEvent;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -410,6 +411,8 @@ pub struct Agent {
     pub aor: String,
     /// The agent's SIP domain, used to resolve bare dial targets.
     pub domain: String,
+    /// Recording bookkeeping, shared with the event bridge.
+    recording: Arc<RecordingState>,
     client: Arc<ProcessClient>,
     state: Arc<Mutex<AgentState>>,
     events: broadcast::Sender<(u64, AppEvent)>,
@@ -439,6 +442,7 @@ impl Agent {
             .collect();
         let aor = format!("sip:{}@{}", account.username, account.domain);
         let domain = account.domain.clone();
+        let record_default = options.record_audio;
         let config = AgentConfig {
             name: name.to_string(),
             account,
@@ -453,15 +457,19 @@ impl Agent {
 
         let (events_tx, _) = broadcast::channel::<(u64, AppEvent)>(EVENT_CHANNEL_CAPACITY);
         let state = Arc::new(Mutex::new(AgentState::default()));
+        // `record_default` agents are armed at startup (the worker's
+        // BackendOptions carries it); see `RecordingState` for the per-call policy.
+        let recording = Arc::new(RecordingState::new(record_default));
 
         // Bridge the worker's blocking std channel into the async world: reduce
         // into the shared state, fan out to any wait_event subscribers, poll for
-        // inbound INVITE headers between events, and reset a stale `play` spec
-        // when the agent's last call ends.
+        // inbound INVITE headers between events, reset a stale `play` spec
+        // when the agent's last call ends, and keep the recording flags in step.
         let bridge_state = Arc::clone(&state);
         let bridge_tx = events_tx.clone();
         let bridge_client = Arc::clone(&client);
         let bridge_log = Arc::clone(&log);
+        let bridge_recording = Arc::clone(&recording);
         let headers = client.headers_handle();
         tokio::task::spawn_blocking(move || {
             loop {
@@ -479,13 +487,28 @@ impl Agent {
                         let id = bridge_log.append(event.clone());
                         let _ = bridge_tx.send((id, event.clone()));
                         let mut g = bridge_state.lock().unwrap_or_else(|e| e.into_inner());
+                        let starts_call = matches!(
+                            &event,
+                            AppEvent::CallIncoming { .. } | AppEvent::CallOutgoing { .. }
+                        );
+                        let was_idle = g.calls.is_empty();
                         reduce(&mut g, &event);
                         // `play` is call-scoped for MCP agents: when the agent's LAST
                         // call ended, stop transmitting the stale spec so the next
                         // call doesn't replay it (the underlying ausrc is per-UA and
                         // would otherwise persist, as ringo-flow scenarios want).
-                        if closes_last_call(&event, &g) {
+                        let last_call_ended = closes_last_call(&event, &g);
+                        if last_call_ended {
                             bridge_client.set_audio_source("silence");
+                        }
+                        match bridge_recording.on_event(
+                            starts_call && was_idle,
+                            matches!(event, AppEvent::CallOutgoing { .. }),
+                            last_call_ended,
+                        ) {
+                            RecordingAction::Arm => bridge_client.set_recording(true),
+                            RecordingAction::Disarm => bridge_client.set_recording(false),
+                            RecordingAction::None => {}
                         }
                     }
                     // Poll window: pick up INVITE headers the worker collected.
@@ -518,6 +541,7 @@ impl Agent {
             name: name.to_string(),
             aor,
             domain,
+            recording,
             client,
             state,
             events: events_tx,
@@ -797,6 +821,36 @@ impl Agent {
         self.client.set_audio_source(spec);
     }
 
+    /// Arm or disarm full-call recording for the agent (see
+    /// `record_start`/`record_stop`): arming starts a fresh recording, disarming
+    /// keeps what was recorded until the next arm/call (save with
+    /// [`Self::save_audio`]). A per-call recording is disarmed automatically
+    /// when the agent's last call ends.
+    pub fn set_recording(&self, on: bool) {
+        // Flags before the command, so a close the bridge processes in between
+        // already sees them.
+        if on {
+            self.recording.arm(false);
+        } else {
+            self.recording.disarm();
+        }
+        self.client.set_recording(on);
+    }
+
+    /// Arm a fresh recording for the call [`Self::dial`] is about to place
+    /// (`dial` with `record: true`). Unlike [`Self::set_recording`], a close of
+    /// the previous call that is still in flight won't disarm it.
+    pub fn arm_for_next_call(&self) {
+        self.recording.arm(true);
+        self.client.set_recording(true);
+    }
+
+    /// Whether recording was ever armed for this agent (default, tool or
+    /// param) — the gate for `save_audio`'s "recording is off" error.
+    pub fn ever_recorded(&self) -> bool {
+        self.recording.ever_armed()
+    }
+
     /// RTP quality stats of the current call, if a call is up.
     pub fn media_stats(&self) -> Option<ringo_core::event::MediaStats> {
         self.client.media_stats()
@@ -822,10 +876,12 @@ impl Agent {
         self.client.pid()
     }
 
-    /// Write the call's sent+received audio to WAV files under `prefix`;
-    /// returns the created paths. Requires `record_audio` in `[backend]`.
-    pub fn save_audio(&self, prefix: &str) -> Vec<String> {
-        self.client.save_audio(prefix)
+    /// Write the recorded sent+received audio to WAV files under `prefix`;
+    /// returns what each file contains (path, side, duration, truncation).
+    /// Empty when nothing was captured; gate with [`Self::ever_recorded`] to
+    /// tell "recording is off" from "no audio yet".
+    pub fn save_audio(&self, prefix: &str) -> Vec<SavedAudio> {
+        self.client.save_audio_detailed(prefix)
     }
 }
 
@@ -869,6 +925,106 @@ fn sanitize_target(input: &str) -> String {
 /// state) — the trigger for resetting a stale `play` spec to silence.
 fn closes_last_call(event: &AppEvent, state: &AgentState) -> bool {
     matches!(event, AppEvent::CallClosed { .. }) && state.calls.is_empty()
+}
+
+/// What the worker should be told about recording.
+#[derive(Debug, PartialEq, Eq)]
+enum RecordingAction {
+    /// (Re-)arm full capture: clears the buffers — a fresh recording.
+    Arm,
+    /// Disarm; the buffers are kept for a later save.
+    Disarm,
+    None,
+}
+
+/// The agent's recording bookkeeping, shared by the tools (`record_start`,
+/// `record: true`) and the event bridge, which arms/disarms per call.
+///
+/// Policy: with `record_default`, every call that starts from idle re-arms
+/// (a fresh recording per call) and nothing is ever disarmed automatically;
+/// without it, a recording armed by a tool is disarmed when the last call
+/// ends, keeping its audio for `save_audio` until the next recording.
+///
+/// Every arm takes a fresh generation. A `dial` with `record: true` reserves
+/// its generation for the call it is about to place, so a close of the
+/// previous call that the bridge processes only afterwards doesn't disarm it.
+#[derive(Debug)]
+struct RecordingState {
+    record_default: bool,
+    /// Generation of the armed recording, 0 = not armed.
+    current: AtomicU64,
+    /// Generation reserved for the next dialed call, 0 = none.
+    reserved: AtomicU64,
+    next_generation: AtomicU64,
+    /// Whether recording was ever armed (gates `save_audio`'s error).
+    ever: AtomicBool,
+}
+
+impl RecordingState {
+    fn new(record_default: bool) -> Self {
+        Self {
+            record_default,
+            current: AtomicU64::new(u64::from(record_default)),
+            reserved: AtomicU64::new(0),
+            next_generation: AtomicU64::new(2),
+            ever: AtomicBool::new(record_default),
+        }
+    }
+
+    /// Arm a fresh recording (flags only; the caller tells the worker).
+    /// `for_next_dial` reserves it for the call about to be dialed.
+    fn arm(&self, for_next_dial: bool) {
+        let generation = self.next_generation.fetch_add(1, Ordering::AcqRel);
+        if for_next_dial {
+            self.reserved.store(generation, Ordering::Release);
+        }
+        self.current.store(generation, Ordering::Release);
+        self.ever.store(true, Ordering::Relaxed);
+    }
+
+    fn disarm(&self) {
+        self.current.store(0, Ordering::Release);
+        self.reserved.store(0, Ordering::Release);
+    }
+
+    fn ever_armed(&self) -> bool {
+        self.ever.load(Ordering::Relaxed)
+    }
+
+    /// The bridge's decision for one event (after the state fold):
+    /// `started_from_idle` = a call began while none was up, `dialed` = it is
+    /// our outgoing call, `last_call_ended` = no call is left.
+    fn on_event(
+        &self,
+        started_from_idle: bool,
+        dialed: bool,
+        last_call_ended: bool,
+    ) -> RecordingAction {
+        if dialed {
+            // The dialed call claims a recording reserved for it.
+            self.reserved.store(0, Ordering::Release);
+        }
+        if started_from_idle && self.record_default {
+            self.arm(false);
+            return RecordingAction::Arm;
+        }
+        if last_call_ended && !self.record_default {
+            let current = self.current.load(Ordering::Acquire);
+            let reserved = self.reserved.load(Ordering::Acquire);
+            // Only the recording that belonged to the ended calls; a tool that
+            // re-armed concurrently wins the compare-exchange.
+            if current != 0
+                && current != reserved
+                && self
+                    .current
+                    .compare_exchange(current, 0, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            {
+                return RecordingAction::Disarm;
+            }
+        }
+        RecordingAction::None
+    }
 }
 
 #[cfg(test)]
@@ -1081,6 +1237,59 @@ mod tests {
         let templates = &hub.slots[0].custom_headers;
         assert_eq!(templates.len(), 2);
         assert_eq!(templates[1].1, "session-${uuid}");
+    }
+
+    #[test]
+    fn default_recording_rearms_per_call_and_never_disarms() {
+        use RecordingAction::*;
+        let r = RecordingState::new(true);
+        assert!(r.ever_armed());
+        // Re-armed at every call start from idle (a fresh recording per call)…
+        assert_eq!(r.on_event(true, true, false), Arm);
+        // …not mid-call (a second call mixes into the running recording)…
+        assert_eq!(r.on_event(false, false, false), None);
+        // …and kept armed when the last call ends (no gap before the next).
+        assert_eq!(r.on_event(false, false, true), None);
+        assert_eq!(r.on_event(true, false, false), Arm);
+    }
+
+    #[test]
+    fn per_call_recording_is_disarmed_when_the_last_call_ends() {
+        use RecordingAction::*;
+        let r = RecordingState::new(false);
+        assert!(!r.ever_armed());
+        // Nothing armed: call events change nothing.
+        assert_eq!(r.on_event(true, true, false), None);
+        assert_eq!(r.on_event(false, false, true), None);
+
+        // record_start, then a call: armed across the call start…
+        r.arm(false);
+        assert!(r.ever_armed());
+        assert_eq!(r.on_event(true, false, false), None);
+        // …and disarmed once (buffers kept for a save) when it ends.
+        assert_eq!(r.on_event(false, false, true), Disarm);
+        assert_eq!(r.on_event(false, false, true), None);
+
+        // record_stop clears it explicitly: nothing left to auto-disarm.
+        r.arm(false);
+        r.disarm();
+        assert_eq!(r.on_event(false, false, true), None);
+    }
+
+    #[test]
+    fn record_dial_survives_the_previous_calls_close_in_flight() {
+        use RecordingAction::*;
+        let r = RecordingState::new(false);
+        // Call 1 recorded; it ends, but the bridge hasn't seen the close yet
+        // when `dial` with `record: true` arms for call 2.
+        r.arm(false);
+        r.arm(true);
+        // The late close must not disarm call 2's recording…
+        assert_eq!(r.on_event(false, false, true), None);
+        // …call 2 claims it…
+        assert_eq!(r.on_event(true, true, false), None);
+        // …and it is disarmed when call 2 itself ends.
+        assert_eq!(r.on_event(false, false, true), Disarm);
     }
 
     #[test]

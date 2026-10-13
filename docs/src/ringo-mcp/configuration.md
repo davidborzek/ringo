@@ -88,7 +88,7 @@ Applies to every agent. All keys optional; `[[agent]]` fields always win.
 | `local_timeout_s` | number | baresip default (120) | Outgoing-call ring timeout in seconds. |
 | `sip_cafile` | string | — | Trust this CA bundle for TLS SIP. |
 | `sip_capath` | string | — | Path to a TLS CA directory (`""` disables). |
-| `record_audio` | bool | `false` | Capture full sent+received audio in-process, for the `save_audio` tool. |
+| `record_audio` | bool | `false` | Record every call by default (sent + received, in-process): each call starts a fresh recording, armed for `save_audio` without `record_start`/`record: true`. |
 
 ## A full example
 

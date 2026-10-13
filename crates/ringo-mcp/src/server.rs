@@ -43,7 +43,7 @@ pub(crate) const TOOL_GROUPS: &[(&str, &[&str])] = &[
     ("audio", &["play"]),
     ("headers", &["call_headers", "add_header", "rm_header"]),
     ("events", &["wait_event", "agent_events"]),
-    ("recording", &["save_audio"]),
+    ("recording", &["record_start", "record_stop", "save_audio"]),
     ("lifecycle", &["agent_stop"]),
     ("trace", &["sip_trace"]),
 ];
@@ -203,6 +203,20 @@ struct DialParam {
     /// reply carries its call_id.
     #[serde(default)]
     timeout_ms: Option<u64>,
+    /// Record this call (sent + received audio). Same as calling `record_start`
+    /// before the dial; save with `save_audio` during or after the call.
+    #[serde(default)]
+    record: bool,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct AcceptParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// Record this call (sent + received audio). Same as calling `record_start`
+    /// before the accept; save with `save_audio` during or after the call.
+    #[serde(default)]
+    record: bool,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -305,7 +319,8 @@ const KNOWN_EVENT_NAMES: &[&str] = &[
 struct SaveAudioParam {
     /// Agent name from the config file.
     agent: String,
-    /// File prefix; WAVs are written as `<prefix>-<call>-<tag>.wav`.
+    /// File prefix; WAVs are written as `<prefix>-sent.wav` /
+    /// `<prefix>-recv.wav`.
     prefix: String,
 }
 
@@ -537,7 +552,7 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Place an outgoing call from an agent. Starts the agent's worker process if this is its first use. Fire-and-forget: returns immediately; wait for `call_ringing`/`call_established`/`call_closed` via `wait_event`, or poll `agent_status`.",
+        description = "Place an outgoing call from an agent. Starts the agent's worker process if this is its first use. Fire-and-forget: returns immediately; wait for `call_ringing`/`call_established`/`call_closed` via `wait_event`, or poll `agent_status`. Pass `record: true` to record this call (then save with `save_audio`).",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -551,6 +566,7 @@ impl TelephonyServer {
             target,
             wait_established,
             timeout_ms,
+            record,
         }): Parameters<DialParam>,
     ) -> Result<CallToolResult, McpError> {
         if timeout_ms.is_some() && !wait_established {
@@ -560,6 +576,9 @@ impl TelephonyServer {
         }
         let a = self.agent(&agent).await?;
         let resolved = self.hub.check_dial(&target, &a.domain).map_err(invalid)?;
+        if record {
+            a.arm_for_next_call();
+        }
         if !wait_established {
             a.dial(&resolved);
             return ok_text(format!("dialing `{target}` from `{agent}`"));
@@ -587,7 +606,7 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Accept the currently ringing (incoming) call of an agent. Starts the agent's worker process if this is its first use.",
+        description = "Accept the currently ringing (incoming) call of an agent. Starts the agent's worker process if this is its first use. Pass `record: true` to record this call (then save with `save_audio`).",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -596,9 +615,13 @@ impl TelephonyServer {
     )]
     async fn accept(
         &self,
-        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+        Parameters(AcceptParam { agent, record }): Parameters<AcceptParam>,
     ) -> Result<CallToolResult, McpError> {
-        self.agent(&agent).await?.accept();
+        let a = self.agent(&agent).await?;
+        if record {
+            a.set_recording(true);
+        }
+        a.accept();
         ok_text(format!("accepting current call on `{agent}`"))
     }
 
@@ -843,10 +866,49 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Write the agent's current-call audio (sent + received) to WAV files. Requires `record_audio = true` in `[backend]`; returns the created file paths.",
+        description = "Start recording an agent's calls: sent + received audio, one recording per agent (parallel calls mix into it). The recording starts FRESH now — a previous recording is cleared — and runs until `record_stop` or the agent's last call ends. Arm before or at the start of a call to capture all of it; save with `save_audio` during or after the call.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn record_start(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.set_recording(true);
+        ok_text(format!(
+            "recording started for `{agent}` (save with `save_audio`; stops at `record_stop` or when the last call ends)"
+        ))
+    }
+
+    #[tool(
+        description = "Stop recording an agent's calls. The recorded audio is kept for `save_audio` until the next recording or call starts.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn record_stop(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.set_recording(false);
+        ok_text(format!(
+            "recording stopped for `{agent}` (the recorded audio is kept for `save_audio`)"
+        ))
+    }
+
+    #[tool(
+        description = "Write the agent's recorded call audio (sent + received) to WAV files, with each file's duration and whether it was truncated (only the newest 600 s are kept). Works during and after the call, until the next recording or call starts. Recording must have been on for the agent: `record_start` (or `record: true` on dial/accept) before the call, or `record_audio = true` in `[backend]`.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
             open_world_hint = true
         )
     )]
@@ -855,16 +917,33 @@ impl TelephonyServer {
         Parameters(SaveAudioParam { agent, prefix }): Parameters<SaveAudioParam>,
     ) -> Result<CallToolResult, McpError> {
         let a = self.agent(&agent).await?;
-        let paths = tokio::task::spawn_blocking(move || a.save_audio(&prefix))
+        if !a.ever_recorded() {
+            return Err(invalid(format!(
+                "recording is off for `{agent}`: call `record_start` (or pass `record: true` to \
+                 dial/accept) before the call, or set `record_audio = true` in [backend]"
+            )));
+        }
+        let files = tokio::task::spawn_blocking(move || a.save_audio(&prefix))
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        if paths.is_empty() {
-            return Err(McpError::internal_error(
-                "no captured audio to save (no active/recorded call, or record_audio is off)",
-                None,
+        if files.is_empty() {
+            return Err(invalid(
+                "no audio recorded yet: recording was on but no call audio was captured \
+                 (arm before or at the call start, then save during or after the call)",
             ));
         }
-        ok_json(json!({ "files": paths }))
+        let files: Vec<serde_json::Value> = files
+            .iter()
+            .map(|f| {
+                json!({
+                    "path": f.path,
+                    "kind": f.kind,
+                    "duration_ms": f.duration_ms,
+                    "truncated": f.truncated,
+                })
+            })
+            .collect();
+        ok_json(json!({ "files": files }))
     }
 
     #[tool(
@@ -1136,7 +1215,11 @@ mod tests {
 
         // Plain disables: a group expands, a tool name passes through.
         let d = resolve_disabled_tools(None, &owned(&["recording"])).unwrap();
-        assert_eq!(d, vec!["save_audio"]);
+        assert_eq!(
+            d,
+            vec!["record_start", "record_stop", "save_audio"],
+            "the recording group"
+        );
         let d = resolve_disabled_tools(None, &owned(&["add_header"])).unwrap();
         assert_eq!(d, vec!["add_header"]);
 

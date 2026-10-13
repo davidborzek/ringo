@@ -7,11 +7,13 @@ use crate::event::{AppEvent, InviteHeaders};
 use crate::phone::Phone;
 
 pub use crate::baresip::BaresipBackend;
+pub use crate::baresip::RECORDING_MAX_SECS;
 pub use crate::baresip::available_audio_codecs;
 pub use crate::baresip::call_count;
 pub use crate::baresip::is_registered;
 pub use crate::baresip::received_audio;
 pub use crate::baresip::sent_audio;
+pub use crate::baresip::set_recording;
 pub use crate::baresip::{AudioFrame, push_audio, start_audio_stream, subscribe_received_audio};
 pub use crate::baresip::{sip_trace_file, sip_trace_stderr};
 
