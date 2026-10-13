@@ -40,7 +40,8 @@ impl Server {
             .env("XDG_RUNTIME_DIR", config_path.parent().expect("config dir"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            // Inherited: shows up in the failing test's output (spawn errors).
+            .stderr(Stdio::inherit())
             .spawn()
             .expect("spawn ringo-mcp");
         let stdin = child.stdin.take().expect("server stdin");
@@ -98,7 +99,9 @@ impl Server {
     /// Call a tool and return its content text.
     fn tool(&mut self, name: &str, args: Value) -> Value {
         let reply = self.tool_reply(name, args);
-        reply["result"]["content"][0]["text"].clone()
+        let text = reply["result"]["content"][0]["text"].clone();
+        assert!(text.is_string(), "`{name}` failed: {reply}");
+        text
     }
 
     /// Call a tool and return the full JSON-RPC reply (errors included).
