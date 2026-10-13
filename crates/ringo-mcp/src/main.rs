@@ -34,7 +34,7 @@ struct Cli {
 
     /// Disable a tool group or a single tool (repeatable; applied on top of
     /// --enabled-tools). Groups: discovery, call-control, audio, headers,
-    /// events, recording, lifecycle
+    /// events, recording, lifecycle, trace
     #[arg(long = "disable", value_name = "GROUP|TOOL", value_delimiter = ',')]
     disable: Vec<String>,
 
