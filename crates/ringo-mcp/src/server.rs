@@ -1096,6 +1096,10 @@ mod tests {
         // Inside the ring: no truncation.
         let (_, _, _, truncated) = log.page_after(oldest);
         assert!(!truncated);
+        // A client-supplied cursor past every id is just "nothing newer".
+        let (page, _, _, truncated) = log.page_after(u64::MAX);
+        assert!(page.is_empty());
+        assert!(!truncated);
     }
 
     #[test]

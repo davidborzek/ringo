@@ -64,7 +64,7 @@ when using `wait_established`.
 | Tool | Args | Effect |
 | ---- | ---- | ------ |
 | `agent_stop` | `agent` | Stop the agent's worker (deregister + exit). Idempotent; the agent starts again on its next use. |
-| `dial` | `agent`, `target` | Place an outgoing call. `target` is a full URI, `user@host`, or a bare number/extension (resolved to `sip:<target>@<agent domain>`). Subject to the `--dial-allow`/`--dial-deny` policy. Re-renders dynamic header templates (fresh `${uuid}`). |
+| `dial` | `agent`, `target` | Place an outgoing call. `target` is a full URI, `user@host`, or a bare number/extension (resolved to `sip:<target>@<agent domain>`); `tel:`/`callto:` and number separators are stripped. Subject to the `--dial-allow`/`--dial-deny` policy. Re-renders dynamic header templates (fresh `${uuid}`). |
 | `accept` | `agent` | Accept the currently ringing (incoming) call. |
 | `hangup` | `agent` | Hang up the current call. |
 | `hangup_all` | `agent` | Hang up all calls. |

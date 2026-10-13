@@ -111,7 +111,7 @@ impl EventLog {
                 .load(std::sync::atomic::Ordering::Relaxed)
                 .saturating_sub(1),
         );
-        let truncated = after_id + 1 < oldest;
+        let truncated = after_id.saturating_add(1) < oldest;
         let events: Vec<(u64, AppEvent)> = entries
             .iter()
             .filter(|(id, _)| *id > after_id)
@@ -831,14 +831,38 @@ impl Agent {
 
 /// Resolve a dial/transfer target: full URIs pass through, `user@host` gets a
 /// `sip:` prefix, and a bare number/extension becomes `sip:<target>@<domain>`.
+/// Input is cleaned up first (see [`sanitize_target`]).
 fn resolve_target(target: &str, domain: &str) -> String {
+    let target = sanitize_target(target);
     if target.starts_with("sip:") || target.starts_with("sips:") {
-        target.to_string()
+        target
     } else if target.contains('@') {
         format!("sip:{target}")
     } else {
         format!("sip:{target}@{domain}")
     }
+}
+
+/// Clean up a dial target the way people (and LLMs) write it, mirroring
+/// ringo-phone's `sanitize_dial_target`: trim, drop `tel:`/`callto:`,
+/// lowercase a `sip:`/`sips:` scheme, and strip separators (spaces, `-`, `.`,
+/// `/`, parentheses) from phone numbers. SIP user names and URIs keep their
+/// characters.
+fn sanitize_target(input: &str) -> String {
+    let trimmed = input.trim();
+    let (scheme, rest) = trimmed.split_once(':').unwrap_or(("", trimmed));
+    let trimmed = match scheme.to_ascii_lowercase().as_str() {
+        "tel" | "callto" => rest.trim(),
+        s @ ("sip" | "sips") => return format!("{s}:{rest}"),
+        _ => trimmed,
+    };
+    if trimmed.contains('@') || trimmed.chars().any(|c| c.is_ascii_alphabetic()) {
+        return trimmed.to_string();
+    }
+    trimmed
+        .chars()
+        .filter(|c| !(c.is_whitespace() || matches!(c, '-' | '.' | '/' | '(' | ')')))
+        .collect()
 }
 
 /// Whether this event ended the agent's last remaining call (post-reduce
@@ -869,6 +893,75 @@ mod tests {
             resolve_target("sips:1002@other.example.com", "pbx.example.com"),
             "sips:1002@other.example.com"
         );
+    }
+
+    #[test]
+    fn cleans_up_targets_the_way_people_and_llms_write_them() {
+        let d = "pbx.example.com";
+        // Separators in phone numbers.
+        assert_eq!(
+            resolve_target("+49 89 123456", d),
+            "sip:+4989123456@pbx.example.com"
+        );
+        assert_eq!(
+            resolve_target("(0123) 4567-890", d),
+            "sip:01234567890@pbx.example.com"
+        );
+        assert_eq!(
+            resolve_target("0123.4567/890", d),
+            "sip:01234567890@pbx.example.com"
+        );
+        assert_eq!(resolve_target("  100  ", d), "sip:100@pbx.example.com");
+        // Click-to-dial schemes.
+        assert_eq!(
+            resolve_target("tel:+49-30-1234567", d),
+            "sip:+49301234567@pbx.example.com"
+        );
+        assert_eq!(
+            resolve_target("callto:0123 456", d),
+            "sip:0123456@pbx.example.com"
+        );
+        assert_eq!(resolve_target("TEL:100", d), "sip:100@pbx.example.com");
+        // Scheme case is normalised; the rest of a URI is kept verbatim.
+        assert_eq!(
+            resolve_target("SIP:1002@Other.example.com", d),
+            "sip:1002@Other.example.com"
+        );
+        assert_eq!(
+            resolve_target("Sips:1002@other.example.com", d),
+            "sips:1002@other.example.com"
+        );
+        // Dialable symbols and SIP user names survive.
+        assert_eq!(resolve_target("*100#", d), "sip:*100#@pbx.example.com");
+        assert_eq!(
+            resolve_target("john.doe", d),
+            "sip:john.doe@pbx.example.com"
+        );
+        assert_eq!(
+            resolve_target("alice-bob", d),
+            "sip:alice-bob@pbx.example.com"
+        );
+        assert_eq!(resolve_target("user@host", d), "sip:user@host");
+    }
+
+    #[test]
+    fn dial_policy_sees_the_cleaned_up_target() {
+        let hub = Hub::new(
+            loaded_config(),
+            DialPolicy::build(vec!["^00".into(), "^\\+?49900".into()], vec![]).unwrap(),
+        );
+        // Separators and schemes can't sneak a denied number past the policy.
+        for target in [
+            "00 41 1234",
+            "tel:0041-1234",
+            "+49 900 123",
+            "TEL:+49900123",
+        ] {
+            assert!(
+                hub.check_dial(target, "pbx.example.com").is_err(),
+                "{target} must be denied"
+            );
+        }
     }
 
     fn loaded_config() -> LoadedConfig {

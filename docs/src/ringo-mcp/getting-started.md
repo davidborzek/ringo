@@ -155,7 +155,10 @@ The equivalent of a hello-world, by hand:
 ```
 
 Dial targets accept full URIs (`sip:1002@pbx.example.com`), `user@host`, or a
-bare number/extension (resolved to `sip:<target>@<agent's domain>`).
+bare number/extension (resolved to `sip:<target>@<agent's domain>`). Numbers
+are cleaned up like in ringo-phone: `tel:`/`callto:` and separators
+(`+49 89 123-456` → `+4989123456`) are dropped before the dial policy checks
+them.
 
 ## Diagnostics
 
