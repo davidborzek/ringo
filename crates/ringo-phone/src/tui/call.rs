@@ -121,6 +121,22 @@ impl super::app::App {
         }
     }
 
+    /// The remote party put the call on hold. Mirrors the local hold state
+    /// (same `OnHold` the TUI sets for its own hold), so the call view shows
+    /// the truth regardless of which side initiated it.
+    pub(super) fn handle_call_held(&mut self, call_id: String) {
+        if let Some(c) = self.calls.iter_mut().find(|c| c.id == call_id) {
+            c.state = CallState::OnHold;
+        }
+    }
+
+    /// The remote party resumed a held call.
+    pub(super) fn handle_call_resumed(&mut self, call_id: String) {
+        if let Some(c) = self.calls.iter_mut().find(|c| c.id == call_id) {
+            c.state = CallState::Established;
+        }
+    }
+
     pub(super) fn handle_call_closed(&mut self, call_id: String, reason: String, error: bool) {
         // A completed attended transfer tears down BOTH legs. Detect it up front
         // (before `reason` may be moved below) so the surviving leg isn't given a

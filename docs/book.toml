@@ -1,7 +1,7 @@
 [book]
 title = "ringo"
 authors = ["David Borzek"]
-description = "Tooling for baresip SIP softphones — the ringo softphone and the ringo-flow scenario test runner."
+description = "Tooling for baresip SIP softphones — the ringo softphone, the ringo-flow scenario test runner, and the ringo-mcp MCP server."
 language = "en"
 src = "src"
 

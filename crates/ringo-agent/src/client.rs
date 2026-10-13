@@ -371,8 +371,9 @@ impl ProcessClient {
             value: value.to_string(),
         });
     }
-    /// Not yet exposed by a scenario verb (header removal is planned).
-    #[allow(dead_code)]
+    /// Remove ALL custom headers with this name (the worker's `uarmheader`
+    /// semantics). Used by ringo-mcp for replace-on-add and by the phone's
+    /// per-call header re-rendering.
     pub fn rm_header(&self, key: &str) {
         self.cmd(Command::RmHeader {
             key: key.to_string(),

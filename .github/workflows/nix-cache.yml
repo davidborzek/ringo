@@ -78,6 +78,7 @@ jobs:
       # two full C builds per platform — the reason the cache is worth having.
       - run: nix build --print-build-logs --out-link result-phone .#ringo-phone
       - run: nix build --print-build-logs --out-link result-flow .#ringo-flow
+      - run: nix build --print-build-logs --out-link result-mcp .#ringo-mcp
 
       # Same smoke test the release binaries and nix.yml get: the wrapper links
       # and runs. All three runners are native to their target, so this also
@@ -87,3 +88,4 @@ jobs:
         run: |
           ./result-phone/bin/ringo --help
           ./result-flow/bin/ringo-flow --help
+          ./result-mcp/bin/ringo-mcp --help

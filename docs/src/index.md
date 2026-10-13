@@ -6,12 +6,14 @@
 <p class="tagline">Make and test phone calls from your terminal.</p>
 </div>
 
-Two tools that share one engine:
+Three tools that share one engine:
 
 - [**ringo-phone**](ringo-phone/introduction.md) — a terminal softphone: manage SIP
   accounts and place calls without leaving the keyboard.
 - [**ringo-flow**](ringo-flow/introduction.md) — a telephony scenario test runner:
   write call flows as JavaScript or TypeScript and run them headlessly in CI.
+- [**ringo-mcp**](ringo-mcp/introduction.md) — an MCP server that gives LLM
+  agents a telephone: SIP agents as named tools, driven over stdio.
 
 The [source is on GitHub](https://github.com/davidborzek/ringo).
 

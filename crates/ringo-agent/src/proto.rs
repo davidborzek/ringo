@@ -360,6 +360,15 @@ pub enum WireEvent {
         display_name: Option<String>,
         target: String,
     },
+    CallHold {
+        call_id: String,
+    },
+    CallResume {
+        call_id: String,
+    },
+    CallTransferFailed {
+        call_id: String,
+    },
     VoicemailStatus {
         waiting: bool,
         new_count: u32,
@@ -420,6 +429,15 @@ impl From<&AppEvent> for WireEvent {
                 reason: reason.clone(),
                 error: *error,
             },
+            AppEvent::CallHold { call_id } => Self::CallHold {
+                call_id: call_id.clone(),
+            },
+            AppEvent::CallResume { call_id } => Self::CallResume {
+                call_id: call_id.clone(),
+            },
+            AppEvent::CallTransferFailed { call_id } => Self::CallTransferFailed {
+                call_id: call_id.clone(),
+            },
             AppEvent::CallDeflected {
                 from,
                 display_name,
@@ -478,6 +496,9 @@ impl From<WireEvent> for AppEvent {
                 reason,
                 error,
             },
+            WireEvent::CallHold { call_id } => AppEvent::CallHold { call_id },
+            WireEvent::CallResume { call_id } => AppEvent::CallResume { call_id },
+            WireEvent::CallTransferFailed { call_id } => AppEvent::CallTransferFailed { call_id },
             WireEvent::CallDeflected {
                 from,
                 display_name,

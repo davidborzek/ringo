@@ -469,6 +469,24 @@ fn bevent_handler_inner(ev: BeventEv, event: *mut Bevent) {
             }
             return;
         }
+        x if x == bevent_ev::BEVENT_CALL_HOLD as i32 => {
+            let call = unsafe { bevent_get_call(event) };
+            AppEvent::CallHold {
+                call_id: call_id_str(call),
+            }
+        }
+        x if x == bevent_ev::BEVENT_CALL_RESUME as i32 => {
+            let call = unsafe { bevent_get_call(event) };
+            AppEvent::CallResume {
+                call_id: call_id_str(call),
+            }
+        }
+        x if x == bevent_ev::BEVENT_CALL_TRANSFER_FAILED as i32 => {
+            let call = unsafe { bevent_get_call(event) };
+            AppEvent::CallTransferFailed {
+                call_id: call_id_str(call),
+            }
+        }
         x if x == bevent_ev::BEVENT_MWI_NOTIFY as i32 => {
             let text = bevent_text(event);
             let mwi = parse_mwi(&text);
