@@ -469,7 +469,8 @@ pub(crate) fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
 #[tool_router(router = build_tool_router)]
 impl TelephonyServer {
     #[tool(
-        description = "List all configured telephony agents (name, SIP address, registration, live calls). Agents start lazily: `running: false` means the agent is configured but its worker will be started by the first tool call that uses it."
+        description = "List all configured telephony agents (name, SIP address, registration, live calls). Agents start lazily: `running: false` means the agent is configured but its worker will be started by the first tool call that uses it.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn list_agents(&self) -> Result<CallToolResult, McpError> {
         let agents: Vec<serde_json::Value> = self
@@ -492,7 +493,8 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Detailed state of one agent: registration, live calls (id, phase, remote party), media quality, received DTMF. Starts the agent's worker process if this is its first use. Poll this after dial/accept to check progress."
+        description = "Detailed state of one agent: registration, live calls (id, phase, remote party), media quality, received DTMF. Starts the agent's worker process if this is its first use. Poll this after dial/accept to check progress.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn agent_status(
         &self,
@@ -535,7 +537,12 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Place an outgoing call from an agent. Starts the agent's worker process if this is its first use. Fire-and-forget: returns immediately; wait for `call_ringing`/`call_established`/`call_closed` via `wait_event`, or poll `agent_status`."
+        description = "Place an outgoing call from an agent. Starts the agent's worker process if this is its first use. Fire-and-forget: returns immediately; wait for `call_ringing`/`call_established`/`call_closed` via `wait_event`, or poll `agent_status`.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn dial(
         &self,
@@ -580,7 +587,12 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Accept the currently ringing (incoming) call of an agent. Starts the agent's worker process if this is its first use."
+        description = "Accept the currently ringing (incoming) call of an agent. Starts the agent's worker process if this is its first use.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn accept(
         &self,
@@ -590,7 +602,14 @@ impl TelephonyServer {
         ok_text(format!("accepting current call on `{agent}`"))
     }
 
-    #[tool(description = "Hang up the current call of an agent.")]
+    #[tool(
+        description = "Hang up the current call of an agent.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            open_world_hint = true
+        )
+    )]
     async fn hangup(
         &self,
         Parameters(AgentParam { agent }): Parameters<AgentParam>,
@@ -599,7 +618,15 @@ impl TelephonyServer {
         ok_text(format!("hanging up current call on `{agent}`"))
     }
 
-    #[tool(description = "Hang up all calls of an agent.")]
+    #[tool(
+        description = "Hang up all calls of an agent.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
     async fn hangup_all(
         &self,
         Parameters(AgentParam { agent }): Parameters<AgentParam>,
@@ -608,7 +635,15 @@ impl TelephonyServer {
         ok_text(format!("hanging up all calls on `{agent}`"))
     }
 
-    #[tool(description = "Put the current call of an agent on hold.")]
+    #[tool(
+        description = "Put the current call of an agent on hold.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
     async fn hold(
         &self,
         Parameters(AgentParam { agent }): Parameters<AgentParam>,
@@ -617,7 +652,15 @@ impl TelephonyServer {
         ok_text(format!("holding current call on `{agent}`"))
     }
 
-    #[tool(description = "Resume the held call of an agent.")]
+    #[tool(
+        description = "Resume the held call of an agent.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
     async fn resume(
         &self,
         Parameters(AgentParam { agent }): Parameters<AgentParam>,
@@ -626,7 +669,15 @@ impl TelephonyServer {
         ok_text(format!("resuming held call on `{agent}`"))
     }
 
-    #[tool(description = "Mute the agent's outgoing audio (the remote party hears silence).")]
+    #[tool(
+        description = "Mute the agent's outgoing audio (the remote party hears silence).",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
     async fn mute(
         &self,
         Parameters(AgentParam { agent }): Parameters<AgentParam>,
@@ -635,7 +686,14 @@ impl TelephonyServer {
         ok_text(format!("`{agent}` is muted"))
     }
 
-    #[tool(description = "Send one DTMF digit (0-9, *, #, A-F) on the agent's current call.")]
+    #[tool(
+        description = "Send one DTMF digit (0-9, *, #, A-F) on the agent's current call.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = true
+        )
+    )]
     async fn send_dtmf(
         &self,
         Parameters(DtmfParam { agent, digit }): Parameters<DtmfParam>,
@@ -651,7 +709,14 @@ impl TelephonyServer {
         ok_text(format!("sent DTMF `{d}` on `{agent}`"))
     }
 
-    #[tool(description = "Blind-transfer the agent's current call to another SIP URI / number.")]
+    #[tool(
+        description = "Blind-transfer the agent's current call to another SIP URI / number.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = true
+        )
+    )]
     async fn transfer(
         &self,
         Parameters(TransferParam { agent, target }): Parameters<TransferParam>,
@@ -663,7 +728,13 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Set what an agent transmits into the call: `\"silence\"`, a sine tone like `\"ausine,425\"`, or a WAV file like `\"aufile,/path/to/mono.wav\"`. Headless agents are silent until you call this. Call-scoped: resets to silence when the agent's last call ends, so the next call won't replay it."
+        description = "Set what an agent transmits into the call: `\"silence\"`, a sine tone like `\"ausine,425\"`, or a WAV file like `\"aufile,/path/to/mono.wav\"`. Headless agents are silent until you call this. Call-scoped: resets to silence when the agent's last call ends, so the next call won't replay it.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn play(
         &self,
@@ -674,7 +745,8 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Block until the agent's NEXT event (call_incoming, call_established, call_closed, register_failed, …), then return it as JSON. Optionally pass `event` (a name or an array) to wait for specific events only — others are skipped, e.g. [\"call_established\",\"call_closed\"] awaits a call's outcome either way. Returns `{\"timeout\": true}` if nothing happened in time. Use after dial/accept to observe progress."
+        description = "Block until the agent's NEXT event (call_incoming, call_established, call_closed, register_failed, …), then return it as JSON. Optionally pass `event` (a name or an array) to wait for specific events only — others are skipped, e.g. [\"call_established\",\"call_closed\"] awaits a call's outcome either way. Returns `{\"timeout\": true}` if nothing happened in time. Use after dial/accept to observe progress.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn wait_event(
         &self,
@@ -717,7 +789,8 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Read the agent's event log (bounded, newest kept) — every event with its id, oldest first. Pass `after_id` (the last seen id) to get only newer events; `truncated: true` means the cursor fell off the ring (events were lost). Use it to catch up after looking away, and to take a cursor for `wait_event`'s `after_id`."
+        description = "Read the agent's event log (bounded, newest kept) — every event with its id, oldest first. Pass `after_id` (the last seen id) to get only newer events; `truncated: true` means the cursor fell off the ring (events were lost). Use it to catch up after looking away, and to take a cursor for `wait_event`'s `after_id`.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn agent_events(
         &self,
@@ -743,7 +816,13 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Stop an agent's worker process: it deregisters from SIP and exits. Idempotent (`false` = it wasn't running). The agent starts again on its next use — stopping frees the registration/worker without disabling the agent."
+        description = "Stop an agent's worker process: it deregisters from SIP and exits. Idempotent (`false` = it wasn't running). The agent starts again on its next use — stopping frees the registration/worker without disabling the agent.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn agent_stop(
         &self,
@@ -764,7 +843,12 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Write the agent's current-call audio (sent + received) to WAV files. Requires `record_audio = true` in `[backend]`; returns the created file paths."
+        description = "Write the agent's current-call audio (sent + received) to WAV files. Requires `record_audio = true` in `[backend]`; returns the created file paths.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = true
+        )
     )]
     async fn save_audio(
         &self,
@@ -784,7 +868,8 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "The agent's recent SIP messages (plaintext, sent and received, also for TLS) from the current worker's trace — to see why a call failed (e.g. the exact 4xx/5xx response, SDP, headers). Filter by `call_id`, page with `after_id` (the last seen id); returns the newest `limit` messages (default 20, max 100), oldest first. A worker restart (`agent_stop`, crash) starts a new trace."
+        description = "The agent's recent SIP messages (plaintext, sent and received, also for TLS) from the current worker's trace — to see why a call failed (e.g. the exact 4xx/5xx response, SDP, headers). Filter by `call_id`, page with `after_id` (the last seen id); returns the newest `limit` messages (default 20, max 100), oldest first. A worker restart (`agent_stop`, crash) starts a new trace.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn sip_trace(
         &self,
@@ -845,7 +930,13 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Add a custom SIP header to the agent's outgoing INVITEs (persistent until removed or the worker restarts). The value is a template rendered once, now: `${uuid}` becomes a fresh identifier in this call and stays fixed for future calls — for a fresh uuid per call, declare it in ringo-mcp's config file. Removes any header of the same name first (baresip's uarmheader semantics)."
+        description = "Add a custom SIP header to the agent's outgoing INVITEs (persistent until removed or the worker restarts). The value is a template rendered once, now: `${uuid}` becomes a fresh identifier in this call and stays fixed for future calls — for a fresh uuid per call, declare it in ringo-mcp's config file. Removes any header of the same name first (baresip's uarmheader semantics).",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn add_header(
         &self,
@@ -858,7 +949,13 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Remove ALL custom SIP headers with this name from the agent's outgoing INVITEs."
+        description = "Remove ALL custom SIP headers with this name from the agent's outgoing INVITEs.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
     )]
     async fn rm_header(
         &self,
@@ -871,7 +968,8 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "SIP headers of received INVITEs (incoming calls), as `[[name, value], …]` pairs — order and duplicates preserved. Filter by `call_id`, or omit it for all known calls (newest first). Headers can lag `call_incoming` by ~150ms; if empty right after the event, retry once."
+        description = "SIP headers of received INVITEs (incoming calls), as `[[name, value], …]` pairs — order and duplicates preserved. Filter by `call_id`, or omit it for all known calls (newest first). Headers can lag `call_incoming` by ~150ms; if empty right after the event, retry once.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn call_headers(
         &self,
@@ -998,6 +1096,34 @@ mod tests {
         // Inside the ring: no truncation.
         let (_, _, _, truncated) = log.page_after(oldest);
         assert!(!truncated);
+    }
+
+    #[test]
+    fn every_tool_declares_whether_it_is_read_only() {
+        const READ_ONLY: &[&str] = &[
+            "agent_events",
+            "agent_status",
+            "call_headers",
+            "list_agents",
+            "sip_trace",
+            "wait_event",
+        ];
+        let tools = TelephonyServer::build_tool_router().list_all();
+        assert_eq!(tools.len(), total_tool_count());
+        for tool in tools {
+            let hints = tool
+                .annotations
+                .unwrap_or_else(|| panic!("`{}` has no annotations", tool.name));
+            let read_only = READ_ONLY.contains(&tool.name.as_ref());
+            assert_eq!(hints.read_only_hint, Some(read_only), "`{}`", tool.name);
+            if !read_only {
+                assert!(
+                    hints.destructive_hint.is_some(),
+                    "`{}` must say whether it is destructive",
+                    tool.name
+                );
+            }
+        }
     }
 
     #[test]
