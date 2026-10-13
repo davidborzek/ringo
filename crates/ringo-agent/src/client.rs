@@ -44,6 +44,8 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 /// by `spawn`). Dropping it deregisters and reaps the worker.
 pub struct ProcessClient {
     name: String,
+    /// The worker's OS process id (names its per-agent log/trace files).
+    pid: u32,
     stdin: Mutex<ChildStdin>,
     pending: Arc<Mutex<HashMap<u64, Sender<ReplyResult>>>>,
     next_id: AtomicU64,
@@ -91,6 +93,7 @@ impl ProcessClient {
         let mut child = os
             .spawn()
             .with_context(|| format!("spawn agent worker for `{}`", config.name))?;
+        let pid = child.id();
 
         let mut stdin = child.stdin.take().context("worker stdin missing")?;
         let stdout = child.stdout.take().context("worker stdout missing")?;
@@ -219,6 +222,7 @@ impl ProcessClient {
         Ok((
             Self {
                 name: handshake.config.name,
+                pid,
                 stdin: Mutex::new(stdin),
                 pending,
                 next_id: AtomicU64::new(0),
@@ -230,6 +234,12 @@ impl ProcessClient {
             },
             ev_rx,
         ))
+    }
+
+    /// The worker's OS process id — the `<pid>` in its per-agent log and SIP
+    /// trace file names (see [`crate::worker::per_agent_path`]).
+    pub fn pid(&self) -> u32 {
+        self.pid
     }
 
     /// A clone of the inbound-header buffer, for building a `header_poll` closure.

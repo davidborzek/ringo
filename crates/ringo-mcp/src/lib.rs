@@ -19,5 +19,6 @@ mod headers;
 pub mod hub;
 mod server;
 mod state;
+pub mod trace;
 
 pub use server::{event_name, resolve_disabled_tools, serve, total_tool_count};

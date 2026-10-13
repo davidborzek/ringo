@@ -33,6 +33,11 @@ impl Server {
         let mut child = Command::new(env!("CARGO_BIN_EXE_ringo-mcp"))
             .arg("--config")
             .arg(config_path)
+            // The default trace dir is the server's own; a developer's env must
+            // not redirect it. The test kills the server hard (no cleanup), so
+            // the dir goes into the test's own temp dir.
+            .env_remove("RINGO_AGENT_SIPTRACE")
+            .env("XDG_RUNTIME_DIR", config_path.parent().expect("config dir"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -306,4 +311,93 @@ fn event_log_cursor_closes_the_roundtrip_race() {
     );
 
     let _ = server.tool("hangup_all", serde_json::json!({"agent": "alice"}));
+}
+
+#[test]
+fn sip_trace_returns_sent_messages_filterable_by_call_id() {
+    let tmp = tempfile::tempdir().unwrap();
+    let config = write_config(tmp.path());
+    let mut server = Server::start(&config);
+
+    let _ = server.tool(
+        "dial",
+        serde_json::json!({"agent": "alice", "target": "1002"}),
+    );
+    let st = server.tool("agent_status", serde_json::json!({"agent": "alice"}));
+    let v: Value = serde_json::from_str(st.as_str().expect("text")).unwrap();
+    let call_id = v["calls"][0]["id"]
+        .as_str()
+        .expect("dialed call has a call_id")
+        .to_string();
+
+    // The worker writes the INVITE as soon as it is sent; poll briefly.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let trace = loop {
+        let text = server.tool(
+            "sip_trace",
+            serde_json::json!({"agent": "alice", "call_id": call_id}),
+        );
+        let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+        if v["count"].as_u64().unwrap_or(0) > 0 || Instant::now() > deadline {
+            break v;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let messages = trace["messages"].as_array().expect("messages");
+    let invite = messages
+        .iter()
+        .find(|m| {
+            m["first_line"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("INVITE ")
+        })
+        .unwrap_or_else(|| panic!("no INVITE in {trace:?}"));
+    assert_eq!(invite["direction"], "tx");
+    assert_eq!(invite["call_id"], call_id.as_str());
+    assert!(invite["text"].as_str().unwrap().contains("Call-ID"));
+    // The filter really filters: no REGISTER (other Call-ID) in this view.
+    assert!(
+        messages.iter().all(|m| m["call_id"] == call_id.as_str()),
+        "{trace:?}"
+    );
+
+    // Unfiltered, the cursor pages without duplicates.
+    let text = server.tool("sip_trace", serde_json::json!({"agent": "alice"}));
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    let newest = v["newest_id"].as_u64().expect("newest_id");
+    assert_eq!(v["truncated"], false, "{v:?}");
+    assert!(newest >= 1, "{v:?}");
+    let text = server.tool(
+        "sip_trace",
+        serde_json::json!({"agent": "alice", "after_id": newest}),
+    );
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    assert!(
+        v["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|m| m["id"].as_u64().unwrap() > newest),
+        "{v:?}"
+    );
+
+    let _ = server.tool("hangup_all", serde_json::json!({"agent": "alice"}));
+}
+
+#[cfg(unix)]
+#[test]
+fn default_trace_dir_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let config = write_config(tmp.path());
+    let mut server = Server::start(&config);
+    let _ = server.tool("agent_status", serde_json::json!({"agent": "alice"}));
+    let dir = std::fs::read_dir(tmp.path())
+        .unwrap()
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().starts_with("ringo-mcp-"))
+        .expect("trace dir in XDG_RUNTIME_DIR");
+    let mode = dir.metadata().unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700, "trace dir must be owner-only, got {mode:o}");
 }

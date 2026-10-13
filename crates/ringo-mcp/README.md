@@ -37,7 +37,7 @@ Without `--config`, the path comes from `$RINGO_MCP_CONFIG` or defaults to
 
 Optional flags: `--enabled-tools <LIST>` / `--disable <GROUP|TOOL>` trim the
 tool surface (groups: discovery, call-control, audio, headers, events,
-recording, lifecycle — or individual tool names);
+recording, lifecycle, trace — or individual tool names);
 `--dial-deny <REGEX>` / `--dial-allow <REGEX>` (repeatable, global) restrict
 what `dial`/`transfer` may place a call to — deny always wins, e.g.
 `--dial-deny '^00' --dial-deny '^0900'`; `--version` prints the version.
@@ -93,6 +93,7 @@ the only UA in its process — see the ringo-core `Account` docs).
 | `call_headers` | SIP headers of received INVITEs, per Call-ID or all (newest first) |
 | `add_header` / `rm_header` | Custom headers on outgoing INVITEs (runtime; `${uuid}` renders once, immediately) |
 | `save_audio` | Write the current call's audio to WAVs (needs `record_audio`) |
+| `sip_trace` | Recent SIP messages of an agent (plaintext, also TLS), filterable by Call-ID |
 
 Call control is fire-and-forget: observe progress with `wait_event`
 (`call_ringing` → `call_established` → `call_closed`) or by polling
@@ -112,5 +113,8 @@ optional `event` filter — a name or an array, e.g.
 ## Logging
 
 Workers are silent unless `RINGO_AGENT_LOG` is set in the server's environment
-(`-` for stderr, a path for a per-agent file); same for `RINGO_AGENT_SIPTRACE`.
-Both are inherited by the worker processes.
+(`-` for stderr, a path for a per-agent file); it is inherited by the worker
+processes. SIP traces are on by default (text, in a private `$XDG_RUNTIME_DIR/ringo-mcp-*`
+dir, removed on exit) and readable via `sip_trace`; set `RINGO_AGENT_SIPTRACE` to
+write them elsewhere (a `.pcap` path for sngrep/Wireshark, `-` for stderr) —
+`sip_trace` then only works for a text file.

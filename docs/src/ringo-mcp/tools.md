@@ -181,3 +181,33 @@ Custom headers on the agent's **outgoing** INVITEs, at runtime.
 
 Writes the current call's sent + received audio as WAVs. Requires
 `record_audio = true` in `[backend]`.
+
+## Trace
+
+### `sip_trace`
+
+```jsonc
+{ "agent": "alice", "call_id": "a1b2…", "after_id": 3920, "limit": 20 }
+// → { "messages": [{ "id": 4711, "ts": "10:00:00.050", "direction": "rx",
+//       "transport": "UDP", "first_line": "SIP/2.0 488 Not Acceptable Here",
+//       "call_id": "a1b2…", "text": "SIP/2.0 488 …" }],
+//     "count": 1, "skipped": 0, "newest_id": 4711, "truncated": false }
+```
+
+The agent's SIP messages, sent and received, in plaintext (also for TLS: the
+trace is taken before encryption / after decryption) — to see *why* a call
+failed: the exact final response, the SDP, the headers.
+
+- `call_id` (optional) keeps one call's dialog; take it from a `call_*` event
+  or `agent_status`.
+- `after_id` (optional) returns only newer messages; `newest_id` is the next
+  cursor. Ids are opaque, increasing numbers (positions in the trace).
+- Only the newest 2 MiB of the trace are read; `truncated: true` means older
+  messages exist beyond that (or behind your cursor).
+- `limit` (default 20, max 100) keeps the newest matching messages; `skipped`
+  counts the older ones left out. A single message is cut at 8 KiB.
+- The trace belongs to the current worker: after `agent_stop` or a crash the
+  next worker starts a fresh one, and ids start over.
+- Traces include the `Authorization` headers (digest responses, never the
+  password). Disable the tool with `--disable trace` if the client must not
+  see them.

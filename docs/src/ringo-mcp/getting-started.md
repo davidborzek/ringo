@@ -59,7 +59,7 @@ See [Configuration](configuration.md) for all fields.
 Every tool definition costs context in the LLM client — and some setups want
 a locked-down surface. Both flags take **group names**
 (`discovery`, `call-control`, `audio`, `headers`, `events`,
-`recording`, `lifecycle`) or individual tool names:
+`recording`, `lifecycle`, `trace`) or individual tool names:
 
 ```sh
 ringo-mcp --disable call-control            # observe only, no dialing
@@ -161,9 +161,15 @@ bare number/extension (resolved to `sip:<target>@<agent's domain>`).
 
 The MCP stream stays clean; everything else goes to stderr (most clients show
 it as server logs). Workers are silent unless you set `RINGO_AGENT_LOG`
-(`-` for stderr, a path for per-agent files) — same for
-`RINGO_AGENT_SIPTRACE` — in the server's environment; both are inherited by
-the worker processes.
+(`-` for stderr, a path for per-agent files) in the server's environment; it
+is inherited by the worker processes.
+
+SIP traces are on by default: the workers write them as text to a private
+temp dir (`$XDG_RUNTIME_DIR/ringo-mcp-*`, removed when the server exits), and the
+LLM reads them with [`sip_trace`](tools.md#sip_trace). To keep them elsewhere,
+set `RINGO_AGENT_SIPTRACE` yourself: a `.pcap` path writes a capture for
+sngrep/Wireshark, `-` writes to stderr. `sip_trace` only reads text files, so
+it reports the trace as unavailable in those cases.
 
 To check a setup without an MCP client at all, drive the server by hand:
 

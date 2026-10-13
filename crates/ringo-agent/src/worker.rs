@@ -283,23 +283,24 @@ fn init_logging(name: &str) {
         match t.as_str() {
             "" => {}
             "-" => ringo_core::log::init_stderr(),
-            path => ringo_core::log::init_file(per_agent_path(path, name)),
+            path => ringo_core::log::init_file(per_agent_path(path, name, std::process::id())),
         }
     }
     if let Some(t) = std::env::var_os("RINGO_AGENT_SIPTRACE").and_then(|v| v.into_string().ok()) {
         match t.as_str() {
             "" => {}
             "-" => ringo_core::sip_trace_stderr(),
-            path => ringo_core::sip_trace_file(per_agent_path(path, name)),
+            path => ringo_core::sip_trace_file(per_agent_path(path, name, std::process::id())),
         }
     }
 }
 
 /// Insert a per-agent tag before the file extension: `run.log` ->
 /// `run.<name>.<pid>.log`. The name is sanitised (no path separators / dots, so
-/// it can't escape the directory) and the PID disambiguates same-named agents
-/// across scenarios so their truncating logs don't clobber each other.
-fn per_agent_path(base: &str, name: &str) -> std::path::PathBuf {
+/// it can't escape the directory) and the worker PID disambiguates same-named
+/// agents across scenarios so their truncating logs don't clobber each other.
+/// Public so a parent can locate a worker's file (see `ProcessClient::pid`).
+pub fn per_agent_path(base: &str, name: &str, pid: u32) -> std::path::PathBuf {
     let safe: String = name
         .chars()
         .map(|c| {
@@ -310,7 +311,7 @@ fn per_agent_path(base: &str, name: &str) -> std::path::PathBuf {
             }
         })
         .collect();
-    let tag = format!("{safe}.{}", std::process::id());
+    let tag = format!("{safe}.{pid}");
     let p = std::path::Path::new(base);
     match p.extension().and_then(|e| e.to_str()) {
         Some(ext) => p.with_extension(format!("{tag}.{ext}")),

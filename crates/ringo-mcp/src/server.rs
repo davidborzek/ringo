@@ -7,6 +7,7 @@
 //! polling `agent_status` or by blocking on `wait_event`.
 
 use crate::hub::Hub;
+use crate::trace::SipTraceFiles;
 use anyhow::Result;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -44,6 +45,7 @@ pub(crate) const TOOL_GROUPS: &[(&str, &[&str])] = &[
     ("events", &["wait_event", "agent_events"]),
     ("recording", &["save_audio"]),
     ("lifecycle", &["agent_stop"]),
+    ("trace", &["sip_trace"]),
 ];
 
 /// Every tool name (union of all groups — keeps the table honest).
@@ -141,6 +143,8 @@ const DEFAULT_WAIT_MS: u64 = 30_000;
 #[derive(Clone)]
 pub struct TelephonyServer {
     hub: Arc<Hub>,
+    /// Where the workers' SIP trace files live (for `sip_trace`).
+    sip_traces: SipTraceFiles,
     /// The full tool set with the CLI-flag disables applied. Bound into the
     /// generated dispatch via `#[tool_handler(router = …)]` — the plain
     /// `#[tool_handler]` default would rebuild a fresh, unfiltered router.
@@ -148,12 +152,16 @@ pub struct TelephonyServer {
 }
 
 impl TelephonyServer {
-    fn new(hub: Arc<Hub>, disabled_tools: Vec<String>) -> Self {
+    fn new(hub: Arc<Hub>, sip_traces: SipTraceFiles, disabled_tools: Vec<String>) -> Self {
         let mut tool_router = Self::build_tool_router();
         for name in disabled_tools {
             tool_router.disable_route(name);
         }
-        Self { hub, tool_router }
+        Self {
+            hub,
+            sip_traces,
+            tool_router,
+        }
     }
 
     /// Look up (spawning on first use) the named agent's running instance.
@@ -300,6 +308,25 @@ struct SaveAudioParam {
     /// File prefix; WAVs are written as `<prefix>-<call>-<tag>.wav`.
     prefix: String,
 }
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct SipTraceParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// Only messages of this SIP Call-ID (e.g. from a `call_*` event).
+    #[serde(default)]
+    call_id: Option<String>,
+    /// Only messages after this id (`newest_id` from a previous reply).
+    #[serde(default)]
+    after_id: Option<u64>,
+    /// Max messages to return, newest kept (default 20, max 100).
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// Default and cap for `sip_trace`'s `limit`: full SIP messages are large.
+const SIP_TRACE_DEFAULT_LIMIT: usize = 20;
+const SIP_TRACE_MAX_LIMIT: usize = 100;
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct CallHeadersParam {
@@ -757,6 +784,67 @@ impl TelephonyServer {
     }
 
     #[tool(
+        description = "The agent's recent SIP messages (plaintext, sent and received, also for TLS) from the current worker's trace — to see why a call failed (e.g. the exact 4xx/5xx response, SDP, headers). Filter by `call_id`, page with `after_id` (the last seen id); returns the newest `limit` messages (default 20, max 100), oldest first. A worker restart (`agent_stop`, crash) starts a new trace."
+    )]
+    async fn sip_trace(
+        &self,
+        Parameters(SipTraceParam {
+            agent,
+            call_id,
+            after_id,
+            limit,
+        }): Parameters<SipTraceParam>,
+    ) -> Result<CallToolResult, McpError> {
+        // Validates the name and starts the worker, like every agent tool.
+        let a = self.agent(&agent).await?;
+        let limit = limit
+            .unwrap_or(SIP_TRACE_DEFAULT_LIMIT)
+            .clamp(1, SIP_TRACE_MAX_LIMIT);
+        let path = self
+            .sip_traces
+            .worker_file(&a.name, a.worker_pid())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let page = tokio::task::spawn_blocking(move || crate::trace::read_page(&path, after_id))
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        // The cursor advances over every message read, filtered or not.
+        let newest_id = page.messages.last().map_or(after_id.unwrap_or(0), |m| m.id);
+        let matching: Vec<_> = page
+            .messages
+            .iter()
+            .filter(|m| {
+                call_id
+                    .as_deref()
+                    .is_none_or(|c| m.call_id.as_deref() == Some(c))
+            })
+            .collect();
+        let skipped = matching.len().saturating_sub(limit);
+        let entries: Vec<serde_json::Value> = matching[skipped..]
+            .iter()
+            .map(|m| {
+                json!({
+                    "id": m.id,
+                    "ts": m.ts,
+                    "direction": m.direction,
+                    "transport": m.transport,
+                    "first_line": m.first_line,
+                    "call_id": m.call_id,
+                    "text": m.text,
+                })
+            })
+            .collect();
+        ok_json(json!({
+            "messages": entries,
+            "count": entries.len(),
+            "skipped": skipped,
+            "newest_id": newest_id,
+            "truncated": page.truncated,
+        }))
+    }
+
+    #[tool(
         description = "Add a custom SIP header to the agent's outgoing INVITEs (persistent until removed or the worker restarts). The value is a template rendered once, now: `${uuid}` becomes a fresh identifier in this call and stays fixed for future calls — for a fresh uuid per call, declare it in ringo-mcp's config file. Removes any header of the same name first (baresip's uarmheader semantics)."
     )]
     async fn add_header(
@@ -820,16 +908,21 @@ impl ServerHandler for TelephonyServer {
                  `list_agents` to see who is configured, `dial` (or wait for \
                  `call_incoming` via `wait_event`, then `accept`), then `wait_event` \
                  until `call_established`/`call_closed`. Use `send_dtmf`, `play`, \
-                 `transfer`, `hold`/`resume`/`mute` during the call, and \
-                 `agent_status` to poll state and media quality."
+                 `transfer`, `hold`/`resume`/`mute` during the call, \
+                 `agent_status` to poll state and media quality, and `sip_trace` \
+                 to read the raw SIP messages when a call fails."
                     .to_string(),
             )
     }
 }
 
 /// Serve MCP over stdio until the client disconnects.
-pub async fn serve(hub: Arc<Hub>, disabled_tools: Vec<String>) -> anyhow::Result<()> {
-    let service = TelephonyServer::new(hub, disabled_tools)
+pub async fn serve(
+    hub: Arc<Hub>,
+    sip_traces: SipTraceFiles,
+    disabled_tools: Vec<String>,
+) -> anyhow::Result<()> {
+    let service = TelephonyServer::new(hub, sip_traces, disabled_tools)
         .serve(stdio())
         .await
         .map_err(|e| anyhow::anyhow!("serve MCP over stdio: {e}"))?;

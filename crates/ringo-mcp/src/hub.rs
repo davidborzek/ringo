@@ -817,6 +817,11 @@ impl Agent {
         self.client.call_count()
     }
 
+    /// The worker's OS process id (names its SIP trace file).
+    pub fn worker_pid(&self) -> u32 {
+        self.client.pid()
+    }
+
     /// Write the call's sent+received audio to WAV files under `prefix`;
     /// returns the created paths. Requires `record_audio` in `[backend]`.
     pub fn save_audio(&self, prefix: &str) -> Vec<String> {

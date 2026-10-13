@@ -8,7 +8,7 @@
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
-use ringo_mcp::{config, hub, serve};
+use ringo_mcp::{config, hub, serve, trace};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -90,6 +90,34 @@ fn main() -> Result<()> {
         .unwrap_or_else(config::default_path);
     let loaded = config::load(&path)?;
 
+    // SIP traces for the `sip_trace` tool: the workers inherit the destination
+    // via env. A user-set value wins (e.g. a pcap for sngrep); otherwise trace
+    // as text into a private (0700, randomly named) temp dir that is removed
+    // when it drops at exit. Traces carry SIP auth headers — hence private.
+    let owned_trace_dir = match std::env::var_os(trace::TRACE_ENV) {
+        Some(_) => None,
+        None => {
+            let base =
+                std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
+            let mut builder = tempfile::Builder::new();
+            builder.prefix("ringo-mcp-");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                builder.permissions(std::fs::Permissions::from_mode(0o700));
+            }
+            let dir = builder
+                .tempdir_in(&base)
+                .with_context(|| format!("create SIP trace dir in {}", base.display()))?;
+            // SAFETY: set once at startup, before the runtime and any worker
+            // threads exist.
+            unsafe { std::env::set_var(trace::TRACE_ENV, dir.path().join("sip.trace")) };
+            Some(dir)
+        }
+    };
+    let sip_traces =
+        trace::SipTraceFiles::from_env_value(&std::env::var(trace::TRACE_ENV).unwrap_or_default());
+
     // MCP stdio + broadcast/timers are async; the agent workers themselves run
     // as child processes (their own blocking loops), so a multi-thread runtime
     // only serves the server's I/O here.
@@ -103,7 +131,7 @@ fn main() -> Result<()> {
         "ringo-mcp: {n} agent(s) configured (started on first use); {} tool(s) enabled",
         ringo_mcp::total_tool_count() - disabled_tools.len()
     );
-    rt.block_on(async { serve(Arc::clone(&hub), disabled_tools).await })?;
+    let served = rt.block_on(async { serve(Arc::clone(&hub), sip_traces, disabled_tools).await });
 
     // The client is gone: ask the workers to deregister and exit, then give
     // the runtime a bounded window to drain — the per-agent event-poll tasks
@@ -113,5 +141,7 @@ fn main() -> Result<()> {
     // stop, see ringo-agent's SHUTDOWN_GRACE).
     hub.shutdown();
     rt.shutdown_timeout(std::time::Duration::from_secs(35));
-    Ok(())
+    // After the workers are gone: removes the trace dir.
+    drop(owned_trace_dir);
+    served
 }
