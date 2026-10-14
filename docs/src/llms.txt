@@ -1,6 +1,6 @@
 # ringo
 
-> Tooling for baresip SIP softphones: **ringo-phone** (a terminal SIP softphone), **ringo-flow** (a declarative telephony scenario test runner) and **ringo-mcp** (an MCP server exposing SIP agents to LLM clients). Full docs: https://davidborzek.github.io/ringo/
+> SIP tooling: **ringo-phone** (a terminal SIP softphone), **ringo-flow** (a declarative telephony scenario test runner) and **ringo-mcp** (an MCP server exposing SIP agents to LLM clients). Full docs: https://davidborzek.github.io/ringo/
 
 
 ## ringo-phone

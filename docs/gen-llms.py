@@ -14,8 +14,9 @@ SUMMARY = HERE / "src" / "SUMMARY.md"
 OUT = HERE / "src" / "llms.txt"
 
 SUMMARY_LINE = (
-    "Tooling for baresip SIP softphones: **ringo-phone** (a terminal SIP softphone) "
-    "and **ringo-flow** (a declarative telephony scenario test runner). "
+    "SIP tooling: **ringo-phone** (a terminal SIP softphone), "
+    "**ringo-flow** (a declarative telephony scenario test runner) and "
+    "**ringo-mcp** (an MCP server exposing SIP agents to LLM clients). "
     f"Full docs: {BASE}"
 )
 
