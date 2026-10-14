@@ -2,8 +2,7 @@
 
 ## Install
 
-baresip is built in and statically linked — no separate `baresip` install
-needed.
+The SIP stack is built in — nothing else to install.
 
 **Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
 [releases page](https://github.com/davidborzek/ringo/releases) — download,
@@ -108,25 +107,6 @@ claude mcp add ringo -- ringo-mcp
   }
 }
 ```
-
-**Pi** (via the [pi-mcp-adapter] extension) — global, in
-`~/.pi/agent/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "ringo": {
-      "command": "ringo-mcp",
-      "args": ["--config", "/absolute/path/to/config.toml"]
-    }
-  }
-}
-```
-
-Agents are only started when a tool actually uses them, so an idle MCP client
-holds no SIP registrations.
-
-[pi-mcp-adapter]: https://github.com/badlogic/pi-mono/
 
 ## Your first call
 

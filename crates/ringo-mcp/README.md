@@ -7,7 +7,7 @@ DTMF, transfer, observe call events and media quality.
 ## How it works
 
 - Each `[[agent]]` in the config gets its own `ringo-agent` **worker process**
-  (one baresip UA each, with its own SIP port and registration), driven over the
+  (one SIP user agent each, with its own port and registration), driven over the
   framed stdio protocol — the same architecture ringo-flow uses.
 - **Agents start lazily**: the config is validated at startup (no processes),
   and a worker is spawned by the first tool call that touches an agent

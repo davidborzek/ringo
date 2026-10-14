@@ -13,7 +13,7 @@ start with a clear error instead of surprising you mid-call.
 
 ## `[[agent]]`
 
-One agent = one SIP identity = one baresip UA in its own worker process.
+One agent = one SIP identity = one SIP user agent in its own worker process.
 
 | Key | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
@@ -33,7 +33,7 @@ One agent = one SIP identity = one baresip UA in its own worker process.
 | `mwi` | bool | `false` | Subscribe to message-waiting indication. |
 | `dtmf_mode` | string | — | `rtpevent` / `info` / `auto`. `info` (SIP INFO) is the reliable choice when the agent never transmits audio. |
 | `catchall` | bool | `true` | Accept INVITEs addressed to identities other than the registration username. Safe here: each worker is the only UA in its process. |
-| `audio_codecs` | array | `[]` | Restrict/order offered codecs, most-preferred first, e.g. `["G722/16000/1", "PCMU"]`. Empty = baresip's defaults. |
+| `audio_codecs` | array | `[]` | Restrict/order offered codecs, most-preferred first, e.g. `["G722/16000/1", "PCMU"]`. Empty = the default codec set. |
 | `custom_headers` | table / array | `[]` | Custom headers on outgoing INVITEs — see below. |
 
 ### Password resolution
@@ -83,9 +83,9 @@ Applies to every agent. All keys optional; `[[agent]]` fields always win.
 | --- | ---- | ------- | ----------- |
 | `audio_driver` | string | `"aubridge"` | `aubridge` = headless (no sound hardware; `play` renders tones/files, received audio is captured in-process). `pipewire`/`pulse`/… for real audio. |
 | `user_agent` | string | `ringo-mcp/<version>` | SIP `User-Agent` string. |
-| `max_calls` | number | baresip default (4) | Max simultaneous calls per agent. |
+| `max_calls` | number | 4 | Max simultaneous calls per agent. |
 | `hold_other_calls` | bool | `false` | Auto-hold the active call when another comes up. Off by default: the LLM keeps explicit control (`hold`/`resume`). |
-| `local_timeout_s` | number | baresip default (120) | Outgoing-call ring timeout in seconds. |
+| `local_timeout_s` | number | 120 | Outgoing-call ring timeout in seconds. |
 | `sip_cafile` | string | — | Trust this CA bundle for TLS SIP. |
 | `sip_capath` | string | — | Path to a TLS CA directory (`""` disables). |
 | `record_audio` | bool | `false` | Record every call by default (sent + received, in-process): each call starts a fresh recording, armed for `save_audio` without `record_start`/`record: true`. |

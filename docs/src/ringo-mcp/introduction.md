@@ -15,15 +15,15 @@ you: "Call the support line, wait for the IVR menu and press 2"
                             ├─ dial("support", "0800123456")
                             ├─ wait_event → call_established
                             ├─ send_dtmf("2")
-                            └─ …all over SIP, via baresip
+                            └─ …all over SIP
 ```
 
 ## Highlights
 
 - **Telephony without glue code** — one config file maps SIP accounts to named
   agents; the LLM addresses them by name.
-- **Multiple UAs** — each agent is its own worker process (own baresip UA,
-  own SIP port and registration), so agents can call each other or the outside
+- **Multiple UAs** — each agent is its own worker process (own SIP
+  user agent, port and registration), so agents can call each other or the outside
   world. They start lazily, on first use.
 - **Event-driven, not guesswork** — call control is fire-and-forget; outcomes
   arrive as events (`call_incoming`, `call_established`, `call_closed`) via the
@@ -43,8 +43,8 @@ workers always share one build. The same one-process-per-UA design powers
 [ringo-flow]'s scenario runner.
 
 ```
-MCP client ──stdio(JSON-RPC)── ringo-mcp ──framed stdio── agent worker (baresip UA)
-                                             ├─ agent worker (baresip UA)
+MCP client ──stdio(JSON-RPC)── ringo-mcp ──framed stdio── agent worker (SIP UA)
+                                             ├─ agent worker (SIP UA)
                                              └─ …
 ```
 

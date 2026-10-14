@@ -1009,7 +1009,7 @@ impl TelephonyServer {
     }
 
     #[tool(
-        description = "Add a custom SIP header to the agent's outgoing INVITEs (persistent until removed or the worker restarts). The value is a template rendered once, now: `${uuid}` becomes a fresh identifier in this call and stays fixed for future calls — for a fresh uuid per call, declare it in ringo-mcp's config file. Removes any header of the same name first (baresip's uarmheader semantics).",
+        description = "Add a custom SIP header to the agent's outgoing INVITEs (persistent until removed or the worker restarts). The value is a template rendered once, now: `${uuid}` becomes a fresh identifier in this call and stays fixed for future calls — for a fresh uuid per call, declare it in ringo-mcp's config file. Replaces any header of the same name.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
