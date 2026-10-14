@@ -11,6 +11,7 @@
 
 use crate::proto::{
     self, AgentConfig, Command, FromWorker, Query, QueryEnvelope, ReplyResult, ToWorker,
+    WireSavedAudio,
 };
 use anyhow::{Context, Result};
 use ringo_core::AudioFrame;
@@ -38,12 +39,49 @@ const READY_TIMEOUT: Duration = Duration::from_secs(10);
 /// RE-thread shutdown, or we'd kill it mid-deregister and leak the binding.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
+/// One WAV written by [`ProcessClient::save_audio_detailed`]: which side of
+/// the call it holds, how much audio it contains, and whether the recording
+/// hit the retention cap (only the newest
+/// `ringo_core::RECORDING_MAX_SECS` seconds are kept).
+#[derive(Debug, Clone)]
+pub struct SavedAudio {
+    /// The WAV file path written.
+    pub path: String,
+    /// Which side of the call: `"sent"` or `"recv"`.
+    pub kind: String,
+    /// Recorded duration in milliseconds.
+    pub duration_ms: u64,
+    /// Captured mono samples at `srate`.
+    pub samples: usize,
+    /// Sample rate in Hz.
+    pub srate: u32,
+    /// Whether the recording reached the retention cap (the WAV holds only
+    /// the newest audio).
+    pub truncated: bool,
+}
+
+impl From<WireSavedAudio> for SavedAudio {
+    fn from(w: WireSavedAudio) -> Self {
+        let duration_ms = w.samples as u64 * 1000 / w.srate.max(1) as u64;
+        Self {
+            path: w.path,
+            kind: w.kind,
+            duration_ms,
+            samples: w.samples,
+            srate: w.srate,
+            truncated: w.truncated,
+        }
+    }
+}
+
 /// Handle to one agent worker process. Spawn it with [`ProcessClient::spawn`],
 /// then drive it: fire-and-forget call-control commands, blocking queries (media
 /// stats, received DTMF, tone analysis, …), and an [`AppEvent`] stream (returned
 /// by `spawn`). Dropping it deregisters and reaps the worker.
 pub struct ProcessClient {
     name: String,
+    /// The worker's OS process id (names its per-agent log/trace files).
+    pid: u32,
     stdin: Mutex<ChildStdin>,
     pending: Arc<Mutex<HashMap<u64, Sender<ReplyResult>>>>,
     next_id: AtomicU64,
@@ -91,6 +129,7 @@ impl ProcessClient {
         let mut child = os
             .spawn()
             .with_context(|| format!("spawn agent worker for `{}`", config.name))?;
+        let pid = child.id();
 
         let mut stdin = child.stdin.take().context("worker stdin missing")?;
         let stdout = child.stdout.take().context("worker stdout missing")?;
@@ -219,6 +258,7 @@ impl ProcessClient {
         Ok((
             Self {
                 name: handshake.config.name,
+                pid,
                 stdin: Mutex::new(stdin),
                 pending,
                 next_id: AtomicU64::new(0),
@@ -230,6 +270,12 @@ impl ProcessClient {
             },
             ev_rx,
         ))
+    }
+
+    /// The worker's OS process id — the `<pid>` in its per-agent log and SIP
+    /// trace file names (see [`crate::worker::per_agent_path`]).
+    pub fn pid(&self) -> u32 {
+        self.pid
     }
 
     /// A clone of the inbound-header buffer, for building a `header_poll` closure.
@@ -371,8 +417,9 @@ impl ProcessClient {
             value: value.to_string(),
         });
     }
-    /// Not yet exposed by a scenario verb (header removal is planned).
-    #[allow(dead_code)]
+    /// Remove ALL custom headers with this name (the worker's `uarmheader`
+    /// semantics). Used by ringo-mcp for replace-on-add and by the phone's
+    /// per-call header re-rendering.
     pub fn rm_header(&self, key: &str) {
         self.cmd(Command::RmHeader {
             key: key.to_string(),
@@ -383,6 +430,13 @@ impl ProcessClient {
         self.cmd(Command::SetAudioSource {
             spec: spec.to_string(),
         });
+    }
+    /// Arm or disarm full-call recording for the agent's UA: arming starts a
+    /// fresh recording (a previous one is cleared); disarming keeps what was
+    /// recorded until the next arm/call. Fire-and-forget like the worker's
+    /// other recording-free commands.
+    pub fn set_recording(&self, on: bool) {
+        self.cmd(Command::SetRecording { on });
     }
     /// Arm a fixed response (status `scode`/`reason` + extra `headers`) for the
     /// next inbound INVITE instead of accepting it.
@@ -425,10 +479,21 @@ impl ProcessClient {
     /// Ask the worker to write its captured audio to `<prefix>-sent.wav` /
     /// `<prefix>-recv.wav`; returns the paths written.
     pub fn save_audio(&self, prefix: &str) -> Vec<String> {
+        self.save_audio_detailed(prefix)
+            .into_iter()
+            .map(|f| f.path)
+            .collect()
+    }
+    /// Like [`Self::save_audio`], but returns what each written WAV contains
+    /// (side, duration, whether the retention cap truncated it) — the honest
+    /// form for callers that report recordings.
+    pub fn save_audio_detailed(&self, prefix: &str) -> Vec<SavedAudio> {
         match self.query(Query::SaveAudio {
             prefix: prefix.to_string(),
         }) {
-            Some(ReplyResult::Saved(paths)) => paths,
+            Some(ReplyResult::SavedAudio(files)) => {
+                files.into_iter().map(SavedAudio::from).collect()
+            }
             _ => Vec::new(),
         }
     }

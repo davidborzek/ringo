@@ -1,0 +1,1346 @@
+//! The MCP tool surface: a thin, typed layer over the [`Hub`][crate::hub::Hub].
+//!
+//! Every tool takes an `agent` name (plus params where needed) and returns a
+//! compact JSON payload. The first tool call for an agent spawns its worker
+//! process (lazy, single-flight — see the hub docs). Call control is
+//! fire-and-forget (the worker applies it); outcomes are observed either by
+//! polling `agent_status` or by blocking on `wait_event`.
+
+use crate::hub::Hub;
+use crate::trace::SipTraceFiles;
+use anyhow::Result;
+use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig};
+use rmcp::schemars;
+use rmcp::tool_handler;
+use rmcp::tool_router;
+use rmcp::{ErrorData as McpError, ServerHandler, ServiceExt, tool, transport::stdio};
+use serde::Deserialize;
+use serde_json::json;
+use std::sync::Arc;
+use std::time::Duration;
+
+/// Tool groups for the `--disable-<group>` and `--enabled-tools` flags —
+/// the mcp-grafana-style way to trim the surface (context tokens, read-only
+/// observers, lockdown profiles). A flag may name a group OR an individual tool.
+pub(crate) const TOOL_GROUPS: &[(&str, &[&str])] = &[
+    ("discovery", &["list_agents", "agent_status"]),
+    (
+        "call-control",
+        &[
+            "dial",
+            "accept",
+            "hangup",
+            "hangup_all",
+            "hold",
+            "resume",
+            "mute",
+            "send_dtmf",
+            "transfer",
+        ],
+    ),
+    ("audio", &["play"]),
+    ("headers", &["call_headers", "add_header", "rm_header"]),
+    ("events", &["wait_event", "agent_events"]),
+    ("recording", &["record_start", "record_stop", "save_audio"]),
+    ("lifecycle", &["agent_stop"]),
+    ("trace", &["sip_trace"]),
+];
+
+/// Every tool name (union of all groups — keeps the table honest).
+fn all_tool_names() -> Vec<&'static str> {
+    let mut v: Vec<&'static str> = TOOL_GROUPS
+        .iter()
+        .flat_map(|(_, tools)| tools.iter().copied())
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
+/// Expand one `--enabled-tools`/`--disable-` name (group or tool) to tool
+/// names. `None` = unknown name.
+fn expand_tool_name(name: &str) -> Option<Vec<&'static str>> {
+    if let Some((_, tools)) = TOOL_GROUPS.iter().find(|(g, _)| *g == name) {
+        return Some(tools.to_vec());
+    }
+    if let Some(t) = all_tool_names().into_iter().find(|t| *t == name) {
+        return Some(vec![t]);
+    }
+    None
+}
+
+/// How many tools exist in total (the group table's union).
+pub fn total_tool_count() -> usize {
+    all_tool_names().len()
+}
+
+/// Resolve the flags to the list of tools to disable (passed to the router).
+/// `enabled`: the `--enabled-tools` allowlist (None = all enabled);
+/// `disable`: the `--disable-<name>` flag values, applied on top.
+pub fn resolve_disabled_tools(
+    enabled: Option<&[String]>,
+    disable: &[String],
+) -> Result<Vec<String>> {
+    let all = all_tool_names();
+    let allowed: Option<std::collections::HashSet<&str>> = match enabled {
+        None => None,
+        Some(names) => {
+            let mut set = std::collections::HashSet::new();
+            for n in names {
+                let expanded = expand_tool_name(n).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unknown tool or group `{n}`; valid groups: {}; valid tools: {}",
+                        TOOL_GROUPS
+                            .iter()
+                            .map(|(g, _)| *g)
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        all.join(", ")
+                    )
+                })?;
+                set.extend(expanded);
+            }
+            Some(set)
+        }
+    };
+    let mut disabled: Vec<String> = Vec::new();
+    for n in disable {
+        let expanded = expand_tool_name(n).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown tool or group `{n}`; valid groups: {}; valid tools: {}",
+                TOOL_GROUPS
+                    .iter()
+                    .map(|(g, _)| *g)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                all.join(", ")
+            )
+        })?;
+        disabled.extend(expanded.into_iter().map(String::from));
+    }
+    if let Some(allowed) = allowed {
+        // Allowlist mode: everything not allowed is disabled.
+        for t in all {
+            if !allowed.contains(t) && !disabled.iter().any(|d| d == t) {
+                disabled.push(t.to_string());
+            }
+        }
+    }
+    disabled.sort();
+    disabled.dedup();
+    Ok(disabled)
+}
+
+/// Cap on a single `wait_event` timeout, so a confused model can't park a
+/// tool call for hours.
+const MAX_WAIT_MS: u64 = 120_000;
+/// Default `wait_event` timeout.
+const DEFAULT_WAIT_MS: u64 = 30_000;
+
+/// The MCP server state: the agent hub plus the generated tool router.
+#[derive(Clone)]
+pub struct TelephonyServer {
+    hub: Arc<Hub>,
+    /// Where the workers' SIP trace files live (for `sip_trace`).
+    sip_traces: SipTraceFiles,
+    /// The full tool set with the CLI-flag disables applied. Bound into the
+    /// generated dispatch via `#[tool_handler(router = …)]` — the plain
+    /// `#[tool_handler]` default would rebuild a fresh, unfiltered router.
+    tool_router: ToolRouter<Self>,
+}
+
+impl TelephonyServer {
+    fn new(hub: Arc<Hub>, sip_traces: SipTraceFiles, disabled_tools: Vec<String>) -> Self {
+        let mut tool_router = Self::build_tool_router();
+        for name in disabled_tools {
+            tool_router.disable_route(name);
+        }
+        Self {
+            hub,
+            sip_traces,
+            tool_router,
+        }
+    }
+
+    /// Look up (spawning on first use) the named agent's running instance.
+    /// Unknown agents are a client error; a failed spawn is an internal one
+    /// (the config was validated at startup, so this is a runtime problem).
+    async fn agent(&self, name: &str) -> Result<Arc<crate::hub::Agent>, McpError> {
+        self.hub.get(name).await.map_err(|e| {
+            if e.to_string().contains("unknown agent") {
+                McpError::invalid_params(e.to_string(), None)
+            } else {
+                McpError::internal_error(e.to_string(), None)
+            }
+        })
+    }
+}
+
+// Parameter structs ──────────────────────────────────────────────────────────
+
+/// Identifies an agent by its config name.
+#[derive(Deserialize, schemars::JsonSchema)]
+struct AgentParam {
+    /// Agent name from the config file.
+    agent: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct DialParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// SIP URI, `user@host`, or bare number/extension (resolved to
+    /// `sip:<target>@<agent domain>`).
+    target: String,
+    /// Block until the call is established (or fails / the timeout expires)
+    /// instead of returning immediately. Default false (fire-and-forget).
+    #[serde(default)]
+    wait_established: bool,
+    /// Overall wait budget in ms for `wait_established` (default 60000, max
+    /// 120000). A timeout does NOT cancel the call — it keeps ringing, and the
+    /// reply carries its call_id.
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    /// Record this call (sent + received audio). Same as calling `record_start`
+    /// before the dial; save with `save_audio` during or after the call.
+    #[serde(default)]
+    record: bool,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct AcceptParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// Record this call (sent + received audio). Same as calling `record_start`
+    /// before the accept; save with `save_audio` during or after the call.
+    #[serde(default)]
+    record: bool,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct DtmfParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// One DTMF digit: `0-9`, `*`, `#`, or `A-F`.
+    digit: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct TransferParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// SIP URI, `user@host`, or bare number/extension (resolved to
+    /// `sip:<target>@<agent domain>`).
+    target: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct PlayParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// What the agent transmits: `"silence"`, `"ausine,<freq>"` (a sine tone,
+    /// e.g. `ausine,425`) or `"aufile,<path>"` (a mono WAV file).
+    spec: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct WaitEventParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// How long to wait, in milliseconds (default 30000, max 120000).
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+    /// Only wait for this event (or one of these events), e.g. `"call_established"`
+    /// or `["call_established", "call_closed"]` to await a call's outcome either
+    /// way. Non-matching events are skipped. Omit to take the next event of any
+    /// kind. Valid names are listed by an invalid value's error message.
+    #[serde(default)]
+    event: Option<EventFilter>,
+    /// Event-log cursor: wait for the first event with a log id AFTER this —
+    /// events that fired since (e.g. during a slow tool roundtrip) are
+    /// delivered from the log, not lost. Read the current position with
+    /// `agent_events`, pass the last seen `id` here; the reply carries the
+    /// matched event's `id` as the next cursor. Omit for live-only semantics.
+    #[serde(default)]
+    after_id: Option<u64>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct AgentEventsParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// Only events with a log id after this one (default 0 = the whole ring).
+    #[serde(default)]
+    after_id: Option<u64>,
+}
+
+/// A `wait_event` filter: one event name, or several (any of them matches).
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum EventFilter {
+    /// One event name.
+    One(String),
+    /// Any of these event names.
+    Any(Vec<String>),
+}
+
+impl EventFilter {
+    fn names(&self) -> Vec<String> {
+        match self {
+            Self::One(n) => vec![n.clone()],
+            Self::Any(v) => v.clone(),
+        }
+    }
+}
+
+/// The names `wait_event`'s filter accepts (== every `event_name` output).
+const KNOWN_EVENT_NAMES: &[&str] = &[
+    "registering",
+    "register_ok",
+    "register_failed",
+    "unregistered",
+    "call_incoming",
+    "call_outgoing",
+    "call_ringing",
+    "call_established",
+    "call_closed",
+    "call_deflected",
+    "call_hold",
+    "call_resume",
+    "call_transfer_failed",
+    "voicemail_status",
+    "response",
+    "backend_connect_failed",
+];
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct SaveAudioParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// File prefix; WAVs are written as `<prefix>-sent.wav` /
+    /// `<prefix>-recv.wav`.
+    prefix: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct SipTraceParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// Only messages of this SIP Call-ID (e.g. from a `call_*` event).
+    #[serde(default)]
+    call_id: Option<String>,
+    /// Only messages after this id (`newest_id` from a previous reply).
+    #[serde(default)]
+    after_id: Option<u64>,
+    /// Max messages to return, newest kept (default 20, max 100).
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+/// Default and cap for `sip_trace`'s `limit`: full SIP messages are large.
+const SIP_TRACE_DEFAULT_LIMIT: usize = 20;
+const SIP_TRACE_MAX_LIMIT: usize = 100;
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct CallHeadersParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// Optional SIP Call-ID (as reported by `call_incoming`/`agent_status`):
+    /// return only that call's headers. Omit for all known calls (newest
+    /// first).
+    call_id: Option<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct AddHeaderParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// Header name (e.g. `X-Session-Tag`).
+    name: String,
+    /// Header value. Templates are rendered once, NOW: `${uuid}` becomes a
+    /// fresh identifier in this call (it will NOT re-render on future calls —
+    /// declare per-call templates in the config file instead).
+    value: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct RmHeaderParam {
+    /// Agent name from the config file.
+    agent: String,
+    /// Header name; ALL headers with this name are removed.
+    name: String,
+}
+
+// Helpers ───────────────────────────────────────────────────────────────────
+
+fn ok_text(msg: impl Into<String>) -> Result<CallToolResult, McpError> {
+    Ok(CallToolResult::success(vec![ContentBlock::text(msg)]))
+}
+
+fn ok_json(v: serde_json::Value) -> Result<CallToolResult, McpError> {
+    Ok(CallToolResult::success(vec![ContentBlock::text(
+        v.to_string(),
+    )]))
+}
+
+fn invalid(msg: impl Into<String>) -> McpError {
+    McpError::invalid_params(msg.into(), None)
+}
+
+/// Compact JSON for one event, for `wait_event`.
+/// The `event`-field name for an [`AppEvent`] — the single naming source for
+/// `event_json` and `wait_event`'s optional filter.
+pub fn event_name(e: &ringo_core::event::AppEvent) -> &'static str {
+    use ringo_core::event::AppEvent::*;
+    match e {
+        Registering { .. } => "registering",
+        RegisterOk { .. } => "register_ok",
+        RegisterFailed { .. } => "register_failed",
+        Unregistered { .. } => "unregistered",
+        CallIncoming { .. } => "call_incoming",
+        CallOutgoing { .. } => "call_outgoing",
+        CallRinging { .. } => "call_ringing",
+        CallEstablished { .. } => "call_established",
+        CallClosed { .. } => "call_closed",
+        CallDeflected { .. } => "call_deflected",
+        CallHold { .. } => "call_hold",
+        CallResume { .. } => "call_resume",
+        CallTransferFailed { .. } => "call_transfer_failed",
+        VoicemailStatus { .. } => "voicemail_status",
+        Response { .. } => "response",
+        Unknown { .. } => "unknown",
+        BackendConnectFailed { .. } => "backend_connect_failed",
+    }
+}
+
+/// Compact JSON for one event, for `wait_event`.
+pub(crate) fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
+    use ringo_core::event::AppEvent::*;
+    match e {
+        Registering { account } => json!({"event": "registering", "account": account}),
+        RegisterOk { account } => json!({"event": "register_ok", "account": account}),
+        RegisterFailed { reason } => json!({"event": "register_failed", "reason": reason}),
+        Unregistered { account } => json!({"event": "unregistered", "account": account}),
+        CallIncoming {
+            call_id,
+            number,
+            display_name,
+        } => json!({
+            "event": "call_incoming",
+            "call_id": call_id,
+            "from": number,
+            "display_name": display_name,
+        }),
+        CallOutgoing { call_id, number } => {
+            json!({"event": "call_outgoing", "call_id": call_id, "to": number})
+        }
+        CallRinging { call_id } => json!({"event": "call_ringing", "call_id": call_id}),
+        CallEstablished { call_id } => {
+            json!({"event": "call_established", "call_id": call_id})
+        }
+        CallClosed {
+            call_id,
+            reason,
+            error,
+        } => json!({
+            "event": "call_closed",
+            "call_id": call_id,
+            "reason": reason,
+            "error": error,
+        }),
+        CallDeflected {
+            from,
+            display_name,
+            target,
+        } => json!({
+            "event": "call_deflected",
+            "from": from,
+            "display_name": display_name,
+            "target": target,
+        }),
+        CallHold { call_id } => json!({"event": "call_hold", "call_id": call_id}),
+        CallResume { call_id } => json!({"event": "call_resume", "call_id": call_id}),
+        CallTransferFailed { call_id } => {
+            json!({"event": "call_transfer_failed", "call_id": call_id})
+        }
+        VoicemailStatus { waiting, new_count } => {
+            json!({"event": "voicemail_status", "waiting": waiting, "new_count": new_count})
+        }
+        Response { ok, data } => json!({"event": "response", "ok": ok, "data": data}),
+        // Never surfaces through wait_event/WS (the hub filters all Unknown),
+        // kept for direct event_json callers — deliberately WITHOUT the raw
+        // backend class/type numbers: backend details don't leak here.
+        Unknown { .. } => json!({"event": "unknown"}),
+        BackendConnectFailed { reason } => {
+            json!({"event": "backend_connect_failed", "reason": reason})
+        }
+    }
+}
+
+// Tools ─────────────────────────────────────────────────────────────────────
+
+#[tool_router(router = build_tool_router)]
+impl TelephonyServer {
+    #[tool(
+        description = "List all configured telephony agents (name, SIP address, registration, live calls). Agents start lazily: `running: false` means the agent is configured but its worker will be started by the first tool call that uses it.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    fn list_agents(&self) -> Result<CallToolResult, McpError> {
+        let agents: Vec<serde_json::Value> = self
+            .hub
+            .overview()
+            .into_iter()
+            .map(|a| {
+                json!({
+                    "name": a.name,
+                    "aor": a.aor,
+                    "running": a.running,
+                    "registered": a.state.as_ref().map(|s| s.registered),
+                    "reg_error": a.state.as_ref().and_then(|s| s.reg_error.clone()),
+                    "worker_dead": a.state.as_ref().map(|s| s.worker_dead),
+                    "calls": a.state.map(|s| s.calls).unwrap_or_default(),
+                })
+            })
+            .collect();
+        ok_json(json!({ "agents": agents }))
+    }
+
+    #[tool(
+        description = "Detailed state of one agent: registration, live calls (id, phase, remote party), media quality, received DTMF. Starts the agent's worker process if this is its first use. Poll this after dial/accept to check progress.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn agent_status(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let a = self.agent(&agent).await?;
+        let s = a.state();
+        // The worker queries block on a std channel (bounded by the client's
+        // query timeout) — keep them off the async runtime's threads.
+        let (stats, call_count, received_dtmf) = {
+            let a = Arc::clone(&a);
+            tokio::task::spawn_blocking(move || {
+                (a.media_stats(), a.call_count(), a.received_dtmf())
+            })
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?
+        };
+        let stats = stats.map(|m| {
+            json!({
+                "rtt_ms": m.rtt_ms,
+                "jitter_ms": m.jitter_ms,
+                "rx_lost": m.rx_lost,
+                "packet_loss_pct": m.packet_loss_pct,
+                "mos": m.mos,
+            })
+        });
+        ok_json(json!({
+            "name": a.name,
+            "aor": a.aor,
+            "registered": s.registered,
+            "reg_error": s.reg_error,
+            "worker_dead": s.worker_dead,
+            "calls": s.calls,
+            "call_count": call_count,
+            "media_stats": stats,
+            "received_dtmf": received_dtmf,
+            "last_call_reason": s.last_call_reason,
+            "last_call_error": s.last_call_error,
+        }))
+    }
+
+    #[tool(
+        description = "Place an outgoing call from an agent. Starts the agent's worker process if this is its first use. Fire-and-forget: returns immediately; wait for `call_ringing`/`call_established`/`call_closed` via `wait_event`, or poll `agent_status`. Pass `record: true` to record this call (then save with `save_audio`).",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn dial(
+        &self,
+        Parameters(DialParam {
+            agent,
+            target,
+            wait_established,
+            timeout_ms,
+            record,
+        }): Parameters<DialParam>,
+    ) -> Result<CallToolResult, McpError> {
+        if timeout_ms.is_some() && !wait_established {
+            return Err(invalid(
+                "timeout_ms only applies together with wait_established",
+            ));
+        }
+        let a = self.agent(&agent).await?;
+        let resolved = self.hub.check_dial(&target, &a.domain).map_err(invalid)?;
+        if record {
+            a.arm_for_next_call();
+        }
+        if !wait_established {
+            a.dial(&resolved);
+            return ok_text(format!("dialing `{target}` from `{agent}`"));
+        }
+
+        let ms = timeout_ms.unwrap_or(DEFAULT_WAIT_MS).min(MAX_WAIT_MS);
+        let outcome = a.dial_and_wait(&resolved, Duration::from_millis(ms)).await;
+        match outcome {
+            crate::hub::DialOutcome::Established { call_id } => ok_json(json!({
+                "established": true, "call_id": call_id,
+            })),
+            crate::hub::DialOutcome::Failed { call_id, reason } => ok_json(json!({
+                "established": false, "call_id": call_id, "reason": reason,
+            })),
+            crate::hub::DialOutcome::StillRinging { call_id } => ok_json(json!({
+                "established": false, "call_id": call_id,
+                "state": "ringing",
+                "waited_ms": ms,
+            })),
+            crate::hub::DialOutcome::NoCall => ok_json(json!({
+                "established": false,
+                "error": "dial produced no call within 10 s (locally rejected? check the target)",
+            })),
+        }
+    }
+
+    #[tool(
+        description = "Accept the currently ringing (incoming) call of an agent. Starts the agent's worker process if this is its first use. Pass `record: true` to record this call (then save with `save_audio`).",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn accept(
+        &self,
+        Parameters(AcceptParam { agent, record }): Parameters<AcceptParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let a = self.agent(&agent).await?;
+        if record {
+            a.set_recording(true);
+        }
+        a.accept();
+        ok_text(format!("accepting current call on `{agent}`"))
+    }
+
+    #[tool(
+        description = "Hang up the current call of an agent.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn hangup(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.hangup();
+        ok_text(format!("hanging up current call on `{agent}`"))
+    }
+
+    #[tool(
+        description = "Hang up all calls of an agent.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn hangup_all(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.hangup_all();
+        ok_text(format!("hanging up all calls on `{agent}`"))
+    }
+
+    #[tool(
+        description = "Put the current call of an agent on hold.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn hold(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.hold();
+        ok_text(format!("holding current call on `{agent}`"))
+    }
+
+    #[tool(
+        description = "Resume the held call of an agent.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn resume(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.resume();
+        ok_text(format!("resuming held call on `{agent}`"))
+    }
+
+    #[tool(
+        description = "Mute the agent's outgoing audio (the remote party hears silence).",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn mute(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.mute();
+        ok_text(format!("`{agent}` is muted"))
+    }
+
+    #[tool(
+        description = "Send one DTMF digit (0-9, *, #, A-F) on the agent's current call.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn send_dtmf(
+        &self,
+        Parameters(DtmfParam { agent, digit }): Parameters<DtmfParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let d = digit.trim();
+        let Some(d) = d.chars().next() else {
+            return Err(invalid("digit must not be empty"));
+        };
+        if !matches!(d.to_ascii_uppercase(), '0'..='9' | '*' | '#' | 'A'..='F') {
+            return Err(invalid(format!("`{d}` is not a DTMF digit")));
+        }
+        self.agent(&agent).await?.send_dtmf(d);
+        ok_text(format!("sent DTMF `{d}` on `{agent}`"))
+    }
+
+    #[tool(
+        description = "Blind-transfer the agent's current call to another SIP URI / number.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            open_world_hint = true
+        )
+    )]
+    async fn transfer(
+        &self,
+        Parameters(TransferParam { agent, target }): Parameters<TransferParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let a = self.agent(&agent).await?;
+        let resolved = self.hub.check_dial(&target, &a.domain).map_err(invalid)?;
+        a.transfer(&resolved);
+        ok_text(format!("transferring `{agent}`'s call to `{target}`"))
+    }
+
+    #[tool(
+        description = "Set what an agent transmits into the call: `\"silence\"`, a sine tone like `\"ausine,425\"`, or a WAV file like `\"aufile,/path/to/mono.wav\"`. Headless agents are silent until you call this. Call-scoped: resets to silence when the agent's last call ends, so the next call won't replay it.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn play(
+        &self,
+        Parameters(PlayParam { agent, spec }): Parameters<PlayParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.play(&spec);
+        ok_text(format!("`{agent}` now transmits `{spec}`"))
+    }
+
+    #[tool(
+        description = "Block until the agent's NEXT event (call_incoming, call_established, call_closed, register_failed, …), then return it as JSON. Optionally pass `event` (a name or an array) to wait for specific events only — others are skipped, e.g. [\"call_established\",\"call_closed\"] awaits a call's outcome either way. Returns `{\"timeout\": true}` if nothing happened in time. Use after dial/accept to observe progress.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn wait_event(
+        &self,
+        Parameters(WaitEventParam {
+            agent,
+            timeout_ms,
+            event,
+            after_id,
+        }): Parameters<WaitEventParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let a = self.agent(&agent).await?;
+        // Validate an optional filter up front: a typo must fail loudly, not
+        // silently never match.
+        let filter = event.map(|f| f.names());
+        if let Some(names) = filter.as_deref() {
+            for n in names {
+                if !KNOWN_EVENT_NAMES.contains(&n.as_str()) {
+                    return Err(invalid(format!(
+                        "unknown event `{n}`; valid: {}",
+                        KNOWN_EVENT_NAMES.join(", ")
+                    )));
+                }
+            }
+        }
+        let ms = timeout_ms.unwrap_or(DEFAULT_WAIT_MS).min(MAX_WAIT_MS);
+        let names: Option<Vec<&str>> = filter
+            .as_deref()
+            .map(|v| v.iter().map(String::as_str).collect());
+        match a
+            .wait_event(Duration::from_millis(ms), names.as_deref(), after_id)
+            .await
+        {
+            Some((id, e)) => {
+                let mut v = event_json(&e);
+                v["id"] = json!(id);
+                ok_json(v)
+            }
+            None => ok_json(json!({"timeout": true})),
+        }
+    }
+
+    #[tool(
+        description = "Read the agent's event log (bounded, newest kept) — every event with its id, oldest first. Pass `after_id` (the last seen id) to get only newer events; `truncated: true` means the cursor fell off the ring (events were lost). Use it to catch up after looking away, and to take a cursor for `wait_event`'s `after_id`.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn agent_events(
+        &self,
+        Parameters(AgentEventsParam { agent, after_id }): Parameters<AgentEventsParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let a = self.agent(&agent).await?;
+        let (events, oldest, newest, truncated) = a.event_log_page(after_id.unwrap_or(0));
+        let entries: Vec<serde_json::Value> = events
+            .iter()
+            .map(|(id, e)| {
+                let mut v = event_json(e);
+                v["id"] = json!(id);
+                v
+            })
+            .collect();
+        ok_json(json!({
+            "events": entries,
+            "count": entries.len(),
+            "oldest_id": oldest,
+            "newest_id": newest,
+            "truncated": truncated,
+        }))
+    }
+
+    #[tool(
+        description = "Stop an agent's worker process: it deregisters from SIP and exits. Idempotent (`false` = it wasn't running). The agent starts again on its next use — stopping frees the registration/worker without disabling the agent.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn agent_stop(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let stopped = self
+            .hub
+            .stop(&agent)
+            .await
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        if stopped {
+            ok_text(format!(
+                "stopped agent `{agent}` (deregistering; it starts again on next use)"
+            ))
+        } else {
+            ok_text(format!("agent `{agent}` is not running (nothing to stop)"))
+        }
+    }
+
+    #[tool(
+        description = "Start recording an agent's calls: sent + received audio, one recording per agent (parallel calls mix into it). The recording starts FRESH now — a previous recording is cleared — and runs until `record_stop` or the agent's last call ends. Arm before or at the start of a call to capture all of it; save with `save_audio` during or after the call.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
+    async fn record_start(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.set_recording(true);
+        ok_text(format!(
+            "recording started for `{agent}` (save with `save_audio`; stops at `record_stop` or when the last call ends)"
+        ))
+    }
+
+    #[tool(
+        description = "Stop recording an agent's calls. The recorded audio is kept for `save_audio` until the next recording or call starts.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn record_stop(
+        &self,
+        Parameters(AgentParam { agent }): Parameters<AgentParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.set_recording(false);
+        ok_text(format!(
+            "recording stopped for `{agent}` (the recorded audio is kept for `save_audio`)"
+        ))
+    }
+
+    #[tool(
+        description = "Write the agent's recorded call audio (sent + received) to WAV files, with each file's duration and whether it was truncated (only the newest 600 s are kept). Works during and after the call, until the next recording or call starts. Recording must have been on for the agent: `record_start` (or `record: true` on dial/accept) before the call, or `record_audio = true` in `[backend]`.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn save_audio(
+        &self,
+        Parameters(SaveAudioParam { agent, prefix }): Parameters<SaveAudioParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let a = self.agent(&agent).await?;
+        if !a.ever_recorded() {
+            return Err(invalid(format!(
+                "recording is off for `{agent}`: call `record_start` (or pass `record: true` to \
+                 dial/accept) before the call, or set `record_audio = true` in [backend]"
+            )));
+        }
+        let files = tokio::task::spawn_blocking(move || a.save_audio(&prefix))
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        if files.is_empty() {
+            return Err(invalid(
+                "no audio recorded yet: recording was on but no call audio was captured \
+                 (arm before or at the call start, then save during or after the call)",
+            ));
+        }
+        let files: Vec<serde_json::Value> = files
+            .iter()
+            .map(|f| {
+                json!({
+                    "path": f.path,
+                    "kind": f.kind,
+                    "duration_ms": f.duration_ms,
+                    "truncated": f.truncated,
+                })
+            })
+            .collect();
+        ok_json(json!({ "files": files }))
+    }
+
+    #[tool(
+        description = "The agent's recent SIP messages (plaintext, sent and received, also for TLS) from the current worker's trace — to see why a call failed (e.g. the exact 4xx/5xx response, SDP, headers). Filter by `call_id`, page with `after_id` (the last seen id); returns the newest `limit` messages (default 20, max 100), oldest first. A worker restart (`agent_stop`, crash) starts a new trace.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn sip_trace(
+        &self,
+        Parameters(SipTraceParam {
+            agent,
+            call_id,
+            after_id,
+            limit,
+        }): Parameters<SipTraceParam>,
+    ) -> Result<CallToolResult, McpError> {
+        // Validates the name and starts the worker, like every agent tool.
+        let a = self.agent(&agent).await?;
+        let limit = limit
+            .unwrap_or(SIP_TRACE_DEFAULT_LIMIT)
+            .clamp(1, SIP_TRACE_MAX_LIMIT);
+        let path = self
+            .sip_traces
+            .worker_file(&a.name, a.worker_pid())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let page = tokio::task::spawn_blocking(move || crate::trace::read_page(&path, after_id))
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        // The cursor advances over every message read, filtered or not.
+        let newest_id = page.messages.last().map_or(after_id.unwrap_or(0), |m| m.id);
+        let matching: Vec<_> = page
+            .messages
+            .iter()
+            .filter(|m| {
+                call_id
+                    .as_deref()
+                    .is_none_or(|c| m.call_id.as_deref() == Some(c))
+            })
+            .collect();
+        let skipped = matching.len().saturating_sub(limit);
+        let entries: Vec<serde_json::Value> = matching[skipped..]
+            .iter()
+            .map(|m| {
+                json!({
+                    "id": m.id,
+                    "ts": m.ts,
+                    "direction": m.direction,
+                    "transport": m.transport,
+                    "first_line": m.first_line,
+                    "call_id": m.call_id,
+                    "text": m.text,
+                })
+            })
+            .collect();
+        ok_json(json!({
+            "messages": entries,
+            "count": entries.len(),
+            "skipped": skipped,
+            "newest_id": newest_id,
+            "truncated": page.truncated,
+        }))
+    }
+
+    #[tool(
+        description = "Add a custom SIP header to the agent's outgoing INVITEs (persistent until removed or the worker restarts). The value is a template rendered once, now: `${uuid}` becomes a fresh identifier in this call and stays fixed for future calls — for a fresh uuid per call, declare it in ringo-mcp's config file. Replaces any header of the same name.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn add_header(
+        &self,
+        Parameters(AddHeaderParam { agent, name, value }): Parameters<AddHeaderParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.add_header(&name, &value);
+        ok_text(format!(
+            "`{agent}` now sends `{name}: {value}` on outgoing INVITEs"
+        ))
+    }
+
+    #[tool(
+        description = "Remove ALL custom SIP headers with this name from the agent's outgoing INVITEs.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = true
+        )
+    )]
+    async fn rm_header(
+        &self,
+        Parameters(RmHeaderParam { agent, name }): Parameters<RmHeaderParam>,
+    ) -> Result<CallToolResult, McpError> {
+        self.agent(&agent).await?.rm_header(&name);
+        ok_text(format!(
+            "removed header `{name}` from `{agent}`'s outgoing INVITEs"
+        ))
+    }
+
+    #[tool(
+        description = "SIP headers of received INVITEs (incoming calls), as `[[name, value], …]` pairs — order and duplicates preserved. Filter by `call_id`, or omit it for all known calls (newest first). Headers can lag `call_incoming` by ~150ms; if empty right after the event, retry once.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn call_headers(
+        &self,
+        Parameters(CallHeadersParam { agent, call_id }): Parameters<CallHeadersParam>,
+    ) -> Result<CallToolResult, McpError> {
+        let a = self.agent(&agent).await?;
+        let s = a.state();
+        if let Some(call_id) = call_id.as_deref() {
+            return match s.headers_of(call_id) {
+                Some(headers) => ok_json(json!({ "call_id": call_id, "headers": headers })),
+                None => Err(invalid(format!(
+                    "no INVITE headers known for Call-ID `{call_id}`"
+                ))),
+            };
+        }
+        let calls: Vec<serde_json::Value> = s
+            .received_headers
+            .iter()
+            .rev()
+            .map(|(call_id, headers)| json!({ "call_id": call_id, "headers": headers }))
+            .collect();
+        ok_json(json!({ "calls": calls }))
+    }
+}
+
+#[tool_handler(router = self.tool_router.clone())]
+impl ServerHandler for TelephonyServer {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new("ringo-mcp", env!("CARGO_PKG_VERSION")))
+            .with_instructions(
+                "Telephony over SIP. Agents are configured in ringo-mcp's config file; \
+                 address them by name (they start lazily on first use). Typical flow: \
+                 `list_agents` to see who is configured, `dial` (or wait for \
+                 `call_incoming` via `wait_event`, then `accept`), then `wait_event` \
+                 until `call_established`/`call_closed`. Use `send_dtmf`, `play`, \
+                 `transfer`, `hold`/`resume`/`mute` during the call, \
+                 `agent_status` to poll state and media quality, and `sip_trace` \
+                 to read the raw SIP messages when a call fails."
+                    .to_string(),
+            )
+    }
+}
+
+/// Serve MCP over stdio until the client disconnects.
+pub async fn serve(
+    hub: Arc<Hub>,
+    sip_traces: SipTraceFiles,
+    disabled_tools: Vec<String>,
+) -> anyhow::Result<()> {
+    let service = TelephonyServer::new(hub, sip_traces, disabled_tools)
+        .serve(stdio())
+        .await
+        .map_err(|e| anyhow::anyhow!("serve MCP over stdio: {e}"))?;
+    service.waiting().await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_call_flow_events_render_backend_neutral() {
+        let v = event_json(&ringo_core::event::AppEvent::CallHold {
+            call_id: "c1".into(),
+        });
+        assert_eq!(v, json!({"event": "call_hold", "call_id": "c1"}));
+        let v = event_json(&ringo_core::event::AppEvent::CallResume {
+            call_id: "c1".into(),
+        });
+        assert_eq!(v, json!({"event": "call_resume", "call_id": "c1"}));
+        let v = event_json(&ringo_core::event::AppEvent::CallTransferFailed {
+            call_id: "c1".into(),
+        });
+        assert_eq!(v, json!({"event": "call_transfer_failed", "call_id": "c1"}));
+    }
+
+    #[test]
+    fn event_log_ids_and_cursors() {
+        let log = crate::hub::EventLog::for_tests();
+
+        // Append assigns monotonic ids and the cursor reads oldest-first.
+        let a = log.append(ringo_core::event::AppEvent::RegisterOk {
+            account: "a".into(),
+        });
+        let b = log.append(ringo_core::event::AppEvent::RegisterFailed { reason: "r".into() });
+        assert_eq!(b, a + 1);
+        let (page, oldest, newest, truncated) = log.page_after(0);
+        assert_eq!(page.len(), 2);
+        assert_eq!(oldest, a);
+        assert_eq!(newest, b);
+        assert!(!truncated);
+
+        // after_id = newest → empty, but the bounds report the position.
+        let (page, oldest, _, _) = log.page_after(b);
+        assert!(page.is_empty());
+        assert_eq!(oldest, a);
+
+        // first_after skips non-matching entries.
+        let only_failed = |e: &ringo_core::event::AppEvent| {
+            matches!(e, ringo_core::event::AppEvent::RegisterFailed { .. })
+        };
+        assert_eq!(log.first_after(0, only_failed).unwrap().0, b);
+        assert!(log.first_after(b, only_failed).is_none());
+    }
+
+    #[test]
+    fn event_log_ring_truncates_and_reports() {
+        let log = crate::hub::EventLog::for_tests();
+        let ev = || ringo_core::event::AppEvent::RegisterOk {
+            account: "a".into(),
+        };
+        for _ in 0..(crate::hub::EVENT_LOG_CAPACITY + 10) {
+            log.append(ev());
+        }
+        // A cursor older than the ring's oldest entry is reported as truncated.
+        let (page, oldest, newest, truncated) = log.page_after(0);
+        // Pages are capped; the ring holds more.
+        assert_eq!(page.len(), crate::hub::EVENT_PAGE_LIMIT);
+        assert!(truncated, "cursor 0 fell off the ring");
+        assert_eq!(oldest, 11);
+        assert_eq!(newest, crate::hub::EVENT_LOG_CAPACITY as u64 + 10);
+        // Inside the ring: no truncation.
+        let (_, _, _, truncated) = log.page_after(oldest);
+        assert!(!truncated);
+        // A client-supplied cursor past every id is just "nothing newer".
+        let (page, _, _, truncated) = log.page_after(u64::MAX);
+        assert!(page.is_empty());
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn every_tool_declares_whether_it_is_read_only() {
+        const READ_ONLY: &[&str] = &[
+            "agent_events",
+            "agent_status",
+            "call_headers",
+            "list_agents",
+            "sip_trace",
+            "wait_event",
+        ];
+        let tools = TelephonyServer::build_tool_router().list_all();
+        assert_eq!(tools.len(), total_tool_count());
+        for tool in tools {
+            let hints = tool
+                .annotations
+                .unwrap_or_else(|| panic!("`{}` has no annotations", tool.name));
+            let read_only = READ_ONLY.contains(&tool.name.as_ref());
+            assert_eq!(hints.read_only_hint, Some(read_only), "`{}`", tool.name);
+            if !read_only {
+                assert!(
+                    hints.destructive_hint.is_some(),
+                    "`{}` must say whether it is destructive",
+                    tool.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tool_flag_resolution() {
+        let owned = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
+
+        // Plain disables: a group expands, a tool name passes through.
+        let d = resolve_disabled_tools(None, &owned(&["recording"])).unwrap();
+        assert_eq!(
+            d,
+            vec!["record_start", "record_stop", "save_audio"],
+            "the recording group"
+        );
+        let d = resolve_disabled_tools(None, &owned(&["add_header"])).unwrap();
+        assert_eq!(d, vec!["add_header"]);
+
+        // Allowlist: everything not covered is disabled, disables subtract on top.
+        let d = resolve_disabled_tools(Some(&owned(&["discovery"])), &[]).unwrap();
+        assert_eq!(
+            d.len(),
+            total_tool_count() - 2,
+            "total minus the discovery pair"
+        );
+        assert!(!d.contains(&"list_agents".to_string()));
+        let d =
+            resolve_disabled_tools(Some(&owned(&["discovery", "lifecycle"])), &owned(&["dial"]))
+                .unwrap();
+        assert!(d.contains(&"dial".to_string()));
+        assert!(!d.contains(&"agent_stop".to_string()));
+        assert!(!d.contains(&"agent_status".to_string()));
+
+        // Unknown names fail loudly with the valid list.
+        let err = resolve_disabled_tools(None, &owned(&["nope"]))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown tool or group `nope`"), "{err}");
+        assert!(err.contains("valid groups"), "{err}");
+        let err = resolve_disabled_tools(Some(&owned(&["garbage"])), &[])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("garbage"), "{err}");
+
+        // The group table covers every tool exactly once — no orphans, no dupes.
+        let all = all_tool_names();
+        let covered: Vec<&str> = TOOL_GROUPS
+            .iter()
+            .flat_map(|(_, tools)| tools.iter().copied())
+            .collect();
+        assert_eq!(all.len(), covered.len(), "duplicate tool in groups?");
+    }
+
+    #[test]
+    fn event_names_match_event_json_and_the_known_list() {
+        use ringo_core::event::AppEvent::*;
+        // Every variant renders with exactly event_name()'s string, and
+        // every wait_event filter name corresponds to a real variant.
+        let cases: Vec<ringo_core::event::AppEvent> = vec![
+            Registering {
+                account: "a".into(),
+            },
+            RegisterOk {
+                account: "a".into(),
+            },
+            RegisterFailed { reason: "r".into() },
+            Unregistered {
+                account: "a".into(),
+            },
+            CallIncoming {
+                call_id: "c".into(),
+                number: "n".into(),
+                display_name: None,
+            },
+            CallOutgoing {
+                call_id: "c".into(),
+                number: "n".into(),
+            },
+            CallRinging {
+                call_id: "c".into(),
+            },
+            CallEstablished {
+                call_id: "c".into(),
+            },
+            CallClosed {
+                call_id: "c".into(),
+                reason: "r".into(),
+                error: false,
+            },
+            CallDeflected {
+                from: "f".into(),
+                display_name: None,
+                target: "t".into(),
+            },
+            CallHold {
+                call_id: "c".into(),
+            },
+            CallResume {
+                call_id: "c".into(),
+            },
+            CallTransferFailed {
+                call_id: "c".into(),
+            },
+            VoicemailStatus {
+                waiting: false,
+                new_count: 0,
+            },
+            Response {
+                ok: true,
+                data: "d".into(),
+            },
+            Unknown {
+                class: "x".into(),
+                type_: "1".into(),
+            },
+            BackendConnectFailed { reason: "r".into() },
+        ];
+        let mut seen: Vec<&str> = Vec::new();
+        for e in &cases {
+            let rendered = event_json(e);
+            let json_name = rendered["event"].as_str().expect("event field");
+            assert_eq!(json_name, event_name(e));
+            seen.push(event_name(e));
+        }
+        // The wait_event filter accepts exactly these (minus "unknown", which
+        // the hub filters before it could ever match).
+        let filterable: Vec<&str> = seen.into_iter().filter(|n| *n != "unknown").collect();
+        assert_eq!(filterable, KNOWN_EVENT_NAMES);
+    }
+
+    #[test]
+    fn unknown_renders_without_backend_details() {
+        let v = event_json(&ringo_core::event::AppEvent::Unknown {
+            class: "bevent".into(),
+            type_: "29".into(),
+        });
+        assert_eq!(v, json!({"event": "unknown"}));
+    }
+}

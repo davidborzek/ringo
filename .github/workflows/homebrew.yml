@@ -18,6 +18,11 @@ on:
         type: string
         required: false
         default: ""
+      mcp_tag:
+        description: "ringo-mcp tag (ringo-mcp-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
     inputs:
       phone_tag:
@@ -27,6 +32,11 @@ on:
         default: ""
       flow_tag:
         description: "ringo-flow tag (ringo-flow-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
+      mcp_tag:
+        description: "ringo-mcp tag (ringo-mcp-vX.Y.Z); empty if not released"
         type: string
         required: false
         default: ""
@@ -45,6 +55,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           PHONE_TAG: ${{ inputs.phone_tag }}
           FLOW_TAG: ${{ inputs.flow_tag }}
+          MCP_TAG: ${{ inputs.mcp_tag }}
         run: |
           set -euo pipefail
           sha() { gh release download "$1" -R "$REPO" -p "$2" -O - | sha256sum | cut -d' ' -f1; }
@@ -76,6 +87,11 @@ jobs:
             ver="${FLOW_TAG#ringo-flow-v}"
             render .github/homebrew/ringo-flow.rb "${rel}/${FLOW_TAG}" ringo-flow "$FLOW_TAG" "$ver" tap/Formula/ringo-flow.rb
             msg="${msg:+$msg, }ringo-flow $ver"
+          fi
+          if [ -n "$MCP_TAG" ]; then
+            ver="${MCP_TAG#ringo-mcp-v}"
+            render .github/homebrew/ringo-mcp.rb "${rel}/${MCP_TAG}" ringo-mcp "$MCP_TAG" "$ver" tap/Formula/ringo-mcp.rb
+            msg="${msg:+$msg, }ringo-mcp $ver"
           fi
           cd tap
           git config user.name "github-actions[bot]"

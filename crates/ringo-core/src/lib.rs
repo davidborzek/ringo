@@ -10,9 +10,9 @@ pub mod phone;
 pub mod tones;
 
 pub use backend::{
-    AudioFrame, available_audio_codecs, call_count, is_registered, push_audio, received_audio,
-    sent_audio, shutdown, sip_trace_file, sip_trace_stderr, start_audio_stream,
-    subscribe_received_audio,
+    AudioFrame, RECORDING_MAX_SECS, available_audio_codecs, call_count, is_registered, push_audio,
+    received_audio, sent_audio, set_recording, shutdown, sip_trace_file, sip_trace_stderr,
+    start_audio_stream, subscribe_received_audio,
 };
 
 mod baresip;

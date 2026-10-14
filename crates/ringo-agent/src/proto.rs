@@ -104,7 +104,7 @@ pub(crate) fn bytes_to_pcm(bytes: &[u8]) -> Vec<i16> {
 /// stale worker (old binary on `$PATH`, a half-finished upgrade) would otherwise
 /// desync silently on the framed stream. The worker rejects a mismatching
 /// version at the handshake instead. Bump on any incompatible wire change.
-pub(crate) const PROTO_VERSION: u32 = 1;
+pub(crate) const PROTO_VERSION: u32 = 2;
 
 /// The first frame the parent sends: the protocol version plus the agent config.
 /// Versioning lives here, on the wire envelope, so the public [`AgentConfig`]
@@ -176,6 +176,11 @@ pub enum Command {
     SetAudioSource {
         spec: String,
     },
+    /// Arm or disarm full-call recording for this UA (see
+    /// `ringo_core::set_recording`): arming clears the previous recording.
+    SetRecording {
+        on: bool,
+    },
     ArmInviteResponse {
         scode: u16,
         reason: String,
@@ -203,7 +208,8 @@ pub enum Query {
     /// DTMF digits received so far.
     ReceivedDtmf,
     /// Write the agent's captured sent/received audio as WAV files named
-    /// `<prefix>-sent.wav` / `<prefix>-recv.wav`; returns the paths written.
+    /// `<prefix>-sent.wav` / `<prefix>-recv.wav`; returns what was written
+    /// (paths, side, size, and whether the retention cap truncated it).
     SaveAudio { prefix: String },
     /// Number of active calls (for teardown's BYE-flush wait).
     CallCount,
@@ -263,6 +269,22 @@ impl From<WireMediaStats> for MediaStats {
     }
 }
 
+/// One WAV written by a `SaveAudio` query: which side of the call it holds,
+/// how much audio it contains, and whether the recording hit the retention
+/// cap (only the newest `ringo_core::RECORDING_MAX_SECS` seconds are kept).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WireSavedAudio {
+    pub path: String,
+    /// `"sent"` or `"recv"`.
+    pub kind: String,
+    /// Captured mono samples at `srate`.
+    pub samples: usize,
+    /// Sample rate in Hz.
+    pub srate: u32,
+    /// Whether the recording reached the retention cap.
+    pub truncated: bool,
+}
+
 /// The payload of a [`Reply`], one variant per [`Query`]. Externally tagged
 /// (e.g. `{"call_count":2}`) so newtype variants over primitives/sequences
 /// round-trip — internal tagging can't carry those.
@@ -271,7 +293,7 @@ impl From<WireMediaStats> for MediaStats {
 pub enum ReplyResult {
     MediaStats(Option<WireMediaStats>),
     Dtmf(String),
-    Saved(Vec<String>),
+    SavedAudio(Vec<WireSavedAudio>),
     CallCount(u32),
 }
 
@@ -360,6 +382,15 @@ pub enum WireEvent {
         display_name: Option<String>,
         target: String,
     },
+    CallHold {
+        call_id: String,
+    },
+    CallResume {
+        call_id: String,
+    },
+    CallTransferFailed {
+        call_id: String,
+    },
     VoicemailStatus {
         waiting: bool,
         new_count: u32,
@@ -420,6 +451,15 @@ impl From<&AppEvent> for WireEvent {
                 reason: reason.clone(),
                 error: *error,
             },
+            AppEvent::CallHold { call_id } => Self::CallHold {
+                call_id: call_id.clone(),
+            },
+            AppEvent::CallResume { call_id } => Self::CallResume {
+                call_id: call_id.clone(),
+            },
+            AppEvent::CallTransferFailed { call_id } => Self::CallTransferFailed {
+                call_id: call_id.clone(),
+            },
             AppEvent::CallDeflected {
                 from,
                 display_name,
@@ -478,6 +518,9 @@ impl From<WireEvent> for AppEvent {
                 reason,
                 error,
             },
+            WireEvent::CallHold { call_id } => AppEvent::CallHold { call_id },
+            WireEvent::CallResume { call_id } => AppEvent::CallResume { call_id },
+            WireEvent::CallTransferFailed { call_id } => AppEvent::CallTransferFailed { call_id },
             WireEvent::CallDeflected {
                 from,
                 display_name,
@@ -714,7 +757,11 @@ mod tests {
     #[test]
     fn audio_commands_disambiguate_as_to_worker_cmd() {
         // The audio control commands must parse as Cmd, not Query (untagged split).
-        for cmd in [Command::StartRxAudio, Command::StartTxAudio { rate: 8000 }] {
+        for cmd in [
+            Command::StartRxAudio,
+            Command::StartTxAudio { rate: 8000 },
+            Command::SetRecording { on: true },
+        ] {
             let line = serde_json::to_string(&ToWorker::Cmd(cmd)).unwrap();
             assert!(
                 matches!(
@@ -723,6 +770,48 @@ mod tests {
                 ),
                 "expected Cmd for {line}"
             );
+        }
+    }
+
+    #[test]
+    fn set_recording_roundtrips() {
+        let line =
+            serde_json::to_string(&ToWorker::Cmd(Command::SetRecording { on: true })).unwrap();
+        assert_eq!(line, r#"{"cmd":"set_recording","on":true}"#);
+        match serde_json::from_str::<ToWorker>(&line).unwrap() {
+            ToWorker::Cmd(Command::SetRecording { on }) => assert!(on),
+            _ => panic!("expected set_recording"),
+        }
+    }
+
+    #[test]
+    fn saved_audio_reply_roundtrips() {
+        let file = WireSavedAudio {
+            path: "rec-recv.wav".into(),
+            kind: "recv".into(),
+            samples: 8000,
+            srate: 8000,
+            truncated: false,
+        };
+        let rep = serde_json::to_string(&FromWorker::Reply(Reply {
+            reply: 7,
+            result: ReplyResult::SavedAudio(vec![file]),
+        }))
+        .unwrap();
+        match serde_json::from_str::<FromWorker>(&rep).unwrap() {
+            FromWorker::Reply(Reply {
+                reply,
+                result: ReplyResult::SavedAudio(files),
+            }) => {
+                assert_eq!(reply, 7);
+                assert_eq!(files.len(), 1);
+                assert_eq!(files[0].path, "rec-recv.wav");
+                assert_eq!(files[0].kind, "recv");
+                assert_eq!(files[0].samples, 8000);
+                assert_eq!(files[0].srate, 8000);
+                assert!(!files[0].truncated);
+            }
+            _ => panic!("expected saved_audio reply"),
         }
     }
 }

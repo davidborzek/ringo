@@ -14,7 +14,7 @@
 use crate::audio;
 use crate::proto::{
     self, Command, FromWorker, Headers, Query, QueryEnvelope, Ready, Reply, ReplyResult,
-    RxAudioStarted, ToWorker, WireEvent, WireMediaStats,
+    RxAudioStarted, ToWorker, WireEvent, WireMediaStats, WireSavedAudio,
 };
 use anyhow::{Context, Result, bail};
 use ringo_core::backend::{Backend, BaresipBackend};
@@ -193,6 +193,9 @@ pub fn run() -> Result<()> {
                         ));
                     }
                 }
+                Ok(ToWorker::Cmd(Command::SetRecording { on })) => {
+                    ringo_core::set_recording(&username, on);
+                }
                 Ok(ToWorker::Cmd(cmd)) => dispatch(phone.as_ref(), cmd),
                 Ok(ToWorker::Query(QueryEnvelope { id, query })) => {
                     let result = answer(phone.as_ref(), &username, query);
@@ -283,23 +286,24 @@ fn init_logging(name: &str) {
         match t.as_str() {
             "" => {}
             "-" => ringo_core::log::init_stderr(),
-            path => ringo_core::log::init_file(per_agent_path(path, name)),
+            path => ringo_core::log::init_file(per_agent_path(path, name, std::process::id())),
         }
     }
     if let Some(t) = std::env::var_os("RINGO_AGENT_SIPTRACE").and_then(|v| v.into_string().ok()) {
         match t.as_str() {
             "" => {}
             "-" => ringo_core::sip_trace_stderr(),
-            path => ringo_core::sip_trace_file(per_agent_path(path, name)),
+            path => ringo_core::sip_trace_file(per_agent_path(path, name, std::process::id())),
         }
     }
 }
 
 /// Insert a per-agent tag before the file extension: `run.log` ->
 /// `run.<name>.<pid>.log`. The name is sanitised (no path separators / dots, so
-/// it can't escape the directory) and the PID disambiguates same-named agents
-/// across scenarios so their truncating logs don't clobber each other.
-fn per_agent_path(base: &str, name: &str) -> std::path::PathBuf {
+/// it can't escape the directory) and the worker PID disambiguates same-named
+/// agents across scenarios so their truncating logs don't clobber each other.
+/// Public so a parent can locate a worker's file (see `ProcessClient::pid`).
+pub fn per_agent_path(base: &str, name: &str, pid: u32) -> std::path::PathBuf {
     let safe: String = name
         .chars()
         .map(|c| {
@@ -310,7 +314,7 @@ fn per_agent_path(base: &str, name: &str) -> std::path::PathBuf {
             }
         })
         .collect();
-    let tag = format!("{safe}.{}", std::process::id());
+    let tag = format!("{safe}.{pid}");
     let p = std::path::Path::new(base);
     match p.extension().and_then(|e| e.to_str()) {
         Some(ext) => p.with_extension(format!("{tag}.{ext}")),
@@ -344,15 +348,19 @@ fn dispatch(phone: &dyn Phone, cmd: Command) {
             headers,
         } => phone.arm_invite_response(scode, &reason, headers),
         Command::DisarmInviteResponse => phone.disarm_invite_response(),
-        // Audio-stream control + shutdown are handled in the run loop, before
-        // dispatch (they need the username / writer, not just the phone).
-        Command::StartTxAudio { .. } | Command::StartRxAudio | Command::Shutdown => {}
+        // Audio-stream control + recording + shutdown are handled in the run
+        // loop, before dispatch (they need the username / writer, not just the
+        // phone).
+        Command::StartTxAudio { .. }
+        | Command::StartRxAudio
+        | Command::SetRecording { .. }
+        | Command::Shutdown => {}
     }
 }
 
 /// Answer one query. WAV writing runs here (on the worker's own in-process
-/// captured buffer) so only the resulting paths cross the pipe; tone analysis
-/// now happens on the parent over the streamed RX audio.
+/// captured buffer) so only the resulting files (plus their sizes) cross the
+/// pipe; tone analysis now happens on the parent over the streamed RX audio.
 fn answer(phone: &dyn Phone, username: &str, query: Query) -> ReplyResult {
     match query {
         Query::MediaStats => ReplyResult::MediaStats(phone.media_stats().map(WireMediaStats::from)),
@@ -369,13 +377,21 @@ fn answer(phone: &dyn Phone, username: &str, query: Query) -> ReplyResult {
                 if samples.is_empty() {
                     continue;
                 }
+                let truncated =
+                    samples.len() >= srate as usize * ringo_core::RECORDING_MAX_SECS as usize;
                 let path = format!("{prefix}-{tag}.wav");
                 match audio::write_wav(std::path::Path::new(&path), &samples, srate) {
-                    Ok(()) => written.push(path),
+                    Ok(()) => written.push(WireSavedAudio {
+                        path,
+                        kind: tag.into(),
+                        samples: samples.len(),
+                        srate,
+                        truncated,
+                    }),
                     Err(e) => ringo_core::rlog!(Warn, "save {path}: {e}"),
                 }
             }
-            ReplyResult::Saved(written)
+            ReplyResult::SavedAudio(written)
         }
         Query::CallCount => ReplyResult::CallCount(ringo_core::call_count() as u32),
     }

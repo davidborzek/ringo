@@ -49,6 +49,8 @@ await verifyAudioConnection(a, b);
 ## Debugging
 
 Run with `--save-audio` to write each agent's sent/received WAVs to the working
-directory, so you can listen to what actually flowed.
+directory, so you can listen to what actually flowed. A recording covers the
+whole scenario (all of an agent's calls, across hold/resume), up to the newest
+10 minutes.
 
 See the [Agent](js-api/classes/Agent.md) reference for the exact signatures.

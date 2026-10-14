@@ -19,6 +19,11 @@ on:
         type: string
         required: false
         default: ""
+      mcp_tag:
+        description: "ringo-mcp tag (ringo-mcp-vX.Y.Z); empty if not released"
+        type: string
+        required: false
+        default: ""
   workflow_dispatch:
     inputs:
       phone_tag:
@@ -28,6 +33,11 @@ on:
         default: ""
       flow_tag:
         description: "ringo-flow tag (ringo-flow-vX.Y.Z); empty to skip"
+        type: string
+        required: false
+        default: ""
+      mcp_tag:
+        description: "ringo-mcp tag (ringo-mcp-vX.Y.Z); empty to skip"
         type: string
         required: false
         default: ""
@@ -100,3 +110,37 @@ jobs:
           commit_email: 41898282+github-actions[bot]@users.noreply.github.com
           ssh_private_key: ${{ secrets.AUR_SSH_KEY }}
           commit_message: "ringo-flow ${{ inputs.flow_tag }}"
+
+  ringo-mcp:
+    name: Publish ringo-mcp-bin
+    if: inputs.mcp_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Render PKGBUILD
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.mcp_tag }}
+        run: |
+          set -euo pipefail
+          ver="${TAG#ringo-mcp-v}"
+          base="https://github.com/${REPO}/releases/download/${TAG}"
+          sha() { gh release download "$TAG" -R "$REPO" -p "$1" -O - | sha256sum | cut -d' ' -f1; }
+          mkdir -p out
+          sed \
+            -e '/^# Template/d' -e '/^# `aur`/d' -e '/^# result is/d' \
+            -e "s|__VERSION__|$ver|g" \
+            -e "s|__BASE__|$base|g" \
+            -e "s|__SHA_LINUX_X64__|$(sha "ringo-mcp-$ver-x86_64-unknown-linux-gnu.tar.gz")|" \
+            -e "s|__SHA_LINUX_ARM__|$(sha "ringo-mcp-$ver-aarch64-unknown-linux-gnu.tar.gz")|" \
+            .github/aur/ringo-mcp-bin.PKGBUILD > out/PKGBUILD
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+        with:
+          pkgname: ringo-mcp-bin
+          pkgbuild: out/PKGBUILD
+          commit_username: github-actions[bot]
+          commit_email: 41898282+github-actions[bot]@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_KEY }}
+          commit_message: "ringo-mcp ${{ inputs.mcp_tag }}"

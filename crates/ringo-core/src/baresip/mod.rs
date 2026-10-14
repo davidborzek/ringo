@@ -100,6 +100,20 @@ pub fn sent_audio(key: &str) -> Option<(Vec<i16>, u32)> {
     ausrc::sent_window(key)
 }
 
+/// Arm or disarm full-call capture for the UA with audio key `key` (the account
+/// username). Arming starts a fresh recording (the UA's buffers are cleared);
+/// disarming returns to the 3 s verify window (sent side no longer captured)
+/// and keeps the buffers until the next arm/alloc, so a save after hangup still
+/// works. The startup default comes from `BackendOptions.record_audio`.
+pub fn set_recording(key: &str, on: bool) {
+    ausrc::arm_capture(key, on);
+}
+
+/// Cap on a full-call recording: only the newest [`RECORDING_MAX_SECS`] seconds
+/// are retained per UA (older audio is dropped; `save_audio` flags it
+/// truncated).
+pub use self::ausrc::RECORDING_MAX_SECS;
+
 /// A mono PCM audio frame plus its sample rate — the unit streamed into a call
 /// via [`push_audio`] / out of one via [`subscribe_received_audio`].
 pub use self::ausrc::AudioFrame;
