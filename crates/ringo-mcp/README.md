@@ -75,6 +75,25 @@ calls between them (or to/from the outside) are routed by your SIP
 infrastructure. `catchall` defaults to `true` (safe here because each worker is
 the only UA in its process — see the ringo-core `Account` docs).
 
+Agents can also take their account from ringo-phone profiles — per agent or
+in bulk — so SIP credentials and custom headers live in one place:
+
+```toml
+[[agent]]
+profile = "[prod] Office"      # username/domain/credentials/headers from the profile
+name = "prod-office"            # optional — defaults to the profile name's slug
+dtmf_mode = "info"              # explicit fields override the profile
+
+[ringo]
+# Or in bulk: every ringo-phone profile whose name matches a regex becomes an
+# agent (unanchored, case-sensitive — escape `[` and `]`).
+profiles = ['^\[test\]']
+```
+
+`list_agents`/`agent_status` show such an agent's `profile` origin. Patterns
+select accounts, not just names — a broad regex exposes LIVE trunks to the LLM
+too; the configuration docs have the rules and pitfalls.
+
 ## Tools
 
 | Tool | Description |

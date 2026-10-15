@@ -1,8 +1,8 @@
 # Configuration
 
-The config is TOML: a list of `[[agent]]` tables plus one optional `[backend]`
-table — agents and how they run, nothing else. The path comes from
-`--config <path>`, `$RINGO_MCP_CONFIG`, or defaults to
+The config is TOML: a list of `[[agent]]` tables plus the optional `[backend]`
+and `[ringo]` tables — agents and how they run, nothing else. The path comes
+from `--config <path>`, `$RINGO_MCP_CONFIG`, or defaults to
 `~/.config/ringo-mcp/config.toml`. Runtime knobs are CLI flags instead:
 `--enabled-tools` / `--disable` trim the tool surface and `--dial-deny` /
 `--dial-allow` restrict dial targets (see [Getting started](getting-started.md)).
@@ -17,9 +17,10 @@ One agent = one SIP identity = one SIP user agent in its own worker process.
 
 | Key | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `name` | string | *required* | Unique label every MCP tool addresses the agent by. |
-| `username` | string | *required* | SIP username (user part of the AOR). |
-| `domain` | string | *required* | SIP domain/registrar (host part of the AOR). Bare dial targets resolve against it. |
+| `profile` | string | — | Take the account (username, domain, credentials, custom headers, …) from this [ringo-phone profile](#agents-from-ringo-phone-profiles). Every other key set on the agent overrides the profile's value. |
+| `name` | string | *required* | Unique label every MCP tool addresses the agent by. With `profile`: optional, defaults to the profile name's slug. |
+| `username` | string | *required* | SIP username (user part of the AOR). With `profile`: from the profile unless set here. |
+| `domain` | string | *required* | SIP domain/registrar (host part of the AOR). Bare dial targets resolve against it. With `profile`: from the profile unless set here. |
 | `password` | string | `""` | SIP password. Consider `password_file`/`password_cmd`. |
 | `password_file` | string | — | Read the password from this file (one trailing newline stripped). Overrides `password`. A leading `~/` expands to `$HOME`. |
 | `password_cmd` | string | — | Run via `sh -c`; stdout is the password (one trailing newline stripped). Overrides `password_file`. |
@@ -75,6 +76,75 @@ Static templates (no placeholders) are set once when the agent starts;
 dynamic ones are re-rendered by every `dial`. The same semantics as
 [ringo-phone profiles](../ringo-phone/profiles.md).
 
+## Agents from ringo-phone profiles
+
+An agent can take its whole account — username, domain, credentials, custom
+headers — from a [ringo-phone profile](../ringo-phone/profiles.md) instead of
+repeating the fields. Per agent with `profile`, or in bulk with `[ringo]`
+`profiles`:
+
+```toml
+[[agent]]
+profile = "[prod] Office"      # account, credentials, custom_headers from here
+name = "prod-office"            # optional; default: slug of the profile name
+dtmf_mode = "info"              # any explicit field overrides the profile
+
+[ringo]
+# Every profile whose name matches becomes an agent (named by slug).
+profiles = ['^\[test\]']
+```
+
+ringo-mcp only ever *reads* profiles — it never modifies them. Profiles are
+resolved once at server startup, so a profile edited later needs a restart.
+
+### Pattern rules
+
+The regexes work like `--dial-allow`/`--dial-deny`: unanchored (they match
+anywhere in the profile name), case-sensitive (prefix `(?i)` to ignore case).
+They match against profile *names* — which typically contain `[`/`]`, and in a
+regex those start a character class. Escape them, and prefer TOML literal
+strings (single quotes), where backslashes need no doubling:
+
+```toml
+profiles = ['^[test]']    # WRONG: the character class [test] matches any name
+                          # starting with t, e or s
+profiles = ['^\[test\]']  # right: names starting with "[test]"
+```
+
+A pattern that matches nothing fails the startup with the list of available
+profile names, as do an invalid regex and a `profile = "…"` that doesn't
+exist. Each pattern's matches are logged to stderr at startup (profile names
+only), which makes an accidental broad match visible. A profile already
+referenced by an explicit `[[agent]] profile = …` is skipped — the explicit
+entry wins. Two agents ending up with the same name (two entries, or an entry
+colliding with a pattern's slug) fail the startup, naming both sources.
+
+### Overrides
+
+With `profile`, every field set on the `[[agent]]` replaces the profile's
+value; the rest comes from the profile. Two special cases:
+
+- Password: setting `password`, `password_file` or `password_cmd` on the agent
+  replaces the profile's *whole* password source; otherwise the profile's
+  source is resolved (its `cmd` > `file` > inline, like ringo-phone).
+- `custom_headers` set on the agent replace the profile's; absent → the
+  profile's.
+
+The default agent name for a profile is its slug: lowercase, ASCII
+alphanumerics kept, every other run of characters collapsed to one `-`
+(`"[test] Alice"` → `test-alice`). Phone-only profile settings
+(`notify`, `auto_hold`, `deflect`, `header_display`, `notes`, `metadata`) are
+ignored.
+
+### Safety
+
+`profiles` selects *accounts*, not just names: a broad pattern (say `.`)
+exposes every matching profile — including LIVE trunks — to the LLM as a
+dialable agent. With a client whose permission gate allows all ringo tools
+unconfirmed (e.g. Pi allowing the ringo tool group), that means real calls
+the LLM can place on its own. Scope patterns narrowly (`'^\[test\]'`), and keep
+`--dial-allow`/`--dial-deny` as the second gate on what may be dialed at all.
+
 ## `[backend]`
 
 Applies to every agent. All keys optional; `[[agent]]` fields always win.
@@ -117,5 +187,6 @@ audio_driver = "aubridge"
 record_audio = true
 ```
 
-ringo-mcp never reuses or rewrites your ringo-phone profiles — the two configs
-are fully independent (share credentials via `password_cmd` if you want to).
+Without any `profile`/`profiles` reference, ringo-mcp never touches your
+ringo-phone profiles — the two configs stay fully independent (share
+credentials via `password_cmd` if you want to).
