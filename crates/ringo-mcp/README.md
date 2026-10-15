@@ -90,7 +90,9 @@ dtmf_mode = "info"              # explicit fields override the profile
 profiles = ['^\[test\]']
 ```
 
-`list_agents`/`agent_status` show such an agent's `profile` origin. Patterns
+`list_agents`/`agent_status` show such an agent's `profile` origin and its
+`description`/`metadata` (e.g. `metadata.number`, so the LLM knows which
+number reaches which agent). Patterns
 select accounts, not just names — a broad regex exposes LIVE trunks to the LLM
 too; the configuration docs have the rules and pitfalls.
 

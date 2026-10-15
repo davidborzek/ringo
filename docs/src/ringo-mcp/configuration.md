@@ -36,6 +36,8 @@ One agent = one SIP identity = one SIP user agent in its own worker process.
 | `catchall` | bool | `true` | Accept INVITEs addressed to identities other than the registration username. Safe here: each worker is the only UA in its process. |
 | `audio_codecs` | array | `[]` | Restrict/order offered codecs, most-preferred first, e.g. `["G722/16000/1", "PCMU"]`. Empty = the default codec set. |
 | `custom_headers` | table / array | `[]` | Custom headers on outgoing INVITEs — see below. |
+| `description` | string | — | Free-text note shown to the LLM: what the agent is for, how to reach it. Not taken from a profile. |
+| `metadata` | table | `{}` | Free-form facts shown to the LLM, e.g. `number` (how other agents dial this one). Merged key by key over the profile's `[metadata]`. See [Telling the LLM how to reach agents](#telling-the-llm-how-to-reach-agents). |
 
 ### Password resolution
 
@@ -75,6 +77,27 @@ Values are templates, evaluated per outgoing call:
 Static templates (no placeholders) are set once when the agent starts;
 dynamic ones are re-rendered by every `dial`. The same semantics as
 [ringo-phone profiles](../ringo-phone/profiles.md).
+
+### Telling the LLM how to reach agents
+
+The SIP address of an agent is often not what you dial to reach it (a
+provider's SIP usernames aren't phone numbers). `description` and `metadata`
+are shown to the LLM in `list_agents`/`agent_status` and never interpreted by
+ringo-mcp, so they can say what the agent is and how to call it:
+
+```toml
+[[agent]]
+name = "front-desk"
+username = "1001"
+domain = "pbx.example.com"
+password_cmd = "pass show sip/front-desk"
+description = "Front desk, answers incoming calls"
+metadata = { number = "+492111234567", extension = "21" }
+```
+
+The tool descriptions point the LLM at `metadata.number` for calling one agent
+from another. For agents built from a ringo-phone profile, the profile's
+`[metadata]` is used as is; keys set on the agent win.
 
 ## Agents from ringo-phone profiles
 
@@ -129,12 +152,13 @@ value; the rest comes from the profile. Two special cases:
   source is resolved (its `cmd` > `file` > inline, like ringo-phone).
 - `custom_headers` set on the agent replace the profile's; absent → the
   profile's.
+- `metadata` is merged key by key: the profile's `[metadata]`, then the
+  agent's keys on top. `description` comes from the agent only.
 
 The default agent name for a profile is its slug: lowercase, ASCII
 alphanumerics kept, every other run of characters collapsed to one `-`
 (`"[test] Alice"` → `test-alice`). Phone-only profile settings
-(`notify`, `auto_hold`, `deflect`, `header_display`, `notes`, `metadata`) are
-ignored.
+(`notify`, `auto_hold`, `deflect`, `header_display`, `notes`) are ignored.
 
 ### Safety
 

@@ -29,7 +29,7 @@ use regex::Regex;
 use ringo_core::account::{Account, BackendOptions};
 use ringo_profile::profile::Profile;
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command as OsCommand;
@@ -43,6 +43,12 @@ pub struct AgentDef {
     /// The ringo-phone profile this agent was built from, if any; surfaced by
     /// `list_agents`/`agent_status` so a profile origin stays visible.
     pub profile: Option<String>,
+    /// Free-text note for the LLM: what this agent is for, how to reach it.
+    pub description: Option<String>,
+    /// Free-form key/value facts for the LLM (e.g. `number` = how other
+    /// agents dial this one), merged from the profile's `[metadata]` and the
+    /// agent's own; never interpreted by ringo-mcp.
+    pub metadata: BTreeMap<String, String>,
     /// The SIP account to register.
     pub account: Account,
     /// Custom headers on outgoing INVITEs, `(name, template)` pairs.
@@ -119,6 +125,14 @@ pub struct AgentEntry {
     /// identifier per call, `$$` is a literal `$`.
     #[serde(default, deserialize_with = "deserialize_custom_headers")]
     pub custom_headers: Option<Vec<(String, String)>>,
+    /// Free-text note for the LLM (what the agent is for, how to reach it).
+    /// Not taken from a profile.
+    pub description: Option<String>,
+    /// Free-form key/value facts shown to the LLM, e.g. `number` (how other
+    /// agents dial this one). Merged key by key over the profile's
+    /// `[metadata]`; a key set here wins.
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
 }
 
 /// The optional `[ringo]` table: ringo-phone integration.
@@ -412,6 +426,14 @@ fn build_agent_def(entry: AgentEntry, profile: Option<(&str, &Profile)>) -> Resu
             .or_else(|| profile.map(|p| p.audio_codecs.clone()))
             .unwrap_or_default(),
     };
+    let mut metadata: BTreeMap<String, String> = profile
+        .map(|p| p.metadata.clone().into_iter().collect())
+        .unwrap_or_default();
+    metadata.extend(entry.metadata);
+    let description = entry
+        .description
+        .map(|d| d.trim().to_string())
+        .filter(|d| !d.is_empty());
     let custom_headers = entry
         .custom_headers
         .or_else(|| profile.map(|p| p.custom_headers.clone()))
@@ -420,6 +442,8 @@ fn build_agent_def(entry: AgentEntry, profile: Option<(&str, &Profile)>) -> Resu
     Ok(AgentDef {
         name,
         profile: profile_name.map(str::to_string),
+        description,
+        metadata,
         account,
         custom_headers,
     })
@@ -845,6 +869,10 @@ domain = "pbx.example.com"
 password = "test-secret"
 display_name = "Test Alice"
 custom_headers = [["X-Channel", "01"]]
+
+[metadata]
+number = "02011112222"
+env = "test"
 "#
                 .to_string(),
             ),
@@ -1006,6 +1034,69 @@ password_cmd = "printf overridden"
         assert_eq!(a.account.display_name.as_deref(), Some("Test Alice"));
         assert!(a.account.mwi, "profile mwi (unset on the agent)");
         assert!(a.account.catchall, "profile catchall default");
+    }
+
+    #[test]
+    fn metadata_merges_key_by_key_and_description_is_agent_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = load_with_profiles(
+            &tmp,
+            r#"
+[[agent]]
+profile = "[test] Alice"
+description = "  Front desk; answers incoming calls.  "
+
+[agent.metadata]
+number = "021"
+extension = "21"
+
+[ringo]
+profiles = ['^\[test\] Bob']
+"#,
+        )
+        .unwrap();
+        let alice = &cfg.agents[0];
+        // The agent's key wins, the profile's other keys stay, new keys add.
+        let expected: BTreeMap<String, String> =
+            [("env", "test"), ("extension", "21"), ("number", "021")]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+        assert_eq!(alice.metadata, expected);
+        assert_eq!(
+            alice.description.as_deref(),
+            Some("Front desk; answers incoming calls."),
+            "trimmed"
+        );
+        // A pattern-selected profile without [metadata] and no description.
+        let bob = &cfg.agents[1];
+        assert!(bob.metadata.is_empty());
+        assert_eq!(bob.description, None);
+    }
+
+    #[test]
+    fn plain_agents_take_metadata_and_description_from_the_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("c.toml");
+        std::fs::write(
+            &p,
+            r#"
+[[agent]]
+name = "a"
+username = "1"
+domain = "x"
+password = "pw"
+description = ""
+metadata = { number = "100" }
+"#,
+        )
+        .unwrap();
+        let cfg = load(&p).unwrap();
+        assert_eq!(
+            cfg.agents[0].metadata.get("number").map(String::as_str),
+            Some("100")
+        );
+        assert_eq!(cfg.agents[0].description, None, "empty = unset");
     }
 
     #[test]
