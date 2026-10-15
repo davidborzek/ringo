@@ -49,6 +49,7 @@ jobs:
     outputs:
       phone_tag: ${{ steps.tags.outputs.phone_tag }}
       flow_tag: ${{ steps.tags.outputs.flow_tag }}
+      mcp_tag: ${{ steps.tags.outputs.mcp_tag }}
     steps:
       - uses: actions/checkout@v7
         with:
