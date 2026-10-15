@@ -375,6 +375,20 @@ struct RmHeaderParam {
 
 // Helpers ───────────────────────────────────────────────────────────────────
 
+/// Add the config's facts about an agent to a `list_agents`/`agent_status`
+/// entry — each key only when set, so plain agents stay compact.
+fn add_agent_info(entry: &mut serde_json::Value, info: &crate::hub::AgentInfo) {
+    if let Some(profile) = &info.profile {
+        entry["profile"] = json!(profile);
+    }
+    if let Some(description) = &info.description {
+        entry["description"] = json!(description);
+    }
+    if !info.metadata.is_empty() {
+        entry["metadata"] = json!(info.metadata);
+    }
+}
+
 fn ok_text(msg: impl Into<String>) -> Result<CallToolResult, McpError> {
     Ok(CallToolResult::success(vec![ContentBlock::text(msg)]))
 }
@@ -484,7 +498,7 @@ pub(crate) fn event_json(e: &ringo_core::event::AppEvent) -> serde_json::Value {
 #[tool_router(router = build_tool_router)]
 impl TelephonyServer {
     #[tool(
-        description = "List all configured telephony agents (name, SIP address, registration, live calls). Agents start lazily: `running: false` means the agent is configured but its worker will be started by the first tool call that uses it.",
+        description = "List all configured telephony agents (name, SIP address, registration, live calls), plus what the config says about each: `description` and `metadata` (e.g. `metadata.number` = the number to dial to reach that agent — use it to call one agent from another; the SIP address is not necessarily dialable). Agents start lazily: `running: false` means the agent is configured but its worker will be started by the first tool call that uses it.",
         annotations(read_only_hint = true, open_world_hint = false)
     )]
     fn list_agents(&self) -> Result<CallToolResult, McpError> {
@@ -502,10 +516,7 @@ impl TelephonyServer {
                     "worker_dead": a.state.as_ref().map(|s| s.worker_dead),
                     "calls": a.state.map(|s| s.calls).unwrap_or_default(),
                 });
-                // Present only for agents built from a ringo-phone profile.
-                if let Some(profile) = &a.profile {
-                    agent["profile"] = json!(profile);
-                }
+                add_agent_info(&mut agent, &a.info);
                 agent
             })
             .collect();
@@ -555,10 +566,7 @@ impl TelephonyServer {
                 "last_call_reason": s.last_call_reason,
                 "last_call_error": s.last_call_error,
             });
-            // Present only for agents built from a ringo-phone profile.
-            if let Some(profile) = &a.profile {
-                status["profile"] = json!(profile);
-            }
+            add_agent_info(&mut status, &a.info);
             status
         })
     }
@@ -1094,7 +1102,8 @@ impl ServerHandler for TelephonyServer {
             .with_instructions(
                 "Telephony over SIP. Agents are configured in ringo-mcp's config file; \
                  address them by name (they start lazily on first use). Typical flow: \
-                 `list_agents` to see who is configured, `dial` (or wait for \
+                 `list_agents` to see who is configured (their `description` and \
+                 `metadata` say how to reach them, e.g. `metadata.number`), `dial` (or wait for \
                  `call_incoming` via `wait_event`, then `accept`), then `wait_event` \
                  until `call_established`/`call_closed`. Use `send_dtmf`, `play`, \
                  `transfer`, `hold`/`resume`/`mute` during the call, \

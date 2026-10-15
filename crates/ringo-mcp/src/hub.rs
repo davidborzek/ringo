@@ -20,7 +20,7 @@ use ringo_agent::{AgentConfig, ProcessClient, SavedAudio};
 use ringo_core::account::{Account, BackendOptions};
 use ringo_core::event::AppEvent;
 use ringo_profile::header::{HeaderContext, HeaderTemplate};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
@@ -228,8 +228,7 @@ pub struct Hub {
 /// the already-running instance.
 struct Slot {
     name: String,
-    /// The ringo-phone profile this agent was built from, if any.
-    profile: Option<String>,
+    info: Arc<AgentInfo>,
     aor: String,
     account: Account,
     options: BackendOptions,
@@ -251,7 +250,11 @@ impl Hub {
                 let aor = format!("sip:{}@{}", def.account.username, def.account.domain);
                 Slot {
                     name: def.name,
-                    profile: def.profile,
+                    info: Arc::new(AgentInfo {
+                        profile: def.profile,
+                        description: def.description,
+                        metadata: def.metadata,
+                    }),
                     aor,
                     options: config.backend.clone(),
                     custom_headers: def.custom_headers,
@@ -281,7 +284,7 @@ impl Hub {
                 };
                 AgentOverview {
                     name: s.name.clone(),
-                    profile: s.profile.clone(),
+                    info: Arc::clone(&s.info),
                     aor: s.aor.clone(),
                     running,
                     state,
@@ -317,7 +320,7 @@ impl Hub {
         let agent = Arc::new(
             Agent::connect(
                 &slot.name,
-                slot.profile.clone(),
+                Arc::clone(&slot.info),
                 slot.account.clone(),
                 slot.options.clone(),
                 &slot.custom_headers,
@@ -388,8 +391,8 @@ impl Hub {
 pub struct AgentOverview {
     /// Config label (tool-facing name).
     pub name: String,
-    /// The ringo-phone profile this agent was built from, if any.
-    pub profile: Option<String>,
+    /// What the config says about the agent for the LLM.
+    pub info: Arc<AgentInfo>,
     /// `sip:username@domain` of the configured AOR.
     pub aor: String,
     /// `false` = configured but never used since server start (or dead and not
@@ -397,6 +400,18 @@ pub struct AgentOverview {
     pub running: bool,
     /// Reduced state, `None` unless the worker is running.
     pub state: Option<AgentState>,
+}
+
+/// What the config says about an agent beyond its account — shown to the LLM
+/// by `list_agents`/`agent_status`, never interpreted by ringo-mcp.
+#[derive(Debug, Default)]
+pub struct AgentInfo {
+    /// The ringo-phone profile the agent was built from, if any.
+    pub profile: Option<String>,
+    /// Free-text note: what the agent is for, how to reach it.
+    pub description: Option<String>,
+    /// Free-form facts, e.g. `number` = how other agents dial this one.
+    pub metadata: BTreeMap<String, String>,
 }
 
 /// Whether an event is worth surfacing to an MCP agent. Everything ringo-core
@@ -414,8 +429,8 @@ fn is_agent_relevant(event: &AppEvent) -> bool {
 pub struct Agent {
     /// Config label (tool-facing name).
     pub name: String,
-    /// The ringo-phone profile this agent was built from, if any.
-    pub profile: Option<String>,
+    /// What the config says about the agent for the LLM.
+    pub info: Arc<AgentInfo>,
     /// `sip:username@domain` of the registered AOR.
     pub aor: String,
     /// The agent's SIP domain, used to resolve bare dial targets.
@@ -440,7 +455,7 @@ impl Agent {
     /// Static (non-template) custom headers are applied to the worker here.
     async fn connect(
         name: &str,
-        profile: Option<String>,
+        info: Arc<AgentInfo>,
         account: Account,
         options: BackendOptions,
         custom_headers: &[(String, String)],
@@ -549,7 +564,7 @@ impl Agent {
         }
         Ok(Self {
             name: name.to_string(),
-            profile,
+            info,
             aor,
             domain,
             recording,
@@ -1137,6 +1152,8 @@ mod tests {
                 crate::config::AgentDef {
                     name: "alice".into(),
                     profile: None,
+                    description: None,
+                    metadata: Default::default(),
                     account: Account {
                         username: "1001".into(),
                         domain: "pbx.example.com".into(),
@@ -1148,6 +1165,8 @@ mod tests {
                 crate::config::AgentDef {
                     name: "bob".into(),
                     profile: None,
+                    description: None,
+                    metadata: Default::default(),
                     account: Account {
                         username: "1002".into(),
                         domain: "pbx.example.com".into(),

@@ -472,7 +472,8 @@ fn write_fake_profiles(home: &std::path::Path) {
     for (name, body) in [
         (
             "[test] Alice",
-            "username = \"2001\"\ndomain = \"10.255.255.1:5060\"\npassword = \"pw\"\n",
+            "username = \"2001\"\ndomain = \"10.255.255.1:5060\"\npassword = \"pw\"\n\
+             [metadata]\nnumber = \"02011112222\"\n",
         ),
         (
             "[prod] Trunk",
@@ -502,10 +503,17 @@ fn profile_patterns_become_listed_agents() {
     assert_eq!(agents[0]["name"], "test-alice");
     assert_eq!(agents[0]["profile"], "[test] Alice");
     assert_eq!(agents[0]["aor"], "sip:2001@10.255.255.1:5060");
+    // The profile's [metadata] tells the LLM how to reach the agent.
+    assert_eq!(agents[0]["metadata"]["number"], "02011112222");
+    assert!(
+        agents[0].get("description").is_none(),
+        "unset keys are omitted"
+    );
 
     // `agent_status` carries the profile too (and starts the worker).
     let st = server.tool("agent_status", serde_json::json!({"agent": "test-alice"}));
     let v: Value = serde_json::from_str(st.as_str().expect("text")).unwrap();
     assert_eq!(v["profile"], "[test] Alice");
     assert_eq!(v["name"], "test-alice");
+    assert_eq!(v["metadata"]["number"], "02011112222");
 }
