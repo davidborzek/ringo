@@ -30,14 +30,25 @@ impl Drop for Server {
 
 impl Server {
     fn start(config_path: &std::path::Path) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_ringo-mcp"))
-            .arg("--config")
+        Self::start_in(config_path, None)
+    }
+
+    /// `home` overrides `$HOME` for the server process — how profile tests
+    /// point the (child) server at a fake ~/.config/ringo without touching the
+    /// test process's own HOME.
+    fn start_in(config_path: &std::path::Path, home: Option<&std::path::Path>) -> Self {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_ringo-mcp"));
+        cmd.arg("--config")
             .arg(config_path)
             // The default trace dir is the server's own; a developer's env must
             // not redirect it. The test kills the server hard (no cleanup), so
             // the dir goes into the test's own temp dir.
             .env_remove("RINGO_AGENT_SIPTRACE")
-            .env("XDG_RUNTIME_DIR", config_path.parent().expect("config dir"))
+            .env("XDG_RUNTIME_DIR", config_path.parent().expect("config dir"));
+        if let Some(home) = home {
+            cmd.env("HOME", home);
+        }
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             // Inherited: shows up in the failing test's output (spawn errors).
@@ -452,4 +463,49 @@ fn default_trace_dir_is_private() {
         .expect("trace dir in XDG_RUNTIME_DIR");
     let mode = dir.metadata().unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o700, "trace dir must be owner-only, got {mode:o}");
+}
+
+/// A fake `$HOME` with ringo-phone profiles; the child server process reads
+/// them (the test process's own HOME is never touched).
+fn write_fake_profiles(home: &std::path::Path) {
+    let profiles = home.join(".config").join("ringo").join("profiles");
+    for (name, body) in [
+        (
+            "[test] Alice",
+            "username = \"2001\"\ndomain = \"10.255.255.1:5060\"\npassword = \"pw\"\n",
+        ),
+        (
+            "[prod] Trunk",
+            "username = \"3001\"\ndomain = \"10.255.255.1:5060\"\npassword = \"pw\"\n",
+        ),
+    ] {
+        std::fs::create_dir_all(profiles.join(name)).unwrap();
+        std::fs::write(profiles.join(name).join("profile.toml"), body).unwrap();
+    }
+}
+
+#[test]
+fn profile_patterns_become_listed_agents() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    write_fake_profiles(&home);
+    let config = tmp.path().join("config.toml");
+    std::fs::write(&config, "[ringo]\nprofiles = ['^\\[test\\]']\n").unwrap();
+    let mut server = Server::start_in(&config, Some(&home));
+
+    // Only the [test] profile was selected; the name is the slug and `profile`
+    // names the origin.
+    let text = server.tool("list_agents", serde_json::json!({}));
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    let agents = v["agents"].as_array().expect("agents");
+    assert_eq!(agents.len(), 1, "[prod] must not match ^\\[test\\]: {v:?}");
+    assert_eq!(agents[0]["name"], "test-alice");
+    assert_eq!(agents[0]["profile"], "[test] Alice");
+    assert_eq!(agents[0]["aor"], "sip:2001@10.255.255.1:5060");
+
+    // `agent_status` carries the profile too (and starts the worker).
+    let st = server.tool("agent_status", serde_json::json!({"agent": "test-alice"}));
+    let v: Value = serde_json::from_str(st.as_str().expect("text")).unwrap();
+    assert_eq!(v["profile"], "[test] Alice");
+    assert_eq!(v["name"], "test-alice");
 }

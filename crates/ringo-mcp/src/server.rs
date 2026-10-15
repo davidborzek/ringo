@@ -493,7 +493,7 @@ impl TelephonyServer {
             .overview()
             .into_iter()
             .map(|a| {
-                json!({
+                let mut agent = json!({
                     "name": a.name,
                     "aor": a.aor,
                     "running": a.running,
@@ -501,7 +501,12 @@ impl TelephonyServer {
                     "reg_error": a.state.as_ref().and_then(|s| s.reg_error.clone()),
                     "worker_dead": a.state.as_ref().map(|s| s.worker_dead),
                     "calls": a.state.map(|s| s.calls).unwrap_or_default(),
-                })
+                });
+                // Present only for agents built from a ringo-phone profile.
+                if let Some(profile) = &a.profile {
+                    agent["profile"] = json!(profile);
+                }
+                agent
             })
             .collect();
         ok_json(json!({ "agents": agents }))
@@ -536,19 +541,26 @@ impl TelephonyServer {
                 "mos": m.mos,
             })
         });
-        ok_json(json!({
-            "name": a.name,
-            "aor": a.aor,
-            "registered": s.registered,
-            "reg_error": s.reg_error,
-            "worker_dead": s.worker_dead,
-            "calls": s.calls,
-            "call_count": call_count,
-            "media_stats": stats,
-            "received_dtmf": received_dtmf,
-            "last_call_reason": s.last_call_reason,
-            "last_call_error": s.last_call_error,
-        }))
+        ok_json({
+            let mut status = json!({
+                "name": a.name,
+                "aor": a.aor,
+                "registered": s.registered,
+                "reg_error": s.reg_error,
+                "worker_dead": s.worker_dead,
+                "calls": s.calls,
+                "call_count": call_count,
+                "media_stats": stats,
+                "received_dtmf": received_dtmf,
+                "last_call_reason": s.last_call_reason,
+                "last_call_error": s.last_call_error,
+            });
+            // Present only for agents built from a ringo-phone profile.
+            if let Some(profile) = &a.profile {
+                status["profile"] = json!(profile);
+            }
+            status
+        })
     }
 
     #[tool(

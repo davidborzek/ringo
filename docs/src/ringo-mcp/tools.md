@@ -15,12 +15,14 @@ All configured agents. Spawns nothing.
 { "agents": [
     { "name": "alice", "aor": "sip:1001@pbx.example.com",
       "running": false, "registered": null, "reg_error": null,
-      "worker_dead": null, "calls": [] } ] }
+      "worker_dead": null, "calls": [],
+      "profile": "[test] Alice" } ] }
 ```
 
 `running: false` = configured but not started since server start.
 `registered: null` = agent is starting up (or not running); query
-`agent_status` for live values.
+`agent_status` for live values. `profile` is present only for agents built
+from a ringo-phone profile — the profile's name.
 
 ### `agent_status`
 
@@ -29,6 +31,7 @@ DTMF, the last close reason. Poll this after `dial`/`accept` to check progress.
 
 ```jsonc
 { "name": "alice", "aor": "sip:1001@pbx.example.com",
+  "profile": "[test] Alice",
   "registered": true, "reg_error": null, "worker_dead": false,
   "calls": [ { "id": "a1b2…", "phase": "established",
                "peer": "sip:1002@pbx.example.com", "peer_name": "Bob" } ],
@@ -38,6 +41,9 @@ DTMF, the last close reason. Poll this after `dial`/`accept` to check progress.
   "received_dtmf": "12",
   "last_call_reason": null, "last_call_error": false }
 ```
+
+`profile` is present only for agents built from a ringo-phone profile — the
+profile's name.
 
 ## Call control
 
