@@ -20,6 +20,7 @@ path = "src/main.rs"
 
 [dependencies]
 ringo-core.workspace = true
+ringo-profile.workspace = true
 clap = { version = "4", features = ["derive"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
 serde = { version = "1", features = ["derive"] }
@@ -30,7 +31,6 @@ ratatui = "0.30"
 crossterm = "0.29"
 tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-uuid = { version = "1", features = ["v4"] }
 libc = "0.2"
 
 [build-dependencies]

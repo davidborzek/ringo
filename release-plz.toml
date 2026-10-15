@@ -51,6 +51,15 @@ git_release_enable = false
 git_tag_name = "ringo-flow-macros-v{{ version }}"
 
 [[package]]
+name = "ringo-profile"
+# Internal support crate (the shared profile format and header templates): publish +
+# tag it, but no standalone GitHub release page. Must be published — ringo-phone
+# and ringo-mcp depend on it with a version requirement; release-plz publishes it
+# in dependency order.
+git_release_enable = false
+git_tag_name = "ringo-profile-v{{ version }}"
+
+[[package]]
 name = "ringo-phone"
 git_tag_name = "ringo-phone-v{{ version }}"
 

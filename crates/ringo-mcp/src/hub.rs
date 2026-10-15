@@ -13,13 +13,13 @@
 //! tool calls can observe them.
 
 use crate::config::LoadedConfig;
-use crate::headers::{HeaderContext, HeaderTemplate};
 use crate::state::{AgentState, reduce};
 use anyhow::{Context, Result};
 use regex::Regex;
 use ringo_agent::{AgentConfig, ProcessClient, SavedAudio};
 use ringo_core::account::{Account, BackendOptions};
 use ringo_core::event::AppEvent;
+use ringo_profile::header::{HeaderContext, HeaderTemplate};
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::RecvTimeoutError;

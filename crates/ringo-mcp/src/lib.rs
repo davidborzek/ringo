@@ -15,7 +15,6 @@
 #![warn(missing_docs)]
 
 pub mod config;
-mod headers;
 pub mod hub;
 mod server;
 mod state;
