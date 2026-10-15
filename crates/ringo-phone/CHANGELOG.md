@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.16.1...ringo-phone-v0.17.0) - 2026-10-15
+
+### Refactor
+
+- extract profile format and header templates into ringo-profile ([#133](https://github.com/davidborzek/ringo/pull/133))
+
 ## [0.16.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.15.0...ringo-phone-v0.16.0) - 2026-08-31
 
 ### Features

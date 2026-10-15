@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6](https://github.com/davidborzek/ringo/compare/ringo-agent-v0.2.5...ringo-agent-v0.2.6) - 2026-10-15
+
 ## [0.2.1](https://github.com/davidborzek/ringo/compare/ringo-agent-v0.2.0...ringo-agent-v0.2.1) - 2026-07-23
 
 ### Bug Fixes
