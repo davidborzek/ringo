@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ringo-core", "crates/ringo-agent", "crates/ringo-phone", "crates/ringo-flow", "crates/ringo-flow/macros", "crates/ringo-mcp"]
+members = ["crates/ringo-core", "crates/ringo-agent", "crates/ringo-phone", "crates/ringo-profile", "crates/ringo-flow", "crates/ringo-flow/macros", "crates/ringo-mcp"]
 
 # Shared metadata inherited by the member crates via `<field>.workspace = true`.
 # Each crate carries its own `version` (independent per-crate releasing via
@@ -17,4 +17,5 @@ rust-version = "1.85"
 [workspace.dependencies]
 ringo-core = { path = "crates/ringo-core", version = "0.16.1" }
 ringo-agent = { path = "crates/ringo-agent", version = "0.2.5" }
+ringo-profile = { path = "crates/ringo-profile", version = "0.1.0" }
 ringo-flow-macros = { path = "crates/ringo-flow/macros", version = "0.1.1" }

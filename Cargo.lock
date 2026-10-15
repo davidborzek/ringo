@@ -2495,13 +2495,13 @@ dependencies = [
  "regex",
  "ringo-agent",
  "ringo-core",
+ "ringo-profile",
  "rmcp",
  "serde",
  "serde_json",
  "tempfile",
  "tokio",
  "toml",
- "uuid",
 ]
 
 [[package]]
@@ -2517,9 +2517,19 @@ dependencies = [
  "libc",
  "ratatui",
  "ringo-core",
+ "ringo-profile",
  "serde",
  "serde_json",
  "tokio",
+ "toml",
+]
+
+[[package]]
+name = "ringo-profile"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
  "toml",
  "uuid",
 ]

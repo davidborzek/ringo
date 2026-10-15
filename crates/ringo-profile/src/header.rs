@@ -1,10 +1,9 @@
 //! Custom-header template values with `${placeholder}` substitution.
 //!
-//! Ported from ringo-phone's `header` module (trimmed to the MCP use case):
-//! templates are evaluated per outgoing call so values like `${uuid}` produce a
-//! fresh identifier on every INVITE; one [`HeaderContext`] is shared across all
-//! renders within one call so multiple headers referencing `${uuid}` on the
-//! same INVITE see the same value.
+//! Templates are evaluated per outgoing call so that values like `${uuid}` can
+//! produce a fresh identifier on every INVITE. A single [`HeaderContext`] is
+//! shared across all template renders within one call, so multiple headers
+//! that reference `${uuid}` in the same INVITE see the same value.
 //!
 //! Syntax: `${name}` expands a placeholder; `$$` is a literal `$` (so a literal
 //! `${uuid}` is written `$${uuid}`). Unknown placeholders and `$` not followed
@@ -12,13 +11,10 @@
 
 use uuid::Uuid;
 
-/// One custom-header template. `raw` is what the config declared; `render`
-/// substitutes placeholders against a per-call [`HeaderContext`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeaderTemplate(String);
 
 impl HeaderTemplate {
-    /// Wrap a raw template string.
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into())
     }
@@ -29,7 +25,7 @@ impl HeaderTemplate {
     }
 
     /// True if the template references at least one known placeholder and
-    /// therefore must be re-rendered per call (fresh value each INVITE).
+    /// therefore must be re-rendered per call.
     pub fn is_dynamic(&self) -> bool {
         let mut found = false;
         expand(&self.0, |name| {
@@ -50,7 +46,7 @@ impl HeaderTemplate {
 /// Expand `${name}` placeholders in `s`. `sub(name)` returns `Some(value)` for
 /// a recognized placeholder or `None` to leave it verbatim. `$$` is a literal
 /// `$`; a `$` not followed by `{` or `$` is also left verbatim.
-fn expand(s: &str, mut sub: impl FnMut(&str) -> Option<String>) -> String {
+pub fn expand(s: &str, mut sub: impl FnMut(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(idx) = rest.find('$') {
@@ -69,8 +65,8 @@ fn expand(s: &str, mut sub: impl FnMut(&str) -> Option<String>) -> String {
                     }
                     rest = &stripped[end + 1..];
                 }
-                // No closing brace: leave the rest verbatim.
                 None => {
+                    // No closing brace: leave the rest verbatim.
                     out.push_str(&rest[idx..]);
                     return out;
                 }
@@ -86,11 +82,10 @@ fn expand(s: &str, mut sub: impl FnMut(&str) -> Option<String>) -> String {
 
 /// Per-call values shared across all templates rendered for the same INVITE.
 pub struct HeaderContext {
-    uuid: String,
+    pub uuid: String,
 }
 
 impl HeaderContext {
-    /// A fresh context for one outgoing call (new correlation uuid).
     pub fn for_call() -> Self {
         Self {
             uuid: Uuid::new_v4().to_string(),
@@ -185,6 +180,15 @@ mod tests {
         let ctx = HeaderContext { uuid: "X".into() };
         assert_eq!(HeaderTemplate::new("$${uuid}").render(&ctx), "${uuid}");
         assert_eq!(HeaderTemplate::new("a$$b").render(&ctx), "a$b");
+    }
+
+    #[test]
+    fn render_leaves_lone_dollar_and_unclosed_brace_verbatim() {
+        let ctx = HeaderContext { uuid: "X".into() };
+        assert_eq!(
+            HeaderTemplate::new("5$ and ${uuid").render(&ctx),
+            "5$ and ${uuid"
+        );
     }
 
     #[test]

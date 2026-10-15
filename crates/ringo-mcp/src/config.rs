@@ -42,7 +42,8 @@ pub struct AgentDef {
     /// The SIP account to register.
     pub account: Account,
     /// Custom headers on outgoing INVITEs, `(name, template)` pairs.
-    /// Templates may contain `${uuid}` (fresh per call); see `headers` module.
+    /// Templates may contain `${uuid}` (fresh per call); see
+    /// `ringo_profile::header`.
     pub custom_headers: Vec<(String, String)>,
 }
 
