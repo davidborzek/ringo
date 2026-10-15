@@ -34,6 +34,27 @@ on:
         description: "Release tag (required when upload=true)"
         type: string
         default: ""
+  # By hand: (re-)attach binaries to an existing release, e.g. one whose
+  # release run skipped them.
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Cargo package: ringo-phone, ringo-flow or ringo-mcp"
+        type: choice
+        options: [ringo-phone, ringo-flow, ringo-mcp]
+        required: true
+      ref:
+        description: "Git ref to build (usually the release tag)"
+        type: string
+        required: true
+      upload:
+        description: "Package as tarball and attach to the release"
+        type: boolean
+        default: true
+      tag:
+        description: "Release tag (required when upload=true)"
+        type: string
+        default: ""
 
 jobs:
   build:
