@@ -2,7 +2,8 @@
 
 ## Install
 
-baresip is built in and statically linked — no separate `baresip` install needed.
+The SIP stack (baresip, libre, OpenSSL) is built in — no separate `baresip`
+install needed.
 
 **Homebrew (macOS / Linux):**
 
@@ -16,22 +17,6 @@ brew install davidborzek/tap/ringo
 yay -S ringo-phone-bin   # or: paru -S ringo-phone-bin
 ```
 
-**Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
-[releases page](https://github.com/davidborzek/ringo/releases) — download, extract
-and put `ringo` on your `$PATH`.
-
-**From crates.io:**
-
-```sh
-cargo install ringo-phone
-```
-
-**From GitHub (no clone needed):**
-
-```sh
-cargo install --git https://github.com/davidborzek/ringo ringo-phone
-```
-
 **Nix (flake):**
 
 ```sh
@@ -41,7 +26,7 @@ nix profile install github:davidborzek/ringo#ringo-phone
 Or manage ringo and its SIP profiles declaratively with the
 [Home-Manager module](home-manager.md).
 
-Building ringo from source means compiling OpenSSL, libre and libbaresip before
+Building from source means compiling OpenSSL, libre and libbaresip before
 the Rust code — ten minutes or so, more on a small machine. A binary cache holds
 the result for every platform the flake supports, so enable it first and the
 install is a download instead:
@@ -71,8 +56,43 @@ nix profile install github:davidborzek/ringo/ringo-phone-v0.14.0#ringo-phone
 ```
 
 Releases are tagged per crate, so `ringo-phone-v0.14.0` is the tag for the phone.
-The flake at that tag still provides `ringo-flow` too, in whatever version that
-commit carried.
+The flake at that tag still provides `ringo-flow` and `ringo-mcp` too, in whatever
+version that commit carried.
+
+**Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
+[releases page](https://github.com/davidborzek/ringo/releases) — download,
+extract and put `ringo` on your `$PATH`.
+
+**With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall)** — the
+same prebuilt binary, no compile:
+
+```sh
+cargo binstall ringo-phone
+```
+
+**From crates.io** (compiles, needs a C toolchain and CMake):
+
+```sh
+cargo install ringo-phone
+```
+
+**From GitHub** (no clone needed):
+
+```sh
+cargo install --git https://github.com/davidborzek/ringo ringo-phone
+```
+
+**From a workspace checkout** (no install):
+
+```sh
+cargo run -p ringo-phone
+```
+
+The pre-built binaries, `cargo binstall` and `cargo install` link the opus,
+spandsp and PulseAudio client libraries at runtime — install them first
+(`libopus0 libspandsp2 libpulse0` on Debian/Ubuntu, `opus spandsp` with Homebrew
+or pacman).
+Homebrew, the AUR package and Nix pull them in for you.
 
 > Homebrew 6.0+ requires third-party taps to be trusted before use. If `brew
 > install` prompts you to trust the tap, accept it — or trust it up front:

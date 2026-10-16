@@ -18,6 +18,12 @@ path = "src/lib.rs"
 name = "ringo"
 path = "src/main.rs"
 
+# `cargo binstall ringo-phone` downloads the release tarball instead of building.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/ringo-phone-v{ version }/ringo-{ version }-{ target }.tar.gz"
+bin-dir = "ringo-{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
 [dependencies]
 ringo-core.workspace = true
 ringo-profile.workspace = true

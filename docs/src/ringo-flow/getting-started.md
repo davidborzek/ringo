@@ -2,7 +2,8 @@
 
 ## Install
 
-baresip is built in and statically linked — no separate `baresip` install needed.
+The SIP stack (baresip, libre, OpenSSL) is built in — no separate `baresip`
+install needed.
 
 **Homebrew (macOS / Linux):**
 
@@ -16,17 +17,38 @@ brew install davidborzek/tap/ringo-flow
 yay -S ringo-flow-bin   # or: paru -S ringo-flow-bin
 ```
 
-**Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
-[releases page](https://github.com/davidborzek/ringo/releases) — download, extract
-and put `ringo-flow` on your `$PATH`.
+**Nix (flake):**
 
-**From crates.io:**
+```sh
+nix profile install github:davidborzek/ringo#ringo-flow
+```
+
+To run scheduled monitors as a systemd service, use the
+[NixOS module](nixos.md).
+
+Enable the binary cache first (`cachix use ringo`) so this is a download
+instead of a long build; see [ringo-phone's install notes](../ringo-phone/getting-started.md#install)
+for NixOS settings and pinning a released version
+(`github:davidborzek/ringo/ringo-flow-v<version>#ringo-flow`).
+
+**Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
+[releases page](https://github.com/davidborzek/ringo/releases) — download,
+extract and put `ringo-flow` on your `$PATH`.
+
+**With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall)** — the
+same prebuilt binary, no compile:
+
+```sh
+cargo binstall ringo-flow
+```
+
+**From crates.io** (compiles, needs a C toolchain and CMake):
 
 ```sh
 cargo install ringo-flow
 ```
 
-**From GitHub (no clone needed):**
+**From GitHub** (no clone needed):
 
 ```sh
 cargo install --git https://github.com/davidborzek/ringo ringo-flow
@@ -38,14 +60,18 @@ cargo install --git https://github.com/davidborzek/ringo ringo-flow
 cargo run -p ringo-flow -- run scenario.js
 ```
 
-**Nix (flake):**
+**Docker** — an image with everything compiled in is published to GHCR on
+each release; see [Running in CI](running-in-ci.md#docker):
 
 ```sh
-nix profile install github:davidborzek/ringo#ringo-flow
+docker run --rm --network host -v "$PWD/scenarios:/scn:ro" \
+  ghcr.io/davidborzek/ringo-flow:latest run /scn
 ```
 
-To run scheduled monitors as a systemd service, use the
-[NixOS module](nixos.md).
+The pre-built binaries, `cargo binstall` and `cargo install` link the opus
+and spandsp libraries at runtime — install them first (`libopus0
+libspandsp2` on Debian/Ubuntu, `opus spandsp` with Homebrew or pacman).
+Homebrew, the AUR package and Nix pull them in for you.
 
 > Homebrew 6.0+ requires third-party taps to be trusted before use. If `brew
 > install` prompts you to trust the tap, accept it — or trust it up front:
