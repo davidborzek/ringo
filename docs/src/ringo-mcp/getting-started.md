@@ -39,6 +39,24 @@ same prebuilt binary, no compile:
 cargo binstall ringo-mcp
 ```
 
+**With [mise](https://mise.jdx.dev)** — the same prebuilt binary, via the
+`github` backend. All ringo tools share one repository, so give each its own
+alias in `mise.toml`:
+
+```toml
+[tool_alias]
+ringo-mcp = "github:davidborzek/ringo[version_prefix=ringo-mcp-v]"
+
+[tools]
+ringo-mcp = "latest"
+```
+
+For a single tool, `mise use -g` works without an alias:
+
+```sh
+mise use -g 'github:davidborzek/ringo[version_prefix=ringo-mcp-v]'
+```
+
 **From crates.io** (compiles, needs a C toolchain and CMake):
 
 ```sh
@@ -57,7 +75,7 @@ cargo install --git https://github.com/davidborzek/ringo ringo-mcp
 cargo run -p ringo-mcp
 ```
 
-The pre-built binaries, `cargo binstall` and `cargo install` link the opus
+The pre-built binaries, `cargo binstall`, mise and `cargo install` link the opus
 and spandsp libraries at runtime — install them first (`libopus0
 libspandsp2` on Debian/Ubuntu, `opus spandsp` with Homebrew or pacman).
 Homebrew, the AUR package and Nix pull them in for you.

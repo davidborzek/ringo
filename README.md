@@ -44,6 +44,7 @@ install needed.
 | AUR | `ringo-phone-bin` | `ringo-flow-bin` | `ringo-mcp-bin` |
 | Nix | `nix profile install github:davidborzek/ringo#ringo-phone` | `…#ringo-flow` | `…#ringo-mcp` |
 | cargo | `cargo binstall ringo-phone` | `cargo binstall ringo-flow` | `cargo binstall ringo-mcp` |
+| mise | `mise use -g 'github:davidborzek/ringo[version_prefix=ringo-phone-v]'` | `…[version_prefix=ringo-flow-v]` | `…[version_prefix=ringo-mcp-v]` |
 | Docker | — | `ghcr.io/davidborzek/ringo-flow` | — |
 
 Pre-built binaries for Linux and macOS (x86\_64 + arm64) are on the

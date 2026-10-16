@@ -70,6 +70,24 @@ same prebuilt binary, no compile:
 cargo binstall ringo-phone
 ```
 
+**With [mise](https://mise.jdx.dev)** — the same prebuilt binary, via the
+`github` backend. All ringo tools share one repository, so give each its own
+alias in `mise.toml`:
+
+```toml
+[tool_alias]
+ringo-phone = "github:davidborzek/ringo[version_prefix=ringo-phone-v]"
+
+[tools]
+ringo-phone = "latest"
+```
+
+For a single tool, `mise use -g` works without an alias:
+
+```sh
+mise use -g 'github:davidborzek/ringo[version_prefix=ringo-phone-v]'
+```
+
 **From crates.io** (compiles, needs a C toolchain and CMake):
 
 ```sh
@@ -88,7 +106,7 @@ cargo install --git https://github.com/davidborzek/ringo ringo-phone
 cargo run -p ringo-phone
 ```
 
-The pre-built binaries, `cargo binstall` and `cargo install` link the opus,
+The pre-built binaries, `cargo binstall`, mise and `cargo install` link the opus,
 spandsp and PulseAudio client libraries at runtime — install them first
 (`libopus0 libspandsp2 libpulse0` on Debian/Ubuntu, `opus spandsp` with Homebrew
 or pacman).

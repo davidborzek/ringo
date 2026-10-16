@@ -42,6 +42,24 @@ same prebuilt binary, no compile:
 cargo binstall ringo-flow
 ```
 
+**With [mise](https://mise.jdx.dev)** — the same prebuilt binary, via the
+`github` backend. All ringo tools share one repository, so give each its own
+alias in `mise.toml`:
+
+```toml
+[tool_alias]
+ringo-flow = "github:davidborzek/ringo[version_prefix=ringo-flow-v]"
+
+[tools]
+ringo-flow = "latest"
+```
+
+For a single tool, `mise use -g` works without an alias:
+
+```sh
+mise use -g 'github:davidborzek/ringo[version_prefix=ringo-flow-v]'
+```
+
 **From crates.io** (compiles, needs a C toolchain and CMake):
 
 ```sh
@@ -68,7 +86,7 @@ docker run --rm --network host -v "$PWD/scenarios:/scn:ro" \
   ghcr.io/davidborzek/ringo-flow:latest run /scn
 ```
 
-The pre-built binaries, `cargo binstall` and `cargo install` link the opus
+The pre-built binaries, `cargo binstall`, mise and `cargo install` link the opus
 and spandsp libraries at runtime — install them first (`libopus0
 libspandsp2` on Debian/Ubuntu, `opus spandsp` with Homebrew or pacman).
 Homebrew, the AUR package and Nix pull them in for you.
