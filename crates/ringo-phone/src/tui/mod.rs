@@ -132,7 +132,6 @@ pub struct SessionParams {
     pub control_socket: PathBuf,
     pub call_history_path: Option<PathBuf>,
     pub notify: bool,
-    pub regint: Option<u32>,
     pub custom_headers: Vec<(String, String)>,
     pub theme: crate::config::Theme,
     pub hooks: Vec<crate::config::Hook>,
@@ -157,7 +156,8 @@ type SetupParts = (
 );
 
 /// Build the tokio runtime, spawn the control-socket task, and construct the
-/// [`App`] with registration + static headers already issued. The backend
+/// [`App`] with static headers already issued (the backend registered the UA
+/// when it created it). The backend
 /// I/O tasks are already running (spawned by `Backend::spawn_session`).
 /// Shared by the TUI and headless entry points.
 fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
@@ -225,8 +225,11 @@ fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
         app.command.error = Some(format!("config ignored — {first}{extra}"));
     }
 
+    // No register() here: the backend already registered the UA when it
+    // created it. A second REGISTER restarts the binding and un-registers the
+    // first one (Expires: 0, same Contact) — registrars that key bindings by
+    // Contact (e.g. Kamailio) then drop the registration altogether.
     let aor = app.account_aor.clone();
-    app.phone.register(&aor, p.regint.unwrap_or(3600));
 
     // Add only static headers at startup. Dynamic templates (e.g. `$uuid`)
     // are re-added per call by App::dial so each call gets a fresh value.
