@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/davidborzek/ringo/compare/ringo-mcp-v0.1.0...ringo-mcp-v0.2.0) - 2026-10-16
+
+### Features
+
+- support cargo binstall and align install docs ([#137](https://github.com/davidborzek/ringo/pull/137))
+
+### Tests
+
+- *(ringo-mcp)* log worker output in e2e tests ([#139](https://github.com/davidborzek/ringo/pull/139))
+
 ## [0.1.0](https://github.com/davidborzek/ringo/releases/tag/ringo-mcp-v0.1.0) - 2026-10-15
 
 ### Bug Fixes

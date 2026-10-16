@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.17.0...ringo-phone-v0.18.0) - 2026-10-16
+
+### Bug Fixes
+
+- *(ringo-phone)* register only once at startup ([#142](https://github.com/davidborzek/ringo/pull/142))
+
+### Features
+
+- support cargo binstall and align install docs ([#137](https://github.com/davidborzek/ringo/pull/137))
+
 ## [0.17.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.16.1...ringo-phone-v0.17.0) - 2026-10-15
 
 ### Refactor

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.14.4...ringo-flow-v0.15.0) - 2026-10-16
+
+### Features
+
+- support cargo binstall and align install docs ([#137](https://github.com/davidborzek/ringo/pull/137))
+
 ## [0.14.4](https://github.com/davidborzek/ringo/compare/ringo-flow-v0.14.3...ringo-flow-v0.14.4) - 2026-10-15
 
 ### Bug Fixes
