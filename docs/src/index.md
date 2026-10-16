@@ -6,6 +6,8 @@
 <p class="tagline">Make and test phone calls from your terminal.</p>
 </div>
 
+![ringo-phone: alice picks her profile, calls Bob, then Charlie while Bob is on hold, switches back and hangs up](assets/ringo-phone.gif)
+
 Three tools that share one engine:
 
 - [**ringo-phone**](ringo-phone/introduction.md) — a terminal softphone: manage SIP

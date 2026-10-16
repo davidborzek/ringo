@@ -12,6 +12,8 @@ running headless in the background.
 It's part of the [ringo](https://github.com/davidborzek/ringo) workspace; the
 crate is `ringo-phone`, the binary is `ringo`.
 
+![ringo-phone: alice picks her profile, calls Bob, then Charlie while Bob is on hold, switches back and hangs up](../assets/ringo-phone.gif)
+
 ## Features
 
 - **Profile picker** — fuzzy-search selector with inline create / edit / clone / delete.

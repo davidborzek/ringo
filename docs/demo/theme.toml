@@ -1,0 +1,7 @@
+[theme]
+accent = "#8aadf4"
+subtle = "#8087a2"
+success = "#a6da95"
+danger = "#ed8796"
+attention = "#f5a97f"
+transfer = "#c6a0f6"
