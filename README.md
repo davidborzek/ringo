@@ -1,16 +1,17 @@
 # ringo
 
-> A terminal SIP softphone and telephony test runner built on [baresip](https://github.com/baresip/baresip).
+> A terminal SIP softphone, a telephony test runner and an MCP server for LLM-driven calls, built on [baresip](https://github.com/baresip/baresip).
 
 [![CI](https://github.com/davidborzek/ringo/actions/workflows/ci.yml/badge.svg)](https://github.com/davidborzek/ringo/actions/workflows/ci.yml)
 [![ringo-phone on crates.io](https://img.shields.io/crates/v/ringo-phone?label=ringo-phone)](https://crates.io/crates/ringo-phone)
 [![ringo-flow on crates.io](https://img.shields.io/crates/v/ringo-flow?label=ringo-flow)](https://crates.io/crates/ringo-flow)
+[![ringo-mcp on crates.io](https://img.shields.io/crates/v/ringo-mcp?label=ringo-mcp)](https://crates.io/crates/ringo-mcp)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 
-**ringo** is a cargo workspace of telephony tools built on baresip — a SIP
-softphone you live in, and a scenario runner that drives baresip headless for
-automated call testing, both sharing one engine.
+**ringo** is a cargo workspace of SIP telephony tools sharing one engine: a
+softphone you live in, a scenario runner that drives SIP agents headless for
+automated call testing, and an MCP server that hands those agents to an LLM.
 
 📖 **Documentation: https://davidborzek.github.io/ringo/**
 
@@ -30,28 +31,38 @@ Support crates with no stable public API — pin an exact version if you depend 
 |-------|------------|
 | [`ringo-agent`](crates/ringo-agent) | The **per-agent process backend** — runs a SIP user agent as its own process over a framed stdio protocol (live audio in/out); backs `ringo-flow` and `ringo-mcp` |
 | [`ringo-core`](crates/ringo-core) | The **shared engine** — an FFI backend statically linking baresip/libre, plus the call-event model |
+| [`ringo-profile`](crates/ringo-profile) | The **profile file format** and custom-header templates — shared by `ringo-phone` and `ringo-mcp` |
 
-## Requirements
+## Install
 
-- **Rust 1.85+** to build
-- A **C toolchain + CMake** to build the vendored [baresip](https://github.com/baresip/baresip)/libre/OpenSSL, which are **statically linked** — so neither the softphone nor the test runner needs a separate `baresip` install, at build or run time
+The SIP stack (baresip, libre, OpenSSL) is built in — no separate `baresip`
+install needed.
 
-## Quick start
+| | ringo-phone | ringo-flow | ringo-mcp |
+|---|---|---|---|
+| Homebrew | `brew install davidborzek/tap/ringo` | `brew install davidborzek/tap/ringo-flow` | `brew install davidborzek/tap/ringo-mcp` |
+| AUR | `ringo-phone-bin` | `ringo-flow-bin` | `ringo-mcp-bin` |
+| Nix | `nix profile install github:davidborzek/ringo#ringo-phone` | `…#ringo-flow` | `…#ringo-mcp` |
+| cargo | `cargo binstall ringo-phone` | `cargo binstall ringo-flow` | `cargo binstall ringo-mcp` |
+| Docker | — | `ghcr.io/davidborzek/ringo-flow` | — |
 
-Install the softphone and open the profile picker:
+Pre-built binaries for Linux and macOS (x86\_64 + arm64) are on the
+[releases page](https://github.com/davidborzek/ringo/releases). The
+getting-started pages
+([phone](https://davidborzek.github.io/ringo/ringo-phone/getting-started.html),
+[flow](https://davidborzek.github.io/ringo/ringo-flow/getting-started.html),
+[mcp](https://davidborzek.github.io/ringo/ringo-mcp/getting-started.html)) have
+the details: the Nix binary cache, runtime libraries for the plain binaries, and
+`cargo install` from source.
 
-```sh
-cargo install ringo-phone   # installs the `ringo` binary
-ringo                       # Ctrl+N to create your first profile
-```
-
-See the [documentation](https://davidborzek.github.io/ringo/) for install
-options, configuration, remote control and writing scenario tests with
-[ringo-flow](https://davidborzek.github.io/ringo/ringo-flow/introduction.html).
+Then run `ringo` and press <kbd>Ctrl</kbd>+<kbd>N</kbd> to create your first
+profile.
 
 ## Development
 
-The repo is a cargo workspace; build and test all crates together:
+Building from source needs **Rust 1.85+** and a **C toolchain + CMake** for the
+vendored baresip/libre/OpenSSL, which are statically linked. The repo is a cargo
+workspace; build and test all crates together:
 
 ```sh
 cargo build --workspace
