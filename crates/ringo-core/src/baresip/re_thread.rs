@@ -156,10 +156,30 @@ pub fn redirect_logging() {
     });
 }
 
+/// Readiness channel of [`start_re_thread`], handed to the RE thread's first
+/// main-loop callback.
+type ReadyTx = std::sync::mpsc::Sender<Option<String>>;
+
+/// Runs on the RE thread from inside `re_main` (libre's async main callback):
+/// the loop is polling, so `re_thread_enter()` now actually locks it.
+unsafe extern "C" fn signal_loop_ready(_err: c_int, arg: *mut c_void) {
+    let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+        // SAFETY: `arg` is the Box leaked in `start_re_thread`; libre calls this
+        // exactly once.
+        let tx = unsafe { Box::from_raw(arg as *mut ReadyTx) };
+        let _ = tx.send(None);
+    }));
+}
+
 /// Start libre + `re_main()` on a dedicated RE thread (once, idempotent).
 ///
 /// `libre_init()` MUST be called on the same thread as `re_main()` — it
 /// sets `re_global->tid` to the current thread.
+///
+/// Returns only once `re_main` is polling: before that, `re_thread_enter()` is
+/// a silent no-op (no lock, no `thread_enter` flag), so a caller racing ahead
+/// would run libre calls unlocked and trip libre's thread check — e.g.
+/// `baresip_init`'s DNS socket setup failing with EPERM.
 pub fn start_re_thread() -> Result<(), String> {
     let handle_mutex = RE_HANDLE.get_or_init(|| Mutex::new(None));
     let mut guard = handle_mutex.lock().unwrap_or_else(|e| e.into_inner());
@@ -179,7 +199,15 @@ pub fn start_re_thread() -> Result<(), String> {
                 let _ = ready_tx.send(Some("re_thread_async_init() failed".into()));
                 return;
             }
-            let _ = ready_tx.send(None);
+            // Signal readiness from inside the loop (its first callback), not
+            // here — see the doc comment above.
+            let ready = Box::into_raw(Box::new(ready_tx.clone()));
+            if re_thread_async_main(None, Some(signal_loop_ready), ready as *mut c_void) != 0 {
+                drop(Box::from_raw(ready));
+                let _ = ready_tx.send(Some("re_thread_async_main() failed".into()));
+                return;
+            }
+            drop(ready_tx);
             re_main(None);
             // re_main returned (re_cancel from stop_re_thread). Tear down on
             // THIS thread — libre_init ran here, so libre_close must too, and it
@@ -195,8 +223,9 @@ pub fn start_re_thread() -> Result<(), String> {
         })
         .map_err(|e| format!("failed to spawn RE thread: {e}"))?;
 
-    // The RE thread sends exactly one readiness message after init. A recv
-    // error means it died before signalling — surface that instead of panicking.
+    // The RE thread sends exactly one readiness message, from inside re_main. A
+    // recv error means it died before signalling — surface that instead of
+    // panicking.
     match ready_rx.recv() {
         Ok(Some(e)) => return Err(e),
         Ok(None) => {}
