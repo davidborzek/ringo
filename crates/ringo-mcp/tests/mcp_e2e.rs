@@ -44,7 +44,10 @@ impl Server {
             // not redirect it. The test kills the server hard (no cleanup), so
             // the dir goes into the test's own temp dir.
             .env_remove("RINGO_AGENT_SIPTRACE")
-            .env("XDG_RUNTIME_DIR", config_path.parent().expect("config dir"));
+            .env("XDG_RUNTIME_DIR", config_path.parent().expect("config dir"))
+            // Worker logs (incl. baresip's own warnings) to the inherited
+            // stderr: a failed backend start then says which step failed.
+            .env("RINGO_AGENT_LOG", "-");
         if let Some(home) = home {
             cmd.env("HOME", home);
         }
