@@ -2,26 +2,50 @@
 
 ## Install
 
-The SIP stack is built in — nothing else to install.
+The SIP stack (baresip, libre, OpenSSL) is built in — no separate `baresip`
+install needed.
+
+**Homebrew (macOS / Linux):**
+
+```sh
+brew install davidborzek/tap/ringo-mcp
+```
+
+**Arch Linux (AUR)** — prebuilt, via any AUR helper:
+
+```sh
+yay -S ringo-mcp-bin   # or: paru -S ringo-mcp-bin
+```
+
+**Nix (flake):**
+
+```sh
+nix profile install github:davidborzek/ringo#ringo-mcp
+```
+
+Enable the binary cache first (`cachix use ringo`) so this is a download
+instead of a long build; see [ringo-phone's install notes](../ringo-phone/getting-started.md#install)
+for NixOS settings and pinning a released version
+(`github:davidborzek/ringo/ringo-mcp-v<version>#ringo-mcp`).
 
 **Pre-built binaries** for Linux and macOS (x86\_64 + arm64) are on the
 [releases page](https://github.com/davidborzek/ringo/releases) — download,
 extract and put `ringo-mcp` on your `$PATH`.
 
-**From crates.io:**
-
-```sh
-cargo install ringo-mcp
-```
-
 **With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall)** — the
-prebuilt release binary, no compile:
+same prebuilt binary, no compile:
 
 ```sh
 cargo binstall ringo-mcp
 ```
 
-**From GitHub (no clone needed):**
+**From crates.io** (compiles, needs a C toolchain and CMake):
+
+```sh
+cargo install ringo-mcp
+```
+
+**From GitHub** (no clone needed):
 
 ```sh
 cargo install --git https://github.com/davidborzek/ringo ringo-mcp
@@ -30,8 +54,21 @@ cargo install --git https://github.com/davidborzek/ringo ringo-mcp
 **From a workspace checkout** (no install):
 
 ```sh
-cargo run -p ringo-mcp -- serve
+cargo run -p ringo-mcp
 ```
+
+The pre-built binaries, `cargo binstall` and `cargo install` link the opus
+and spandsp libraries at runtime — install them first (`libopus0
+libspandsp2` on Debian/Ubuntu, `opus spandsp` with Homebrew or pacman).
+Homebrew, the AUR package and Nix pull them in for you.
+
+> Homebrew 6.0+ requires third-party taps to be trusted before use. If `brew
+> install` prompts you to trust the tap, accept it — or trust it up front:
+>
+> ```sh
+> brew tap davidborzek/tap
+> brew trust --formula davidborzek/tap/ringo-mcp
+> ```
 
 ## Configure your agents
 
