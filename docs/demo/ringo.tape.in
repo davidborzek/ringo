@@ -1,0 +1,63 @@
+# ringo-phone demo: alice calls bob, then charlie (bob is held), switches
+# between the two lines and hangs up both. bob and charlie answer headless
+# after 2 s. Placeholders (@…@) are filled in by record.sh.
+
+Output "@OUT@"
+
+Set Shell "bash"
+Set FontSize 16
+Set Width 1200
+Set Height 640
+Set Padding 16
+Set Theme "Catppuccin Macchiato"
+Set TypingSpeed 40ms
+Set WaitTimeout 15s
+
+Hide
+Type "export HOME=@HOME@ XDG_STATE_HOME=@HOME@/state XDG_RUNTIME_DIR=@RT@ PATH=@BIN@:$PATH PS1='$ '"
+Enter
+Type "clear"
+Enter
+Show
+
+# Open the picker, filter to alice, start her, wait for the registration.
+Type "ringo"
+Sleep 200ms
+Enter
+Wait+Screen /bob/
+Sleep 600ms
+Type "ali"
+Sleep 400ms
+Enter
+Wait+Screen /Registered/
+Sleep 500ms
+
+# First call: Bob (first contact).
+Type "f"
+Sleep 500ms
+Enter
+Sleep 300ms
+Enter
+Wait+Screen /RINGING/
+Wait+Screen /00:00:0[1-9]/
+Sleep 1s
+
+# Second call: Charlie (second contact). Dialing holds Bob.
+Type "f"
+Sleep 400ms
+Down
+Sleep 350ms
+Enter
+Sleep 300ms
+Enter
+Wait+Screen /RINGING/
+Wait+Screen /ON HOLD[^\n]*\n[^\n]*00:00:0[1-9]|00:00:0[1-9][^\n]*\n[^\n]*ON HOLD/
+Sleep 1s
+
+# Switch back to Bob (Charlie is held), then hang up both.
+Tab
+Sleep 1.2s
+Type "b"
+Sleep 700ms
+Type "b"
+Sleep 900ms

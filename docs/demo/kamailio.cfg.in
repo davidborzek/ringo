@@ -1,0 +1,79 @@
+#!KAMAILIO
+# Throwaway registrar + proxy. Loopback only, in-memory, no auth — never
+# expose this.
+debug=1
+log_stderror=yes
+fork=no
+children=2
+listen=udp:127.0.0.1:@REG_PORT@
+alias="demo.local"
+auto_aliases=no
+
+loadmodule "kex.so"
+loadmodule "corex.so"
+loadmodule "tm.so"
+loadmodule "sl.so"
+loadmodule "rr.so"
+loadmodule "pv.so"
+loadmodule "maxfwd.so"
+loadmodule "textops.so"
+loadmodule "siputils.so"
+loadmodule "xlog.so"
+loadmodule "sanity.so"
+loadmodule "usrloc.so"
+loadmodule "registrar.so"
+
+modparam("usrloc", "db_mode", 0)
+modparam("rr", "enable_full_lr", 1)
+
+loadmodule "ctl.so"
+modparam("ctl", "binrpc", "unix:@CTL@")
+
+request_route {
+    if (!mf_process_maxfwd_header("10")) {
+        sl_send_reply("483", "Too Many Hops");
+        exit;
+    }
+    if (!sanity_check("1511", "7")) {
+        exit;
+    }
+    if (has_totag()) {
+        if (loose_route()) {
+            t_relay();
+            exit;
+        }
+        if (is_method("ACK")) {
+            if (t_check_trans()) {
+                t_relay();
+            }
+            exit;
+        }
+        sl_send_reply("404", "Not here");
+        exit;
+    }
+    if (is_method("CANCEL")) {
+        if (t_check_trans()) {
+            t_relay();
+        }
+        exit;
+    }
+    if (is_method("REGISTER")) {
+        if (!save("location")) {
+            sl_reply_error();
+        }
+        exit;
+    }
+    # MWI / presence aren't part of the demo.
+    if (is_method("SUBSCRIBE|PUBLISH|OPTIONS")) {
+        sl_send_reply("200", "OK");
+        exit;
+    }
+    if (is_method("INVITE|MESSAGE|REFER")) {
+        record_route();
+    }
+    if (!lookup("location")) {
+        sl_send_reply("404", "User Not Found");
+        exit;
+    }
+    t_relay();
+}

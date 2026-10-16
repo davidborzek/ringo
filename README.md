@@ -1,19 +1,26 @@
-# ringo
+<h1 align="center">
+  <img src="docs/src/logo.svg" alt="" width="72"><br>
+  ringo
+</h1>
 
-> A terminal SIP softphone, a telephony test runner and an MCP server for LLM-driven calls, built on [baresip](https://github.com/baresip/baresip).
+<p align="center">A terminal SIP softphone, a telephony test runner and an MCP server for LLM-driven calls, built on <a href="https://github.com/baresip/baresip">baresip</a>.</p>
 
-[![CI](https://github.com/davidborzek/ringo/actions/workflows/ci.yml/badge.svg)](https://github.com/davidborzek/ringo/actions/workflows/ci.yml)
-[![ringo-phone on crates.io](https://img.shields.io/crates/v/ringo-phone?label=ringo-phone)](https://crates.io/crates/ringo-phone)
-[![ringo-flow on crates.io](https://img.shields.io/crates/v/ringo-flow?label=ringo-flow)](https://crates.io/crates/ringo-flow)
-[![ringo-mcp on crates.io](https://img.shields.io/crates/v/ringo-mcp?label=ringo-mcp)](https://crates.io/crates/ringo-mcp)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
+<p align="center">
+  <a href="https://github.com/davidborzek/ringo/actions/workflows/ci.yml"><img src="https://github.com/davidborzek/ringo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/ringo-phone"><img src="https://img.shields.io/crates/v/ringo-phone?label=ringo-phone" alt="ringo-phone on crates.io"></a>
+  <a href="https://crates.io/crates/ringo-flow"><img src="https://img.shields.io/crates/v/ringo-flow?label=ringo-flow" alt="ringo-flow on crates.io"></a>
+  <a href="https://crates.io/crates/ringo-mcp"><img src="https://img.shields.io/crates/v/ringo-mcp?label=ringo-mcp" alt="ringo-mcp on crates.io"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange.svg" alt="Rust 1.85+"></a>
+</p>
 
 **ringo** is a cargo workspace of SIP telephony tools sharing one engine: a
 softphone you live in, a scenario runner that drives SIP agents headless for
 automated call testing, and an MCP server that hands those agents to an LLM.
 
 📖 **Documentation: https://davidborzek.github.io/ringo/**
+
+![ringo-phone: alice picks her profile, calls Bob, then Charlie while Bob is on hold, switches back and hangs up](docs/src/assets/ringo-phone.gif)
 
 ## Tools
 
