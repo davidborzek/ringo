@@ -79,7 +79,6 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
         control_socket,
         call_history_path: Some(dir.join("call_history")),
         notify: notify && prof.notify,
-        regint: prof.regint,
         custom_headers: prof.custom_headers.clone(),
         theme,
         hooks,
