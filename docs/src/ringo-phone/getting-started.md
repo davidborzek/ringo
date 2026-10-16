@@ -26,6 +26,13 @@ and put `ringo` on your `$PATH`.
 cargo install ringo-phone
 ```
 
+**With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall)** — the
+prebuilt release binary, no compile:
+
+```sh
+cargo binstall ringo-phone
+```
+
 **From GitHub (no clone needed):**
 
 ```sh

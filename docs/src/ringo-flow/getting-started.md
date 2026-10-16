@@ -26,6 +26,13 @@ and put `ringo-flow` on your `$PATH`.
 cargo install ringo-flow
 ```
 
+**With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall)** — the
+prebuilt release binary, no compile:
+
+```sh
+cargo binstall ringo-flow
+```
+
 **From GitHub (no clone needed):**
 
 ```sh

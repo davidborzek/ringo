@@ -16,6 +16,12 @@ path = "src/lib.rs"
 name = "ringo-mcp"
 path = "src/main.rs"
 
+# `cargo binstall ringo-mcp` downloads the release tarball instead of building.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/ringo-mcp-v{ version }/ringo-mcp-{ version }-{ target }.tar.gz"
+bin-dir = "ringo-mcp-{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
 [dependencies]
 ringo-core.workspace = true
 ringo-agent.workspace = true

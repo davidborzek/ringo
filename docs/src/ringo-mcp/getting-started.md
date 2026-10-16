@@ -14,6 +14,13 @@ extract and put `ringo-mcp` on your `$PATH`.
 cargo install ringo-mcp
 ```
 
+**With [cargo-binstall](https://github.com/cargo-bins/cargo-binstall)** — the
+prebuilt release binary, no compile:
+
+```sh
+cargo binstall ringo-mcp
+```
+
 **From GitHub (no clone needed):**
 
 ```sh
