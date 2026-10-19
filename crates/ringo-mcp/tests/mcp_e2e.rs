@@ -129,6 +129,27 @@ impl Server {
     }
 }
 
+/// Dial an unreachable target and return the call's id once it is up.
+/// `dial` alone is fire-and-forget: the call shows up in `agent_status` only
+/// after the worker reports it, so asking right away races a slow runner.
+/// With `wait_established` the reply comes after that report — still
+/// ringing, as the blackhole never answers.
+fn dial_ringing(server: &mut Server, agent: &str, target: &str) -> String {
+    let text = server.tool(
+        "dial",
+        serde_json::json!({
+            "agent": agent, "target": target,
+            "wait_established": true, "timeout_ms": 1000
+        }),
+    );
+    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+    assert_eq!(v["state"], "ringing", "{v}");
+    v["call_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("dial reported no call_id: {v}"))
+        .to_string()
+}
+
 fn write_config(dir: &std::path::Path) -> std::path::PathBuf {
     let p = dir.join("config.toml");
     std::fs::write(
@@ -172,10 +193,7 @@ fn agent_stop_respawn_and_wait_event_filter() {
     // out first, then the hangup triggers the matching call_closed. (Sending
     // the wait only after the dial would race the subscribe — events are not
     // replayed.)
-    let _ = server.tool(
-        "dial",
-        serde_json::json!({"agent": "alice", "target": "1002"}),
-    );
+    dial_ringing(&mut server, "alice", "1002");
     let st = server.tool("agent_status", serde_json::json!({"agent": "alice"}));
     let v: Value = serde_json::from_str(st.as_str().expect("text")).unwrap();
     assert_eq!(v["call_count"], 1, "the respawned worker took the dial");
@@ -289,14 +307,26 @@ fn event_log_cursor_closes_the_roundtrip_race() {
         "dial",
         serde_json::json!({"agent": "alice", "target": "1002"}),
     );
-    std::thread::sleep(Duration::from_millis(1500));
+
+    // The log gets the event once the worker reports the call; poll for it
+    // rather than guessing how long a runner takes.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let v = loop {
+        let text = server.tool(
+            "agent_events",
+            serde_json::json!({"agent": "alice", "after_id": cursor}),
+        );
+        let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
+        let seen = v["events"]
+            .as_array()
+            .is_some_and(|e| e.iter().any(|e| e["event"] == "call_outgoing"));
+        if seen || Instant::now() > deadline {
+            break v;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
 
     // The log has the event, tagged with ids.
-    let text = server.tool(
-        "agent_events",
-        serde_json::json!({"agent": "alice", "after_id": cursor}),
-    );
-    let v: Value = serde_json::from_str(text.as_str().expect("text")).unwrap();
     let events = v["events"].as_array().expect("events");
     assert!(
         events.iter().any(|e| e["event"] == "call_outgoing"),
@@ -342,16 +372,7 @@ fn sip_trace_returns_sent_messages_filterable_by_call_id() {
     let config = write_config(tmp.path());
     let mut server = Server::start(&config);
 
-    let _ = server.tool(
-        "dial",
-        serde_json::json!({"agent": "alice", "target": "1002"}),
-    );
-    let st = server.tool("agent_status", serde_json::json!({"agent": "alice"}));
-    let v: Value = serde_json::from_str(st.as_str().expect("text")).unwrap();
-    let call_id = v["calls"][0]["id"]
-        .as_str()
-        .expect("dialed call has a call_id")
-        .to_string();
+    let call_id = dial_ringing(&mut server, "alice", "1002");
 
     // The worker writes the INVITE as soon as it is sent; poll briefly.
     let deadline = Instant::now() + Duration::from_secs(10);
