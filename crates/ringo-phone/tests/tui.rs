@@ -438,6 +438,45 @@ fn the_reject_command_needs_a_ringing_call() {
 }
 
 #[test]
+fn the_reject_command_takes_an_optional_code() {
+    let (mut app, mut rx) = test_app();
+    ring(&mut app, "1");
+    let _ = commands(&mut rx);
+
+    assert!(app.dispatch("reject", "abc").is_err());
+    assert!(app.dispatch("reject", "200").is_err());
+    assert!(app.dispatch("reject", "603").is_ok());
+    let sent: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter(|(cmd, _)| cmd == "reject")
+        .collect();
+    assert_eq!(sent, vec![("reject".into(), "603 Decline".into())]);
+}
+
+#[test]
+fn tab_completes_the_reject_code() {
+    let (mut app, _rx) = test_app();
+    app.command.input = "reject 6".into();
+    app.cycle_completion();
+    assert_eq!(app.command.input, "reject 603");
+    app.cycle_completion();
+    assert_eq!(app.command.input, "reject 600");
+    app.cycle_completion();
+    assert_eq!(app.command.input, "reject 603");
+
+    app.reset_tab();
+    app.command.input = "reject 48".into();
+    app.cycle_completion();
+    app.cycle_completion();
+    assert_eq!(app.command.input, "reject 480");
+
+    // Commands without completable arguments are left alone.
+    app.reset_tab();
+    app.command.input = "dial 12".into();
+    app.cycle_completion();
+    assert_eq!(app.command.input, "dial 12");
+}
+
+#[test]
 fn silencing_does_nothing_when_nothing_rings() {
     let (mut app, mut rx) = test_app();
     app.handle_key(key('s'));

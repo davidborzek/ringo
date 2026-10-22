@@ -382,15 +382,19 @@ impl super::app::App {
     }
 
     /// Reject the ringing incoming call at `index`, already made current in
-    /// baresip.
+    /// baresip, with the profile's `reject_code`.
     fn reject_current(&mut self, index: usize) {
-        let code = self.profile.reject_code;
+        self.reject_current_with(index, self.profile.reject_code);
+    }
+
+    fn reject_current_with(&mut self, index: usize, code: u16) {
         self.phone.reject(code, reject_reason(code));
         self.calls[index].rejected = true;
     }
 
-    /// Reject the ringing incoming call, if any.
-    pub(super) fn reject_incoming(&mut self) -> bool {
+    /// Reject the ringing incoming call, if any, with `code` or else the
+    /// profile's `reject_code`.
+    pub(super) fn reject_incoming(&mut self, code: Option<u16>) -> bool {
         let Some(index) = self
             .calls
             .iter()
@@ -400,7 +404,8 @@ impl super::app::App {
         };
         let id = self.calls[index].id.clone();
         self.phone.select_call(&id);
-        self.reject_current(index);
+        let code = code.unwrap_or(self.profile.reject_code);
+        self.reject_current_with(index, code);
         true
     }
 
@@ -446,16 +451,22 @@ impl super::app::App {
     }
 }
 
-/// The reason phrase RFC 3261 gives for the common decline codes; baresip
-/// would otherwise send "Busy Here" with whatever code is configured.
+/// The common decline codes with their RFC 3261 reason phrases, in the order
+/// `:reject <Tab>` offers them.
+pub(super) const REJECT_CODES: &[(u16, &str)] = &[
+    (486, "Busy Here"),
+    (603, "Decline"),
+    (480, "Temporarily Unavailable"),
+    (600, "Busy Everywhere"),
+];
+
+/// The reason phrase for `code`; baresip would otherwise send "Busy Here"
+/// with whatever code is configured.
 fn reject_reason(code: u16) -> &'static str {
-    match code {
-        480 => "Temporarily Unavailable",
-        486 => "Busy Here",
-        600 => "Busy Everywhere",
-        603 => "Decline",
-        _ => "Rejected",
-    }
+    REJECT_CODES
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map_or("Rejected", |(_, reason)| reason)
 }
 
 pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {

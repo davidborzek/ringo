@@ -339,7 +339,7 @@ fn render_help(f: &mut Frame, app: &App) {
         Line::from(""),
         Line::from(Span::styled("  Commands (:)", subtle)),
         Line::from(Span::styled(
-            "  dial <n>  hangup  accept  reject  hold  resume  mute  deafen  silence",
+            "  dial <n>  hangup  accept  reject [code]  hold  resume  mute  deafen  silence",
             Style::default(),
         )),
         Line::from(Span::styled(
