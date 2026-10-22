@@ -48,6 +48,10 @@ pub struct Profile {
     /// to `false` to keep multiple calls active in parallel.
     #[serde(default = "default_true")]
     pub auto_hold: bool,
+    /// SIP status code sent when declining a ringing incoming call, e.g. `486`
+    /// (Busy Here, default) or `603` (Decline).
+    #[serde(default = "default_reject_code")]
+    pub reject_code: u16,
     /// Register as a baresip `catchall` UA so incoming INVITEs to identities
     /// other than the registration username are accepted instead of rejected
     /// with `404 (UA not found)`. On by default; ringo-phone runs a single UA.
@@ -72,6 +76,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_reject_code() -> u16 {
+    486
+}
+
 impl Default for Profile {
     fn default() -> Self {
         Self {
@@ -94,6 +102,7 @@ impl Default for Profile {
             notify: false,
             mwi: false,
             auto_hold: true,
+            reject_code: default_reject_code(),
             catchall: true,
             deflect: false,
             deflect_target: None,
@@ -293,6 +302,12 @@ mod tests {
     fn auto_hold_defaults_to_true_when_missing() {
         // Profiles written before the setting existed must default to on.
         assert!(parse("").auto_hold);
+    }
+
+    #[test]
+    fn reject_code_defaults_to_busy_here() {
+        assert_eq!(parse("").reject_code, 486);
+        assert_eq!(parse("reject_code = 603").reject_code, 603);
     }
 
     #[test]

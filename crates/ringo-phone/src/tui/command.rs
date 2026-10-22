@@ -18,6 +18,7 @@ pub const COMMANDS: &[&str] = &[
     "mute",
     "quit",
     "register",
+    "reject",
     "resume",
     "silence",
     "switch",
@@ -129,6 +130,20 @@ impl App {
                     Ok("Hung up".into())
                 } else {
                     Err("No active call".into())
+                }
+            }
+            "reject" => {
+                let code = match arg.trim() {
+                    "" => None,
+                    code => match code.parse::<u16>() {
+                        Ok(c) if (400..=699).contains(&c) => Some(c),
+                        _ => return Err("Usage: reject [4xx|5xx|6xx]".into()),
+                    },
+                };
+                if self.reject_incoming(code) {
+                    Ok("Rejected".into())
+                } else {
+                    Err("No incoming call".into())
                 }
             }
             "a" | "accept" => {
@@ -303,11 +318,6 @@ impl App {
     }
 
     pub fn cycle_completion(&mut self) {
-        // Already has an argument (space in input) → nothing to complete
-        if self.command.input.contains(' ') {
-            return;
-        }
-
         // First Tab press: lock the prefix; subsequent presses: cycle
         let prefix = match &self.command.tab_prefix {
             Some(p) => p.clone(),
@@ -319,27 +329,33 @@ impl App {
             }
         };
 
-        let matches: Vec<&str> = if prefix.is_empty() {
-            COMMANDS.to_vec()
-        } else {
-            COMMANDS
-                .iter()
-                .filter(|c| c.starts_with(&prefix))
-                .copied()
-                .collect()
+        // A command with an argument: complete the argument, keep the command.
+        let (head, word, candidates): (String, &str, Vec<String>) = match prefix.split_once(' ') {
+            Some((cmd, arg)) => match argument_candidates(cmd) {
+                Some(c) => (format!("{cmd} "), arg, c),
+                None => return,
+            },
+            None => (
+                String::new(),
+                prefix.as_str(),
+                COMMANDS.iter().map(|c| c.to_string()).collect(),
+            ),
         };
+        let matches: Vec<&String> = candidates.iter().filter(|c| c.starts_with(word)).collect();
 
         if matches.is_empty() {
             return;
         }
 
         if matches.len() == 1 {
-            self.command.input = format!("{} ", matches[0]);
+            let sep = if head.is_empty() { " " } else { "" };
+            self.command.input = format!("{head}{}{sep}", matches[0]);
             self.command.tab_prefix = None;
             return;
         }
 
-        self.command.input = matches[self.command.tab_index % matches.len()].to_string();
+        let pick = matches[self.command.tab_index % matches.len()];
+        self.command.input = format!("{head}{pick}");
         self.command.tab_index += 1;
     }
 
@@ -379,6 +395,20 @@ impl App {
             }
             _ => {}
         }
+    }
+}
+
+/// Tab-completion candidates for the argument of `cmd`, or `None` if its
+/// argument isn't completable.
+fn argument_candidates(cmd: &str) -> Option<Vec<String>> {
+    match cmd {
+        "reject" => Some(
+            super::call::REJECT_CODES
+                .iter()
+                .map(|(code, _)| code.to_string())
+                .collect(),
+        ),
+        _ => None,
     }
 }
 

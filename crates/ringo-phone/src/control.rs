@@ -23,6 +23,7 @@ pub const ALLOWED_COMMANDS: &[&str] = &[
     "dial",
     "d",
     "hangup",
+    "reject",
     "accept",
     "a",
     "hold",

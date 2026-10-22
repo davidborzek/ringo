@@ -323,7 +323,7 @@ fn render_help(f: &mut Frame, app: &App) {
         row("d", "dial"),
         row("a", "accept incoming"),
         row("s", "silence the ringtone"),
-        row("b / Del", "hang up"),
+        row("b / Del", "hang up (reject if ringing)"),
         row("h", "hold / resume (toggle)"),
         row("m", "mute the microphone"),
         row("M", "deafen (microphone and speaker)"),
@@ -339,7 +339,7 @@ fn render_help(f: &mut Frame, app: &App) {
         Line::from(""),
         Line::from(Span::styled("  Commands (:)", subtle)),
         Line::from(Span::styled(
-            "  dial <n>  hangup  accept  hold  resume  mute  deafen  silence",
+            "  dial <n>  hangup  accept  reject [code]  hold  resume  mute  deafen  silence",
             Style::default(),
         )),
         Line::from(Span::styled(
@@ -555,7 +555,11 @@ impl App {
                             h.push(("s", "silence"));
                         }
                     }
-                    h.push(("b", "hangup"));
+                    h.push(if app.selected_call_is_ringing_incoming() {
+                        ("b", "reject")
+                    } else {
+                        ("b", "hangup")
+                    });
                     // One key, and the label says which way it will go —
                     // clearer than "h/r hold/resume", and shorter.
                     if app.selected_call_on_hold() {

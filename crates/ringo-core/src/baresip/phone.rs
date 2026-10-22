@@ -88,6 +88,19 @@ impl Phone for BaresipPhone {
         });
     }
 
+    fn reject(&self, scode: u16, reason: &str) {
+        let ua = self.ua;
+        let Ok(reason) = CString::new(reason) else {
+            return;
+        };
+        on_re_thread(move || unsafe {
+            let call = ua_call(ua as *mut Ua);
+            if !call.is_null() {
+                ua_hangup(ua as *mut Ua, call, scode, reason.as_ptr());
+            }
+        });
+    }
+
     fn hangup_all(&self) {
         let ua = self.ua;
         on_re_thread(move || unsafe {

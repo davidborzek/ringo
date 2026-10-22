@@ -264,6 +264,7 @@ impl FormState {
             mwi: get_toggle(self.field(Mwi)),
             auto_hold: get_toggle(self.field(AutoHold)),
             catchall: prev_profile.catchall,
+            reject_code: prev_profile.reject_code,
             deflect: get_toggle(self.field(Deflect)),
             deflect_target: opt(get_text(self.field(DeflectTarget))),
             regint: {
