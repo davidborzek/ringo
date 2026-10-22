@@ -46,6 +46,7 @@ impl super::app::App {
             state: CallState::Ringing,
             started_at: None,
             header_views,
+            rejected: false,
         });
     }
 
@@ -98,6 +99,7 @@ impl super::app::App {
             state: CallState::Ringing,
             started_at: None,
             header_views,
+            rejected: false,
         });
         // Make the new outgoing call the active/selected one, keeping
         // selected_call in sync with baresip's current (tail) call — hold(),
@@ -145,7 +147,10 @@ impl super::app::App {
         let completed_transfer = reason.to_lowercase().contains("transfer");
         let mut closed: Option<super::app::LastCall> = None;
         if let Some(call) = self.calls.iter().find(|c| c.id == call_id) {
-            if call.direction == CallDirection::Incoming && call.started_at.is_none() {
+            if call.direction == CallDirection::Incoming
+                && call.started_at.is_none()
+                && !call.rejected
+            {
                 self.notify("Missed call", &call.peer.clone());
             }
             let direction = match call.direction {
@@ -359,14 +364,52 @@ impl super::app::App {
     }
 
     /// Hang up the selected call (not necessarily baresip's current call) by
-    /// making it current first, then hanging up. Falls back to the current call
-    /// if the selection is somehow out of range.
+    /// making it current first, then hanging up. A ringing incoming call is
+    /// rejected with the profile's `reject_code` instead. Falls back to the
+    /// current call if the selection is somehow out of range.
     pub(super) fn hangup_selected(&mut self) {
-        if let Some(c) = self.calls.get(self.selected_call) {
-            let id = c.id.clone();
-            self.phone.select_call(&id);
+        let Some(c) = self.calls.get(self.selected_call) else {
+            self.phone.hangup();
+            return;
+        };
+        let id = c.id.clone();
+        self.phone.select_call(&id);
+        if c.direction == CallDirection::Incoming && c.state == CallState::Ringing {
+            self.reject_current(self.selected_call);
+        } else {
+            self.phone.hangup();
         }
-        self.phone.hangup();
+    }
+
+    /// Reject the ringing incoming call at `index`, already made current in
+    /// baresip.
+    fn reject_current(&mut self, index: usize) {
+        let code = self.profile.reject_code;
+        self.phone.reject(code, reject_reason(code));
+        self.calls[index].rejected = true;
+    }
+
+    /// Reject the ringing incoming call, if any.
+    pub(super) fn reject_incoming(&mut self) -> bool {
+        let Some(index) = self
+            .calls
+            .iter()
+            .position(|c| c.direction == CallDirection::Incoming && c.state == CallState::Ringing)
+        else {
+            return false;
+        };
+        let id = self.calls[index].id.clone();
+        self.phone.select_call(&id);
+        self.reject_current(index);
+        true
+    }
+
+    /// Whether the selected call is an incoming one still ringing, i.e. what
+    /// `b` would reject rather than hang up.
+    pub(super) fn selected_call_is_ringing_incoming(&self) -> bool {
+        self.calls.get(self.selected_call).is_some_and(|c| {
+            c.direction == CallDirection::Incoming && c.state == CallState::Ringing
+        })
     }
 
     /// Answer the ringing incoming call. When another call is active it is held
@@ -400,6 +443,18 @@ impl super::app::App {
         // stale: re-polled for the newly-active call next tick
         self.media = None;
         self.codec = None;
+    }
+}
+
+/// The reason phrase RFC 3261 gives for the common decline codes; baresip
+/// would otherwise send "Busy Here" with whatever code is configured.
+fn reject_reason(code: u16) -> &'static str {
+    match code {
+        480 => "Temporarily Unavailable",
+        486 => "Busy Here",
+        600 => "Busy Everywhere",
+        603 => "Decline",
+        _ => "Rejected",
     }
 }
 

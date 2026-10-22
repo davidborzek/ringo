@@ -18,6 +18,7 @@ pub const COMMANDS: &[&str] = &[
     "mute",
     "quit",
     "register",
+    "reject",
     "resume",
     "silence",
     "switch",
@@ -129,6 +130,13 @@ impl App {
                     Ok("Hung up".into())
                 } else {
                     Err("No active call".into())
+                }
+            }
+            "reject" => {
+                if self.reject_incoming() {
+                    Ok("Rejected".into())
+                } else {
+                    Err("No incoming call".into())
                 }
             }
             "a" | "accept" => {

@@ -40,7 +40,7 @@ so the warning would otherwise reach nobody.
 | `d` | Enter Dial mode |
 | `a` | Accept incoming call |
 | `s` | Silence the ringtone (the call keeps ringing) |
-| `b` / `Del` | Hang up |
+| `b` / `Del` | Hang up, or reject a ringing incoming call (`reject_code`, default 486) |
 | `h` | Hold / resume the selected call (toggle) |
 | `m` | Toggle microphone mute |
 | `M` | Toggle deafen (microphone and speaker) |

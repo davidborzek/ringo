@@ -43,6 +43,7 @@ impl super::app::App {
             }
             None => {
                 let label = match call.direction {
+                    CallDirection::Incoming if call.rejected => "rejected",
                     CallDirection::Incoming => "missed",
                     CallDirection::Outgoing => "no answer",
                 };

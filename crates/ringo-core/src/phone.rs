@@ -11,6 +11,13 @@ pub trait Phone: Send {
     fn dial(&self, number: &str);
     fn hangup(&self);
     fn hangup_all(&self);
+    /// Decline the current ringing incoming call with `scode`/`reason` (e.g.
+    /// `603 Decline`). Default: [`Phone::hangup`], which baresip answers with
+    /// `486 Busy Here`.
+    fn reject(&self, scode: u16, reason: &str) {
+        let _ = (scode, reason);
+        self.hangup();
+    }
     fn accept(&self);
     fn hold(&self);
     fn resume(&self);
@@ -137,6 +144,9 @@ impl Phone for MockPhone {
     }
     fn hangup_all(&self) {
         self.send("hangupall", "");
+    }
+    fn reject(&self, scode: u16, reason: &str) {
+        self.send("reject", &format!("{scode} {reason}"));
     }
     fn accept(&self) {
         self.send("accept", "");

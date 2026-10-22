@@ -15,6 +15,7 @@ stun_server  = "stun:stun.example.com" # optional
 media_enc    = "dtls_srtp"             # optional
 notify       = true                    # desktop notifications (default: true)
 mwi          = true                    # message-waiting indicator (default: true)
+reject_code  = 603                     # status for declining a ringing call (default: 486 Busy Here)
 ```
 
 ## Password from a file or command

@@ -158,7 +158,8 @@ value; the rest comes from the profile. Two special cases:
 The default agent name for a profile is its slug: lowercase, ASCII
 alphanumerics kept, every other run of characters collapsed to one `-`
 (`"[test] Alice"` → `test-alice`). Phone-only profile settings
-(`notify`, `auto_hold`, `deflect`, `header_display`, `notes`) are ignored.
+(`notify`, `auto_hold`, `reject_code`, `deflect`, `header_display`, `notes`)
+are ignored.
 
 ### Safety
 

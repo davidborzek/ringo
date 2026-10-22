@@ -42,6 +42,8 @@ pub struct Call {
     /// Rendered inbound-header views (label, value) from the profile's
     /// `header_display` templates; empty unless configured / for outgoing calls.
     pub header_views: Vec<(String, String)>,
+    /// Declined locally while ringing — logged as "rejected", not "missed".
+    pub rejected: bool,
 }
 
 /// A call that was deflected (302) — shown transiently in the UI.
@@ -667,6 +669,7 @@ mod tests {
             state,
             started_at: Some(Instant::now()),
             header_views: Vec::new(),
+            rejected: false,
         }
     }
 

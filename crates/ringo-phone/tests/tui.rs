@@ -401,6 +401,43 @@ fn silencing_lasts_only_until_the_next_call() {
 }
 
 #[test]
+fn hangup_key_rejects_a_ringing_call_with_the_profile_code() {
+    let (mut app, mut rx) = test_app();
+    app.profile.reject_code = 603;
+    ring(&mut app, "1");
+    let _ = commands(&mut rx);
+
+    app.handle_key(key('b'));
+    let sent: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter(|(cmd, _)| cmd == "reject")
+        .collect();
+    assert_eq!(sent, vec![("reject".into(), "603 Decline".into())]);
+    assert!(app.calls[0].rejected);
+}
+
+#[test]
+fn hangup_key_still_hangs_up_an_established_call() {
+    let (mut app, mut rx) = test_app();
+    established(&mut app, "1");
+    let _ = commands(&mut rx);
+
+    app.handle_key(key('b'));
+    let cmds = commands(&mut rx);
+    assert!(cmds.contains(&"hangup".to_string()));
+    assert!(!cmds.contains(&"reject".to_string()));
+}
+
+#[test]
+fn the_reject_command_needs_a_ringing_call() {
+    let (mut app, mut rx) = test_app();
+    assert!(app.dispatch("reject", "").is_err());
+    ring(&mut app, "1");
+    let _ = commands(&mut rx);
+    assert!(app.dispatch("reject", "").is_ok());
+    assert!(commands(&mut rx).contains(&"reject".to_string()));
+}
+
+#[test]
 fn silencing_does_nothing_when_nothing_rings() {
     let (mut app, mut rx) = test_app();
     app.handle_key(key('s'));
