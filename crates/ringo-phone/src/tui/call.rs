@@ -25,11 +25,8 @@ impl super::app::App {
         };
         self.notify("Incoming call", &notify_text);
 
-        crate::hooks::run(
-            &self.hooks,
+        self.run_hook(
             crate::config::HookEvent::CallIncoming,
-            &self.profile_name,
-            &self.profile,
             serde_json::json!({
                 "call_id": call_id,
                 "number": number,
@@ -77,11 +74,8 @@ impl super::app::App {
         self.last_call_reason = None;
         self.deflected = None;
 
-        crate::hooks::run(
-            &self.hooks,
+        self.run_hook(
             crate::config::HookEvent::CallOutgoing,
-            &self.profile_name,
-            &self.profile,
             serde_json::json!({
                 "call_id": call_id,
                 "number": number,
@@ -114,13 +108,23 @@ impl super::app::App {
     }
 
     pub(super) fn handle_call_established(&mut self, call_id: String) {
-        if let Some(c) = self.calls.iter_mut().find(|c| c.id == call_id) {
-            c.state = CallState::Established;
-            if c.started_at.is_none() {
-                c.started_at = Some(std::time::Instant::now());
-                self.dial.dtmf.clear();
-            }
+        let Some(c) = self.calls.iter_mut().find(|c| c.id == call_id) else {
+            return;
+        };
+        c.state = CallState::Established;
+        // Only the first answer: a later ESTABLISHED (e.g. after a re-INVITE)
+        // is not a new conversation.
+        if c.started_at.is_some() {
+            return;
         }
+        c.started_at = Some(std::time::Instant::now());
+        self.dial.dtmf.clear();
+        let data = serde_json::json!({
+            "call_id": call_id,
+            "number": c.peer,
+            "direction": c.direction.as_str(),
+        });
+        self.run_hook(crate::config::HookEvent::CallEstablished, data);
     }
 
     /// The remote party put the call on hold. Mirrors the local hold state
@@ -160,10 +164,7 @@ impl super::app::App {
             {
                 self.notify("Missed call", &call.peer.clone());
             }
-            let direction = match call.direction {
-                CallDirection::Outgoing => "outgoing",
-                CallDirection::Incoming => "incoming",
-            };
+            let direction = call.direction.as_str();
             let duration_secs = call.started_at.map(|t| t.elapsed().as_secs()).unwrap_or(0);
             closed = Some(super::app::LastCall {
                 peer: call.peer.clone(),
@@ -173,11 +174,8 @@ impl super::app::App {
                 duration_secs,
                 answered: call.started_at.is_some(),
             });
-            crate::hooks::run(
-                &self.hooks,
+            self.run_hook(
                 crate::config::HookEvent::CallEnded,
-                &self.profile_name,
-                &self.profile,
                 serde_json::json!({
                     "call_id": call_id,
                     "number": call.peer,
@@ -187,6 +185,24 @@ impl super::app::App {
                     "error": error,
                 }),
             );
+            // An incoming call that never connected: say how, after call_ended.
+            if call.direction == CallDirection::Incoming && call.started_at.is_none() {
+                let base = serde_json::json!({
+                    "call_id": call_id,
+                    "number": call.peer,
+                    "display_name": call.peer_display_name.as_deref().unwrap_or(""),
+                });
+                let (event, data) = match &call.declined {
+                    None => (crate::config::HookEvent::CallMissed, base),
+                    Some(Declined::Rejected) => (crate::config::HookEvent::CallRejected, base),
+                    Some(Declined::Deflected(target)) => {
+                        let mut data = base;
+                        data["target"] = serde_json::json!(target);
+                        (crate::config::HookEvent::CallDeflected, data)
+                    }
+                };
+                self.run_hook(event, data);
+            }
             self.append_call_history(call);
         }
         if let Some(lc) = closed {
@@ -255,6 +271,17 @@ impl super::app::App {
             .map(|n| format!("{n} ({from})"))
             .unwrap_or_else(|| from.clone());
         self.notify("Call deflected", &format!("{peer} → {target}"));
+        // Auto-deflected by the profile: no call object, so call_ended and the
+        // on-demand call_deflected never fire for it. Same event, no call_id.
+        self.run_hook(
+            crate::config::HookEvent::CallDeflected,
+            serde_json::json!({
+                "call_id": "",
+                "number": from,
+                "display_name": display_name.as_deref().unwrap_or(""),
+                "target": target,
+            }),
+        );
         self.deflected = Some(super::app::DeflectedInfo {
             from,
             display_name,
@@ -530,10 +557,7 @@ pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
                 CallDirection::Outgoing => "↗",
                 CallDirection::Incoming => "↙",
             };
-            let dir = match call.direction {
-                CallDirection::Outgoing => "outgoing",
-                CallDirection::Incoming => "incoming",
-            };
+            let dir = call.direction.as_str();
 
             let selected = i == app.selected_call;
             let on_hold = call.state == CallState::OnHold;

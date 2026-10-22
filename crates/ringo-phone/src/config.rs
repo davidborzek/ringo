@@ -48,16 +48,41 @@ pub enum HookEvent {
     ProfileLoaded,
     CallIncoming,
     CallOutgoing,
+    CallEstablished,
     CallEnded,
+    CallMissed,
+    CallRejected,
+    CallDeflected,
+    RegistrationChanged,
+    Voicemail,
 }
 
 impl HookEvent {
+    pub const ALL: &[Self] = &[
+        Self::ProfileLoaded,
+        Self::CallIncoming,
+        Self::CallOutgoing,
+        Self::CallEstablished,
+        Self::CallEnded,
+        Self::CallMissed,
+        Self::CallRejected,
+        Self::CallDeflected,
+        Self::RegistrationChanged,
+        Self::Voicemail,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ProfileLoaded => "profile_loaded",
             Self::CallIncoming => "call_incoming",
             Self::CallOutgoing => "call_outgoing",
+            Self::CallEstablished => "call_established",
             Self::CallEnded => "call_ended",
+            Self::CallMissed => "call_missed",
+            Self::CallRejected => "call_rejected",
+            Self::CallDeflected => "call_deflected",
+            Self::RegistrationChanged => "registration_changed",
+            Self::Voicemail => "voicemail",
         }
     }
 }
@@ -398,6 +423,15 @@ fn load_from(path: &Path) -> RingoConfig {
         },
         None => RingoConfig::default(),
     };
+    // A misspelt event name would otherwise just never fire.
+    for hook in &cfg.hooks {
+        if !HookEvent::ALL.iter().any(|e| e.as_str() == hook.event) {
+            note(
+                &mut problems,
+                format!("hook for unknown event `{}` never runs", hook.event),
+            );
+        }
+    }
     cfg.problems = problems;
     cfg
 }
@@ -845,6 +879,21 @@ mod tests {
         ]);
         assert_eq!(cfg.baresip.audio_driver.as_deref(), Some("pulse"));
         assert_eq!(cfg.hooks.len(), 1);
+        assert!(cfg.problems.is_empty());
+    }
+
+    #[test]
+    fn a_hook_for_an_unknown_event_is_reported() {
+        let cfg = load_files(&[(
+            "ringo.toml",
+            "[[hooks]]\nevent = \"call_answered\"\ncommand = \"true\"\n",
+        )]);
+        assert_eq!(cfg.hooks.len(), 1);
+        assert!(
+            cfg.problems.iter().any(|p| p.contains("call_answered")),
+            "{:?}",
+            cfg.problems
+        );
     }
 
     #[test]
