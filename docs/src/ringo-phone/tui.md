@@ -44,7 +44,7 @@ so the warning would otherwise reach nobody.
 | `h` | Hold / resume the selected call (toggle) |
 | `m` | Toggle microphone mute |
 | `M` | Toggle deafen (microphone and speaker) |
-| `t` / `T` | Blind / attended transfer |
+| `t` / `T` | Blind / attended transfer; `t` on a ringing incoming call deflects it (302) |
 | `0-9` `*` `#` | DTMF tones (during a call) |
 | `f` / `Tab` | Open contacts (`Tab` switches calls when several are active) |
 | `e` / `l` / `c` | Event log / baresip log / call history |
@@ -68,9 +68,13 @@ so the warning would otherwise reach nobody.
 
 ## Transfer mode
 
+Also used to deflect a ringing call: the caller gets a `302 Moved Temporarily`
+with the target as `Contact` and your account as `Diversion`. Whether the call
+actually follows is up to your provider.
+
 | Key | Action |
 |-----|--------|
-| `Enter` | Execute the transfer |
+| `Enter` | Execute the transfer / deflection |
 | `Tab` | Open contacts |
 | `↑` / `↓` / `Ctrl+R` | Dial-history navigation / search |
 | `Esc` | Cancel |

@@ -327,7 +327,7 @@ fn render_help(f: &mut Frame, app: &App) {
         row("h", "hold / resume (toggle)"),
         row("m", "mute the microphone"),
         row("M", "deafen (microphone and speaker)"),
-        row("t / T", "blind / attended transfer"),
+        row("t / T", "blind / attended transfer (t: deflect if ringing)"),
         row("Tab", "switch active call"),
         row("i", "call details"),
         row("l", "logs"),
@@ -343,7 +343,7 @@ fn render_help(f: &mut Frame, app: &App) {
             Style::default(),
         )),
         Line::from(Span::styled(
-            "  dtmf <digits>  transfer <uri>  register  unregister",
+            "  dtmf <digits>  transfer <uri>  deflect <uri>  register  unregister",
             Style::default(),
         )),
         Line::from(Span::styled(
@@ -529,7 +529,9 @@ impl App {
     pub fn hints(&self) -> Vec<(&'static str, &'static str)> {
         let app = self;
         match &app.transfer_mode {
-            TransferMode::BlindInput(_) | TransferMode::AttendedInput(_) => {
+            TransferMode::BlindInput(_)
+            | TransferMode::AttendedInput(_)
+            | TransferMode::DeflectInput { .. } => {
                 vec![("Enter", "send"), ("Tab", "contacts"), ("Esc", "cancel")]
             }
             TransferMode::AttendedPending => vec![("X", "execute transfer"), ("Esc", "abort")],
@@ -555,11 +557,12 @@ impl App {
                             h.push(("s", "silence"));
                         }
                     }
-                    h.push(if app.selected_call_is_ringing_incoming() {
-                        ("b", "reject")
+                    if app.selected_call_is_ringing_incoming() {
+                        h.push(("b", "reject"));
+                        h.push(("t", "deflect"));
                     } else {
-                        ("b", "hangup")
-                    });
+                        h.push(("b", "hangup"));
+                    }
                     // One key, and the label says which way it will go —
                     // clearer than "h/r hold/resume", and shorter.
                     if app.selected_call_on_hold() {

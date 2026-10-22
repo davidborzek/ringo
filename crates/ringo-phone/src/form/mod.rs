@@ -264,7 +264,10 @@ impl FormState {
             mwi: get_toggle(self.field(Mwi)),
             auto_hold: get_toggle(self.field(AutoHold)),
             catchall: prev_profile.catchall,
-            reject_code: prev_profile.reject_code,
+            reject_code: get_text(self.field(RejectCode))
+                .trim()
+                .parse()
+                .unwrap_or(prev_profile.reject_code),
             deflect: get_toggle(self.field(Deflect)),
             deflect_target: opt(get_text(self.field(DeflectTarget))),
             regint: {
@@ -331,6 +334,11 @@ impl FormState {
         if !regint.trim().is_empty() && regint.trim().parse::<u32>().is_err() {
             self.focus_field(FieldId::Regint);
             return Some("Reg. interval must be a whole number".into());
+        }
+        let reject_code = get_text(self.field(FieldId::RejectCode));
+        if !matches!(reject_code.trim().parse::<u16>(), Ok(400..=699)) {
+            self.focus_field(FieldId::RejectCode);
+            return Some("Reject code must be a 4xx, 5xx or 6xx status".into());
         }
         None
     }
@@ -748,6 +756,17 @@ fn build_fields(profile: &Profile, include_name: bool) -> Vec<Field> {
         .group(Tab::Forwarding)
         .desc("SIP URI or bare number (resolved to sip:<number>@<domain>)."),
     );
+    f.push(
+        Field::text(
+            RejectCode,
+            "Reject code",
+            &profile.reject_code.to_string(),
+            false,
+            false,
+        )
+        .group(Tab::Forwarding)
+        .desc("SIP status for declining a ringing call: 486 Busy Here, 603 Decline, …"),
+    );
 
     f
 }
@@ -937,5 +956,15 @@ mod tests {
         assert_eq!(out.password_file.as_deref(), Some("/f"));
         assert_eq!(out.password, "");
         assert_eq!(out.password_cmd, None);
+    }
+
+    #[test]
+    fn reject_code_round_trips_through_the_form() {
+        let p = crate::profile::Profile {
+            reject_code: 603,
+            ..Default::default()
+        };
+        let (_, out) = FormState::new(&p, false).extract(&p);
+        assert_eq!(out.reject_code, 603);
     }
 }

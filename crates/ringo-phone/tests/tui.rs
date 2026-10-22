@@ -412,7 +412,7 @@ fn hangup_key_rejects_a_ringing_call_with_the_profile_code() {
         .filter(|(cmd, _)| cmd == "reject")
         .collect();
     assert_eq!(sent, vec![("reject".into(), "603 Decline".into())]);
-    assert!(app.calls[0].rejected);
+    assert_eq!(app.calls[0].declined, Some(ringo::tui::Declined::Rejected));
 }
 
 #[test]
@@ -474,6 +474,126 @@ fn tab_completes_the_reject_code() {
     app.command.input = "dial 12".into();
     app.cycle_completion();
     assert_eq!(app.command.input, "dial 12");
+}
+
+fn deflects(rx: &mut tokio::sync::mpsc::Receiver<(String, String)>) -> Vec<String> {
+    std::iter::from_fn(|| rx.try_recv().ok())
+        .filter(|(cmd, _)| cmd == "deflect")
+        .map(|(_, params)| params)
+        .collect()
+}
+
+#[test]
+fn t_on_a_ringing_call_deflects_it() {
+    let (mut app, mut rx) = test_app();
+    ring(&mut app, "1");
+    assert!(app.hints().contains(&("t", "deflect")));
+
+    app.handle_key(key('t'));
+    assert_eq!(
+        app.transfer_mode,
+        TransferMode::DeflectInput {
+            call_id: "1".into(),
+            target: String::new()
+        }
+    );
+    for c in "4711".chars() {
+        app.handle_key(key(c));
+    }
+    app.handle_key(enter());
+
+    assert_eq!(app.transfer_mode, TransferMode::None);
+    assert_eq!(
+        deflects(&mut rx),
+        vec!["1 sip:4711@example.com sip:user@example.com"]
+    );
+}
+
+#[test]
+fn t_on_an_established_call_still_transfers() {
+    let (mut app, _rx) = test_app();
+    established(&mut app, "1");
+    assert!(!app.hints().contains(&("t", "deflect")));
+    app.handle_key(key('t'));
+    assert_eq!(app.transfer_mode, TransferMode::BlindInput(String::new()));
+}
+
+#[test]
+fn the_deflect_command_needs_a_target_and_a_ringing_call() {
+    let (mut app, mut rx) = test_app();
+    assert!(app.dispatch("deflect", "").is_err());
+    assert!(app.dispatch("deflect", "4711").is_err());
+    ring(&mut app, "1");
+    assert!(app.dispatch("deflect", "sip:bob@other.example").is_ok());
+    assert_eq!(
+        deflects(&mut rx),
+        vec!["1 sip:bob@other.example sip:user@example.com"]
+    );
+}
+
+#[test]
+fn declining_a_call_is_not_reported_as_an_error() {
+    for (cmd, arg, reason) in [
+        ("reject", "", "Busy Here"),
+        ("deflect", "4711", "Moved Temporarily"),
+    ] {
+        let (mut app, _rx) = test_app();
+        ring(&mut app, "1");
+        app.dispatch(cmd, arg).unwrap();
+        // baresip reports our own reason phrase back as the close reason.
+        app.handle_message(AppEvent::CallClosed {
+            call_id: "1".into(),
+            reason: reason.into(),
+            error: true,
+        });
+        assert_eq!(app.last_call_reason, None, "{cmd}");
+        assert!(!app.last_call.as_ref().unwrap().error, "{cmd}");
+    }
+}
+
+#[test]
+fn deflect_input_is_dropped_when_its_call_ends() {
+    // Two calls ring; the one being deflected ends while the target is typed.
+    // Enter must not deflect the other one.
+    let (mut app, mut rx) = test_app();
+    ring(&mut app, "A");
+    ring(&mut app, "B");
+    app.selected_call = 0;
+    app.handle_key(key('t'));
+    app.handle_key(key('9'));
+    app.handle_message(AppEvent::CallClosed {
+        call_id: "A".into(),
+        reason: "".into(),
+        error: false,
+    });
+    assert_eq!(app.transfer_mode, TransferMode::None);
+
+    app.handle_key(enter());
+    assert!(deflects(&mut rx).is_empty());
+    assert_eq!(app.calls[0].declined, None);
+}
+
+#[test]
+fn an_unusable_deflect_target_leaves_the_call_ringing() {
+    let (mut app, mut rx) = test_app();
+    ring(&mut app, "1");
+    assert!(
+        app.dispatch("deflect", "sip:bob@example.com\r\nX-Test: bad")
+            .is_err()
+    );
+    assert!(deflects(&mut rx).is_empty());
+    assert_eq!(app.calls[0].declined, None, "still counts as missed");
+}
+
+#[test]
+fn a_deflected_call_is_not_missed() {
+    let (mut app, _rx) = test_app();
+    ring(&mut app, "1");
+    app.dispatch("deflect", "4711").unwrap();
+    assert!(matches!(
+        app.calls[0].declined,
+        Some(ringo::tui::Declined::Deflected(ref t)) if t == "sip:4711@example.com"
+    ));
 }
 
 #[test]

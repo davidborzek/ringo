@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
 
-use super::app::{Call, CallDirection, CallHistoryEntry};
+use super::app::{Call, CallDirection, CallHistoryEntry, Declined};
 
 /// Truncate `s` to `width` display columns (char-aware, appending `…` when it
 /// doesn't fit), otherwise left-pad it to `width` so the next column aligns.
@@ -42,10 +42,11 @@ impl super::app::App {
                 )
             }
             None => {
-                let label = match call.direction {
-                    CallDirection::Incoming if call.rejected => "rejected",
-                    CallDirection::Incoming => "missed",
-                    CallDirection::Outgoing => "no answer",
+                let label = match (&call.direction, &call.declined) {
+                    (CallDirection::Incoming, Some(Declined::Rejected)) => "rejected",
+                    (CallDirection::Incoming, Some(Declined::Deflected(_))) => "deflected",
+                    (CallDirection::Incoming, None) => "missed",
+                    (CallDirection::Outgoing, _) => "no answer",
                 };
                 (label.to_string(), 0)
             }
@@ -57,6 +58,10 @@ impl super::app::App {
             peer: call.peer.clone(),
             duration,
             duration_secs,
+            deflected_to: match &call.declined {
+                Some(Declined::Deflected(target)) => Some(target.clone()),
+                _ => None,
+            },
             headers: call.header_views.clone(),
         };
         if let Ok(mut line) = serde_json::to_string(&entry) {
@@ -475,6 +480,9 @@ fn render_history_detail(f: &mut Frame, app: &super::app::App, area: Rect, indic
         lines.push(field("Direction", &e.dir));
         lines.push(field("Peer", &e.peer));
         lines.push(field("Duration", &e.duration));
+        if let Some(target) = &e.deflected_to {
+            lines.push(field("Deflected", target));
+        }
         lines.push(Line::from(""));
         if e.headers.is_empty() {
             lines.push(Line::from(Span::styled("  No headers captured.", subtle)));
@@ -507,6 +515,7 @@ mod tests {
                 peer: p.to_string(),
                 duration: "00:01:00".into(),
                 duration_secs: 60,
+                deflected_to: None,
                 headers: Vec::new(),
             })
             .collect();

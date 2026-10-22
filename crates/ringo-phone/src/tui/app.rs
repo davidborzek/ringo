@@ -42,8 +42,17 @@ pub struct Call {
     /// Rendered inbound-header views (label, value) from the profile's
     /// `header_display` templates; empty unless configured / for outgoing calls.
     pub header_views: Vec<(String, String)>,
-    /// Declined locally while ringing — logged as "rejected", not "missed".
-    pub rejected: bool,
+    /// How we declined it while it was ringing, if we did — logged as such,
+    /// not as "missed".
+    pub declined: Option<Declined>,
+}
+
+/// A ringing incoming call ended on our side rather than the caller's.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Declined {
+    Rejected,
+    /// Deflected (302) to this target.
+    Deflected(String),
 }
 
 /// A call that was deflected (302) — shown transiently in the UI.
@@ -81,6 +90,9 @@ pub struct CallHistoryEntry {
     pub peer: String,
     pub duration: String,   // "HH:MM:SS" | "missed" | "no answer"
     pub duration_secs: u64, // 0 for missed/no answer
+    /// Where the call was deflected to, for `duration == "deflected"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deflected_to: Option<String>,
     /// Inbound-header views captured for the call (label, value). `#[serde(default)]`
     /// keeps entries written before this field loadable.
     #[serde(default)]
@@ -91,7 +103,12 @@ pub struct CallHistoryEntry {
 pub enum TransferMode {
     #[default]
     None,
-    BlindInput(String),    // 't' pressed, typing URI
+    BlindInput(String), // 't' pressed, typing URI
+    /// `t` on a ringing incoming call: typing the target for that call.
+    DeflectInput {
+        call_id: String,
+        target: String,
+    },
     AttendedInput(String), // 'T' pressed, typing URI
     AttendedPending,       // atransferstart sent, waiting for X or Esc
 }
@@ -669,7 +686,7 @@ mod tests {
             state,
             started_at: Some(Instant::now()),
             header_views: Vec::new(),
-            rejected: false,
+            declined: None,
         }
     }
 

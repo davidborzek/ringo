@@ -17,8 +17,8 @@ ringo control -t work status         # registration + active calls
 `<target>` is a profile name or a **PID** — use the PID (from `ringo control list`)
 when a name is awkward to type or the same profile runs more than once.
 
-Commands: `dial <n>`, `hangup`, `reject [code]`, `accept`, `hold`, `resume`, `mute`, `deafen`,
-`silence`, `dtmf <digits>`, `transfer <uri>`, `register`, `unregister`, `status`,
+Commands: `dial <n>`, `hangup`, `reject [code]`, `deflect <uri>`, `accept`, `hold`,
+`resume`, `mute`, `deafen`, `silence`, `dtmf <digits>`, `transfer <uri>`, `register`, `unregister`, `status`,
 `shutdown`.
 
 `unregister` signs the account off: the provider has nowhere to deliver calls to

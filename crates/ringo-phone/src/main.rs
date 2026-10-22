@@ -49,6 +49,7 @@ fn control_command_candidates() -> Vec<CompletionCandidate> {
         "dial",
         "hangup",
         "reject",
+        "deflect",
         "accept",
         "hold",
         "resume",

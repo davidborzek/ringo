@@ -65,7 +65,9 @@ impl super::app::App {
             || self.dial.mode == InputMode::HistorySearch
             || matches!(
                 self.transfer_mode,
-                TransferMode::BlindInput(_) | TransferMode::AttendedInput(_)
+                TransferMode::BlindInput(_)
+                    | TransferMode::AttendedInput(_)
+                    | TransferMode::DeflectInput { .. }
             )
             || (self.contacts_state.show && self.contacts_state.search_mode)
             || (self.contacts_state.show
@@ -192,7 +194,9 @@ impl super::app::App {
 
         // Transfer input modes
         match &self.transfer_mode {
-            TransferMode::BlindInput(_) | TransferMode::AttendedInput(_) => {
+            TransferMode::BlindInput(_)
+            | TransferMode::AttendedInput(_)
+            | TransferMode::DeflectInput { .. } => {
                 self.handle_transfer_input(key);
                 return;
             }
@@ -257,6 +261,17 @@ impl super::app::App {
             }
             KeyCode::Char('M') if key.modifiers == KeyModifiers::SHIFT && self.in_active_call() => {
                 self.toggle_deafen();
+            }
+            KeyCode::Char('t')
+                if key.modifiers == KeyModifiers::NONE
+                    && self.selected_call_is_ringing_incoming() =>
+            {
+                if let Some(call_id) = self.ringing_incoming_call_id() {
+                    self.transfer_mode = TransferMode::DeflectInput {
+                        call_id,
+                        target: String::new(),
+                    };
+                }
             }
             KeyCode::Char('t') if key.modifiers == KeyModifiers::NONE && self.in_active_call() => {
                 self.transfer_mode = TransferMode::BlindInput(String::new());

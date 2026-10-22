@@ -20,7 +20,9 @@ impl super::app::App {
                     self.transfer_input_set(draft);
                 } else {
                     match &mut self.transfer_mode {
-                        TransferMode::BlindInput(s) | TransferMode::AttendedInput(s) => {
+                        TransferMode::BlindInput(s)
+                        | TransferMode::AttendedInput(s)
+                        | TransferMode::DeflectInput { target: s, .. } => {
                             s.pop();
                         }
                         _ => {}
@@ -49,6 +51,11 @@ impl super::app::App {
                                 &uri, &aor,
                             ));
                         self.transfer_mode = TransferMode::AttendedPending;
+                    }
+                    TransferMode::DeflectInput { call_id, target } => {
+                        if let Err(e) = self.deflect_call(&call_id, &target) {
+                            self.command.error = Some(e);
+                        }
                     }
                     _ => {}
                 }
@@ -107,7 +114,9 @@ impl super::app::App {
             {
                 self.dial.mode = InputMode::Dial; // exit history nav on typing
                 match &mut self.transfer_mode {
-                    TransferMode::BlindInput(s) | TransferMode::AttendedInput(s) => {
+                    TransferMode::BlindInput(s)
+                    | TransferMode::AttendedInput(s)
+                    | TransferMode::DeflectInput { target: s, .. } => {
                         s.push(c);
                     }
                     _ => {}
@@ -136,14 +145,18 @@ impl super::app::App {
 
     pub(super) fn transfer_input_get(&self) -> String {
         match &self.transfer_mode {
-            TransferMode::BlindInput(s) | TransferMode::AttendedInput(s) => s.clone(),
+            TransferMode::BlindInput(s)
+            | TransferMode::AttendedInput(s)
+            | TransferMode::DeflectInput { target: s, .. } => s.clone(),
             _ => String::new(),
         }
     }
 
     pub(super) fn transfer_input_set(&mut self, value: String) {
         match &mut self.transfer_mode {
-            TransferMode::BlindInput(s) | TransferMode::AttendedInput(s) => *s = value,
+            TransferMode::BlindInput(s)
+            | TransferMode::AttendedInput(s)
+            | TransferMode::DeflectInput { target: s, .. } => *s = value,
             _ => {}
         }
     }

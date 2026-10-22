@@ -158,6 +158,7 @@ pub(crate) enum FieldId {
     HeaderViews,
     Deflect,
     DeflectTarget,
+    RejectCode,
 }
 
 pub(crate) struct Field {
