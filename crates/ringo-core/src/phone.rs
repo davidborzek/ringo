@@ -18,6 +18,15 @@ pub trait Phone: Send {
         let _ = (scode, reason);
         self.hangup();
     }
+    /// Deflect the ringing incoming call with SIP `call_id` to `contact` with a
+    /// `302 Moved Temporarily` (plus an RFC 5806 `Diversion` header when
+    /// `diversion` is set). The on-demand counterpart of
+    /// [`Phone::deflect_incoming`]. `false` if the target is unusable or that
+    /// call is gone or no longer ringing. Default: `false` (mocks).
+    fn deflect(&self, call_id: &str, contact: &str, diversion: Option<&str>) -> bool {
+        let _ = (call_id, contact, diversion);
+        false
+    }
     fn accept(&self);
     fn hold(&self);
     fn resume(&self);
@@ -98,12 +107,27 @@ pub trait Phone: Send {
     /// RFC 5806 `Diversion` header when `diversion` is set). Thin wrapper over
     /// [`Phone::arm_invite_response`].
     fn deflect_incoming(&self, contact: &str, diversion: Option<&str>) {
-        let mut headers = vec![format!("Contact: <{contact}>")];
-        if let Some(div) = diversion {
-            headers.push(format!("Diversion: <{div}>"));
-        }
-        self.arm_invite_response(302, "Moved Temporarily", headers);
+        self.arm_invite_response(
+            302,
+            "Moved Temporarily",
+            deflect_headers(contact, diversion),
+        );
     }
+}
+
+/// Whether `value` can go into a SIP header verbatim: CR/LF would inject
+/// headers, NUL can't cross into C.
+pub(crate) fn is_header_safe(value: &str) -> bool {
+    !value.contains(['\r', '\n', '\0'])
+}
+
+/// The headers of a 302 deflection: where the call goes, and on whose behalf.
+pub(crate) fn deflect_headers(contact: &str, diversion: Option<&str>) -> Vec<String> {
+    let mut headers = vec![format!("Contact: <{contact}>")];
+    if let Some(div) = diversion {
+        headers.push(format!("Diversion: <{div}>"));
+    }
+    headers
 }
 
 // ─── Test mock ────────────────────────────────────────────────────────────────
@@ -147,6 +171,16 @@ impl Phone for MockPhone {
     }
     fn reject(&self, scode: u16, reason: &str) {
         self.send("reject", &format!("{scode} {reason}"));
+    }
+    fn deflect(&self, call_id: &str, contact: &str, diversion: Option<&str>) -> bool {
+        if !is_header_safe(contact) || !diversion.is_none_or(is_header_safe) {
+            return false;
+        }
+        self.send(
+            "deflect",
+            format!("{call_id} {contact} {}", diversion.unwrap_or("")).trim_end(),
+        );
+        true
     }
     fn accept(&self) {
         self.send("accept", "");

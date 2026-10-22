@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, List, ListItem, Paragraph},
 };
 
-use super::app::{Call, CallDirection, CallState};
+use super::app::{Call, CallDirection, CallState, Declined};
 
 impl super::app::App {
     pub(super) fn handle_call_incoming(
@@ -46,7 +46,7 @@ impl super::app::App {
             state: CallState::Ringing,
             started_at: None,
             header_views,
-            rejected: false,
+            declined: None,
         });
     }
 
@@ -99,7 +99,7 @@ impl super::app::App {
             state: CallState::Ringing,
             started_at: None,
             header_views,
-            rejected: false,
+            declined: None,
         });
         // Make the new outgoing call the active/selected one, keeping
         // selected_call in sync with baresip's current (tail) call — hold(),
@@ -145,11 +145,18 @@ impl super::app::App {
         // spurious resume re-INVITE that races the incoming BYE. baresip spells
         // it "Call transfered" (optionally prefixed with the SIP status code).
         let completed_transfer = reason.to_lowercase().contains("transfer");
+        // Our own reject/deflect reason ("Busy Here", "Moved Temporarily") comes
+        // back as the close reason; it is what we asked for, not a failure.
+        let error = error
+            && !self
+                .calls
+                .iter()
+                .any(|c| c.id == call_id && c.declined.is_some());
         let mut closed: Option<super::app::LastCall> = None;
         if let Some(call) = self.calls.iter().find(|c| c.id == call_id) {
             if call.direction == CallDirection::Incoming
                 && call.started_at.is_none()
-                && !call.rejected
+                && call.declined.is_none()
             {
                 self.notify("Missed call", &call.peer.clone());
             }
@@ -203,6 +210,15 @@ impl super::app::App {
         // already reset transfer_mode to None when 'X' was pressed.)
         if self.transfer_mode == super::app::TransferMode::AttendedPending && self.calls.len() < 2 {
             self.transfer_mode = super::app::TransferMode::None;
+        }
+        // The call being deflected is gone — the typed target must not land on
+        // another one.
+        if matches!(&self.transfer_mode,
+            super::app::TransferMode::DeflectInput { call_id: id, .. } if *id == call_id)
+        {
+            self.transfer_mode = super::app::TransferMode::None;
+            self.dial.mode = super::app::InputMode::Normal;
+            self.contacts_state.show = false;
         }
         // Auto-resume: closing the active (non-held) call promotes the call that
         // becomes the new current one. If it's on hold, resume it — ringo doesn't
@@ -389,7 +405,7 @@ impl super::app::App {
 
     fn reject_current_with(&mut self, index: usize, code: u16) {
         self.phone.reject(code, reject_reason(code));
-        self.calls[index].rejected = true;
+        self.calls[index].declined = Some(Declined::Rejected);
     }
 
     /// Reject the ringing incoming call, if any, with `code` or else the
@@ -407,6 +423,41 @@ impl super::app::App {
         let code = code.unwrap_or(self.profile.reject_code);
         self.reject_current_with(index, code);
         true
+    }
+
+    /// The ringing incoming call a deflection should act on: the selected one
+    /// if it rings, else the first that does.
+    pub(super) fn ringing_incoming_call_id(&self) -> Option<String> {
+        let ringing =
+            |c: &&Call| c.direction == CallDirection::Incoming && c.state == CallState::Ringing;
+        self.calls
+            .get(self.selected_call)
+            .filter(ringing)
+            .or_else(|| self.calls.iter().find(ringing))
+            .map(|c| c.id.clone())
+    }
+
+    /// Deflect the ringing incoming call `call_id` with a 302 to `target` (a
+    /// SIP URI or a bare number, completed against the account's domain).
+    pub(super) fn deflect_call(&mut self, call_id: &str, target: &str) -> Result<String, String> {
+        let target = target.trim();
+        if target.is_empty() {
+            return Err("Usage: deflect <uri|number>".into());
+        }
+        let Some(index) = self.calls.iter().position(|c| {
+            c.id == call_id
+                && c.direction == CallDirection::Incoming
+                && c.state == CallState::Ringing
+        }) else {
+            return Err("The call is no longer ringing".into());
+        };
+        let aor = self.account_aor.clone();
+        let uri = super::command::normalize_sip_uri(target, &aor);
+        if !self.phone.deflect(call_id, &uri, Some(&aor)) {
+            return Err(format!("Could not deflect to {uri}"));
+        }
+        self.calls[index].declined = Some(Declined::Deflected(uri.clone()));
+        Ok(format!("Deflecting to {uri}"))
     }
 
     /// Whether the selected call is an incoming one still ringing, i.e. what

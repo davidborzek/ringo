@@ -122,7 +122,9 @@ impl super::app::App {
     pub(super) fn handle_history_search(&mut self, key: crossterm::event::KeyEvent) {
         let in_transfer = matches!(
             self.transfer_mode,
-            TransferMode::BlindInput(_) | TransferMode::AttendedInput(_)
+            TransferMode::BlindInput(_)
+                | TransferMode::AttendedInput(_)
+                | TransferMode::DeflectInput { .. }
         );
         match key.code {
             KeyCode::Esc => {
@@ -252,6 +254,16 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
         ]),
         TransferMode::AttendedInput(s) => Line::from(vec![
             Span::styled("  Att. → : ", Style::default().fg(app.theme.transfer.get())),
+            Span::styled(
+                format!("{}_", s),
+                Style::default().fg(app.theme.transfer.get()),
+            ),
+        ]),
+        TransferMode::DeflectInput { target: s, .. } => Line::from(vec![
+            Span::styled(
+                "  Defl. → : ",
+                Style::default().fg(app.theme.transfer.get()),
+            ),
             Span::styled(
                 format!("{}_", s),
                 Style::default().fg(app.theme.transfer.get()),

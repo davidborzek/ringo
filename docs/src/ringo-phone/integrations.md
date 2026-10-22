@@ -52,6 +52,9 @@ One JSON object per line:
 {"ts":"2024-01-15 14:30:05","dir":"outgoing","peer":"sip:alice@example.com","duration":"02:05:13","duration_secs":7513}
 ```
 
+Calls that never connected have a label instead of a duration: `missed`,
+`rejected`, `no answer`, or `deflected` (with `"deflected_to"` holding the target).
+
 ```sh
 cat ~/.config/ringo/profiles/<name>/call_history | jq .
 ```

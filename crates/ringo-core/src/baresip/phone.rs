@@ -101,6 +101,56 @@ impl Phone for BaresipPhone {
         });
     }
 
+    fn deflect(&self, call_id: &str, contact: &str, diversion: Option<&str>) -> bool {
+        let ua = self.ua;
+        if !crate::phone::is_header_safe(contact)
+            || !diversion.is_none_or(crate::phone::is_header_safe)
+        {
+            crate::rlog!(Warn, "deflect: rejected control characters in target");
+            return false;
+        }
+        let mut headers = String::new();
+        for h in crate::phone::deflect_headers(contact, diversion) {
+            headers.push_str(&h);
+            headers.push_str("\r\n");
+        }
+        // A custom header block replaces re's default `Content-Length: 0`.
+        headers.push_str("Content-Length: 0\r\n\r\n");
+        let Ok(headers) = CString::new(headers) else {
+            return false;
+        };
+        let id = call_id.to_string();
+        let mut sent = false;
+        // Find and deflect by id under one RE lock: never fall back to the
+        // current call, which may be an established one that would be hung up.
+        on_re_thread(|| unsafe {
+            let calls = ua_calls(ua as *mut Ua);
+            if calls.is_null() {
+                return;
+            }
+            let mut le = (*calls).head;
+            while !le.is_null() {
+                let call = (*le).data as *mut Call;
+                if !call.is_null() && super::events::call_id_str(call) == id {
+                    if call_state(call) == call_state_CALL_STATE_INCOMING {
+                        ua_hangupf(
+                            ua as *mut Ua,
+                            call,
+                            302,
+                            c"Moved Temporarily".as_ptr(),
+                            c"%s".as_ptr(),
+                            headers.as_ptr(),
+                        );
+                        sent = true;
+                    }
+                    return;
+                }
+                le = (*le).next;
+            }
+        });
+        sent
+    }
+
     fn hangup_all(&self) {
         let ua = self.ua;
         on_re_thread(move || unsafe {

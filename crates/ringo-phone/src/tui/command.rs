@@ -6,6 +6,7 @@ pub const COMMANDS: &[&str] = &[
     "accept",
     "contacts",
     "deafen",
+    "deflect",
     "dial",
     "dtmf",
     "edit",
@@ -132,6 +133,10 @@ impl App {
                     Err("No active call".into())
                 }
             }
+            "deflect" => match self.ringing_incoming_call_id() {
+                Some(id) => self.deflect_call(&id, arg),
+                None => Err("No incoming call".into()),
+            },
             "reject" => {
                 let code = match arg.trim() {
                     "" => None,
