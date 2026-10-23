@@ -150,6 +150,10 @@ pub(crate) fn run_codecs_submenu(
                 action: ClickAction::Key(key),
                 ..
             }) => Some(key),
+            Input::Pointer(Pointed::Click {
+                action: ClickAction::Dismiss,
+                ..
+            }) => break,
             Input::Pointer(_) => None,
         };
         if let Some(key) = key {
@@ -205,6 +209,9 @@ fn draw_codecs(
     let form_x = area.width.saturating_sub(form_w) / 2;
     let form_y = area.height.saturating_sub(form_h) / 2;
     let form_area = Rect::new(form_x, form_y, form_w, form_h);
+    // A click beside the submenu closes it, as Esc does.
+    hits.push(area, ClickAction::Dismiss);
+    hits.push(form_area, ClickAction::Inert);
 
     frame.render_widget(Clear, form_area);
     let block = Block::default()

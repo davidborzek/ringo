@@ -70,6 +70,19 @@ pub fn render(f: &mut Frame, app: &mut App) {
     render_status_bar(f, app, chunks[4]);
     render_command_bar(f, app, chunks[5]);
 
+    // A click beside an overlay closes it. Pushed before the overlay so the
+    // overlay's own regions win inside it; confirmations and the contact form
+    // cover the whole screen with Inert and so are never dismissed this way.
+    let overlay_open = app.log.show
+        || app.help_show
+        || app.details_show
+        || app.call_history.show
+        || app.contacts_state.show
+        || app.dial.mode == InputMode::HistorySearch;
+    if overlay_open {
+        app.hits.push(area, ClickAction::Dismiss);
+    }
+
     // Modal overlays (mutually exclusive — `close_overlays` keeps only one open).
     if app.log.show {
         // Tail-follow / wrap status shown in the title.

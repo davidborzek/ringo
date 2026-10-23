@@ -505,9 +505,23 @@ impl App {
                 let double = self.double_click.register(col, row, Instant::now());
                 return self.click_row(list, index, double);
             }
+            ClickAction::Dismiss => self.dismiss_modal(),
             ClickAction::Scroll { .. } | ClickAction::Inert => return false,
         }
         true
+    }
+
+    /// A click away from a modal closes it as Esc would, all the way: a search
+    /// typed into the overlay goes with it. Confirmations never get here.
+    fn dismiss_modal(&mut self) {
+        if self.dial.mode == InputMode::HistorySearch {
+            self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+            return;
+        }
+        if self.call_history.show && self.call_history.detail {
+            self.call_history.detail = false;
+        }
+        self.close_overlays();
     }
 
     /// Select a row; a double click on an overlay row presses Enter on it.

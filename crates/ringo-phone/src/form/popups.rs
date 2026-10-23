@@ -133,6 +133,9 @@ pub fn run_rename(
                 w,
                 h,
             );
+            // A click beside the rename box cancels it, as Esc does (read_key).
+            hits.push(area, ClickAction::Dismiss);
+            hits.push(popup, ClickAction::Inert);
             frame.render_widget(Clear, popup);
 
             let block = Block::default()

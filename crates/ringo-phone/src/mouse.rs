@@ -3,8 +3,8 @@
 //! terminal's mouse-capture state.
 
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEvent, MouseButton, MouseEvent,
-    MouseEventKind,
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::{
     Frame,
@@ -56,6 +56,9 @@ pub enum ClickAction {
     Scroll { list: ListId },
     /// Swallows the click, so a modal does not pass it on to what it covers.
     Inert,
+    /// Outside a modal that a click away closes (not confirmations): lies under
+    /// the modal, so only clicks that miss it land here.
+    Dismiss,
 }
 
 /// Clickable regions of the last rendered frame.
@@ -93,7 +96,7 @@ impl HitMap {
             .filter(|(rect, _)| rect.contains(pos))
             .find_map(|(_, action)| match action {
                 ClickAction::Scroll { list } => Some(Some(*list)),
-                ClickAction::Inert => Some(None),
+                ClickAction::Inert | ClickAction::Dismiss => Some(None),
                 _ => None,
             })
             .flatten()
@@ -276,7 +279,8 @@ impl Pointer {
     }
 
     /// For screens whose only mouse targets are keys: the key pressed, or the
-    /// key a click stands for. `None` for everything else.
+    /// key a click stands for (a click away from the popup is Esc). `None` for
+    /// everything else.
     pub fn read_key(&mut self) -> io::Result<Option<KeyEvent>> {
         Ok(match self.read()? {
             Input::Key(key) => Some(key),
@@ -284,6 +288,10 @@ impl Pointer {
                 action: ClickAction::Key(key),
                 ..
             }) => Some(key),
+            Input::Pointer(Pointed::Click {
+                action: ClickAction::Dismiss,
+                ..
+            }) => Some(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
             _ => None,
         })
     }

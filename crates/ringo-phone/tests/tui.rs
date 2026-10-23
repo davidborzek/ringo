@@ -378,6 +378,60 @@ fn nothing_behind_a_confirm_popup_is_clickable() {
 }
 
 #[test]
+fn a_click_beside_an_overlay_closes_it_a_click_inside_does_not() {
+    // Each overlay key, and whether it is open afterwards.
+    let open = |app: &App| app.help_show || app.log.show || app.call_history.show;
+    for overlay in ['?', 'l', 'c'] {
+        let (mut app, _rx) = test_app();
+        app.mouse_enabled = true;
+        app.handle_key(key(overlay));
+        assert!(open(&app), "{overlay}");
+
+        // Inside: the overlay is centred, so the screen centre is in it.
+        render_app(&mut app);
+        left_click(&mut app, (50, 15));
+        assert!(open(&app), "{overlay}: a click inside keeps it");
+
+        // Beside: the top-left corner is outside every centred overlay.
+        render_app(&mut app);
+        assert!(left_click(&mut app, (0, 0)), "{overlay}");
+        assert!(!open(&app), "{overlay}: a click beside closes it");
+    }
+}
+
+#[test]
+fn a_click_beside_the_dial_history_search_leaves_it() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.dial.history = ["100".to_string()].into();
+    app.handle_key(key('d'));
+    app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    assert_eq!(app.dial.mode, InputMode::HistorySearch);
+
+    render_app(&mut app);
+    assert!(left_click(&mut app, (0, 0)));
+    assert_ne!(app.dial.mode, InputMode::HistorySearch);
+}
+
+#[test]
+fn a_click_beside_a_confirmation_does_not_dismiss_it() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.contacts = vec![ringo::contacts::Contact {
+        name: "Alice".into(),
+        numbers: vec!["100".into()],
+    }];
+    app.handle_key(key('f'));
+    app.handle_key(key('d'));
+    assert!(app.contacts_state.delete_confirm.is_some());
+
+    render_app(&mut app);
+    assert!(!left_click(&mut app, (0, 0)));
+    assert!(app.contacts_state.delete_confirm.is_some());
+    assert!(app.contacts_state.show);
+}
+
+#[test]
 fn clicking_a_character_hint_while_dialing_does_not_type_it() {
     let (mut app, _rx) = test_app();
     app.mouse_enabled = true;

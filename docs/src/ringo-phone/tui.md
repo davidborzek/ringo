@@ -128,6 +128,11 @@ rejects a ringing call and hangs up an active one.
 | Form submenu: headers | Row (key or value half) takes focus; double-click does the same | Moves the focus |
 | Form submenu: codecs | Row takes focus; double-click toggles it on or off | Moves the focus |
 
+A click beside an overlay (help, logs, call history, contacts, call details,
+dial-history search) or a form submenu (headers, codecs, rename) closes it, as
+`Esc` would. Confirmations and the contact form only close through their own
+buttons or keys.
+
 While a text input is open (dial, transfer, command bar) only the hints for
 `Enter`, `Esc`, `Tab` and `Ctrl+R` are clickable; clicking a character hint would
 otherwise type it.
