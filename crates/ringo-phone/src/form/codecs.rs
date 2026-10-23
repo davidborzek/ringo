@@ -146,6 +146,10 @@ pub(crate) fn run_codecs_submenu(
                 click_row(&mut entries, &mut focused, index, double);
                 None
             }
+            Input::Pointer(Pointed::Click {
+                action: ClickAction::Key(key),
+                ..
+            }) => Some(key),
             Input::Pointer(_) => None,
         };
         if let Some(key) = key {
@@ -257,19 +261,57 @@ fn draw_codecs(
         );
     }
 
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            "  Space toggle  Shift+\u{2191}\u{2193} reorder  Esc back",
-            Style::default().fg(theme.subtle.get()),
-        )),
-        hint_area,
-    );
+    crate::tui::ui::render_hint_bar(frame, hint_area, CODEC_HINTS, theme);
+    crate::tui::ui::record_hint_hits(hits, hint_area, CODEC_HINTS, false);
 }
+
+const CODEC_HINTS: &[crate::tui::ui::Hint] =
+    &[("Space", "toggle"), ("⇧↑/⇧↓", "reorder"), ("Esc", "back")];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::KeyEvent;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn the_hint_line_is_a_clickable_hint_bar() {
+        let entries = vec![Entry {
+            spec: "opus/48000/2".into(),
+            label: "opus".into(),
+            on: false,
+        }];
+        let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
+        let mut hits = HitMap::default();
+        terminal
+            .draw(|f| draw_codecs(f, &entries, 0, &Theme::default(), &mut hits))
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let rows: Vec<String> = (0..10u16)
+            .map(|y| (0..60u16).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+        // Cells, not bytes: the hint line has multi-byte arrows.
+        let at = |needle: &str| {
+            let y = rows.iter().position(|l| l.contains(needle)).unwrap();
+            let byte = rows[y].find(needle).unwrap();
+            (rows[y][..byte].chars().count() as u16, y as u16)
+        };
+        let key = |needle: &str| {
+            let (x, y) = at(needle);
+            hits.hit(x, y).cloned()
+        };
+        let plain = |code| ClickAction::Key(KeyEvent::new(code, KeyModifiers::NONE));
+        assert_eq!(key("Space"), Some(plain(KeyCode::Char(' '))));
+        assert_eq!(key("Esc"), Some(plain(KeyCode::Esc)));
+        assert_eq!(
+            key("⇧↑"),
+            Some(ClickAction::Key(KeyEvent::new(
+                KeyCode::Up,
+                KeyModifiers::SHIFT
+            )))
+        );
+    }
 
     #[test]
     fn the_focused_codec_is_drawn_and_clickable_past_the_visible_rows() {

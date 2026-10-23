@@ -878,7 +878,8 @@ pub(crate) fn hint_rows(hints: &[Hint], width: u16) -> u16 {
 }
 
 /// The key a click on the hint `key` stands for. Alternatives (`m/M`, `a/e/d`,
-/// `↑/↓`) give their first; `^X` is Ctrl+x; unknown names give `None`.
+/// `↑/↓`) give their first; `^X` is Ctrl+x, `⇧↑` Shift+Up; unknown names give
+/// `None`.
 pub(crate) fn key_for_hint(key: &str) -> Option<KeyEvent> {
     let first = if key == "/" {
         key
@@ -892,6 +893,12 @@ pub(crate) fn key_for_hint(key: &str) -> Option<KeyEvent> {
         "Tab" | "⇥" => return plain(KeyCode::Tab),
         "↑" => return plain(KeyCode::Up),
         "↓" => return plain(KeyCode::Down),
+        // Only on its own: the form's `Space/←→` changes the focused field,
+        // which a click on the field itself already does.
+        "Space" if key == "Space" => return plain(KeyCode::Char(' ')),
+        "Space" => return None,
+        "⇧↑" => return Some(KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT)),
+        "⇧↓" => return Some(KeyEvent::new(KeyCode::Down, KeyModifiers::SHIFT)),
         _ => {}
     }
     if let Some(ctrl) = first.strip_prefix('^') {
@@ -1025,6 +1032,11 @@ mod tests {
         assert_eq!(key_for_hint("t/T"), plain(KeyCode::Char('t')));
         assert_eq!(key_for_hint("g/G"), plain(KeyCode::Char('g')));
         assert_eq!(key_for_hint("↑/↓"), plain(KeyCode::Up));
+        assert_eq!(key_for_hint("Space"), plain(KeyCode::Char(' ')));
+        assert_eq!(
+            key_for_hint("⇧↑/⇧↓"),
+            Some(KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT))
+        );
         assert_eq!(
             key_for_hint("^R"),
             Some(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))

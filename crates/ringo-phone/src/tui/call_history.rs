@@ -289,8 +289,10 @@ pub(super) fn render(f: &mut Frame, app: &mut super::app::App, area: Rect) {
     let filtered_len = indices.len();
 
     if app.call_history.detail {
-        render_history_detail(f, app, area, &indices);
         app.hits.push(area, ClickAction::Inert);
+        let footer_area = render_history_detail(f, app, area, &indices);
+        super::ui::render_hint_bar(f, footer_area, DETAIL_HINTS, &app.theme);
+        super::ui::record_hint_hits(&mut app.hits, footer_area, DETAIL_HINTS, false);
         return;
     }
 
@@ -452,8 +454,16 @@ fn call_history_item<'a>(
     }
 }
 
+const DETAIL_HINTS: &[super::ui::Hint] = &[("Esc", "back")];
+
 /// Per-entry detail overlay: call metadata + the captured inbound-header views.
-fn render_history_detail(f: &mut Frame, app: &super::app::App, area: Rect, indices: &[usize]) {
+/// Returns the row left free for the footer hints.
+fn render_history_detail(
+    f: &mut Frame,
+    app: &super::app::App,
+    area: Rect,
+    indices: &[usize],
+) -> Rect {
     let accent = Style::default().fg(app.theme.accent.get());
     let subtle = Style::default().fg(app.theme.subtle.get());
     let sel = app
@@ -500,12 +510,13 @@ fn render_history_detail(f: &mut Frame, app: &super::app::App, area: Rect, indic
                 ]));
             }
         }
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("  Esc / i  back", subtle)));
     } else {
         lines.push(Line::from(Span::styled("  No entry.", subtle)));
     }
-    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+    let footer_h = u16::from(inner.height > 1);
+    let body = Rect::new(inner.x, inner.y, inner.width, inner.height - footer_h);
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), body);
+    Rect::new(inner.x, inner.y + body.height, inner.width, footer_h)
 }
 
 #[cfg(test)]

@@ -83,6 +83,10 @@ pub(crate) fn run_headers_submenu(
                 click_row(&mut focused, &mut on_value, index, col, value_col, double);
                 continue;
             }
+            Input::Pointer(Pointed::Click {
+                action: ClickAction::Key(key),
+                ..
+            }) => key,
             Input::Pointer(_) => continue,
         };
         match key.code {
@@ -145,6 +149,14 @@ pub(crate) fn run_headers_submenu(
     Ok(())
 }
 
+const HEADER_HINTS: &[crate::tui::ui::Hint] = &[
+    ("Tab", "key↔value"),
+    ("↑/↓", "move"),
+    ("^A", "add"),
+    ("^D", "remove"),
+    ("Esc", "back"),
+];
+
 /// Draws the submenu and returns the first column of the value half.
 fn draw_headers(
     frame: &mut Frame,
@@ -191,8 +203,7 @@ fn draw_headers(
 
     if entries.is_empty() {
         frame.render_widget(
-            Paragraph::new("  (no headers — Ctrl+A to add)")
-                .style(Style::default().fg(theme.subtle.get())),
+            Paragraph::new("  (no headers yet)").style(Style::default().fg(theme.subtle.get())),
             fields_area,
         );
     }
@@ -255,13 +266,9 @@ fn draw_headers(
         }
     }
 
-    frame.render_widget(
-        Paragraph::new(Span::styled(
-            "  Tab key\u{2194}value  \u{2191}\u{2193} navigate  Ctrl+A add  Ctrl+D remove  Esc back",
-            Style::default().fg(theme.subtle.get()),
-        )),
-        hint_area,
-    );
+    crate::tui::ui::render_hint_bar(frame, hint_area, HEADER_HINTS, theme);
+    // A key or value is always being edited, so only non-typing keys are clickable.
+    crate::tui::ui::record_hint_hits(hits, hint_area, HEADER_HINTS, true);
 
     if let Some((cx, cy)) = cursor_pos {
         frame.set_cursor_position((cx, cy));
@@ -273,7 +280,41 @@ fn draw_headers(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::KeyEvent;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn the_hint_line_offers_only_keys_that_are_not_typed() {
+        let entries = vec![(TextField::new("X-Foo"), TextField::new("bar"))];
+        let mut terminal = Terminal::new(TestBackend::new(80, 10)).unwrap();
+        let mut hits = HitMap::default();
+        terminal
+            .draw(|f| {
+                draw_headers(f, &entries, (0, false), &Theme::default(), "H", &mut hits);
+            })
+            .unwrap();
+
+        let buf = terminal.backend().buffer();
+        let rows: Vec<String> = (0..10u16)
+            .map(|y| (0..80u16).map(|x| buf[(x, y)].symbol()).collect())
+            .collect();
+        let key = |needle: &str| {
+            let y = rows.iter().position(|l| l.contains(needle)).unwrap();
+            let byte = rows[y].find(needle).unwrap();
+            let x = rows[y][..byte].chars().count() as u16;
+            hits.hit(x, y as u16).cloned()
+        };
+        let ctrl = |c| ClickAction::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+        assert_eq!(key("C-a"), Some(ctrl('a')));
+        assert_eq!(key("C-d"), Some(ctrl('d')));
+        assert_eq!(
+            key("Esc"),
+            Some(ClickAction::Key(KeyEvent::new(
+                KeyCode::Esc,
+                KeyModifiers::NONE
+            )))
+        );
+    }
 
     #[test]
     fn the_focused_header_is_drawn_and_clickable_past_the_visible_rows() {

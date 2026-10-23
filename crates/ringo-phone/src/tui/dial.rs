@@ -323,8 +323,9 @@ pub(super) fn render_history_search(f: &mut Frame, app: &mut super::app::App, ar
 
     let max_visible: usize = 8;
     let visible = filtered.len().min(max_visible);
-    let popup_h = (visible as u16 + 3)
-        .max(4)
+    // Search line, list, hint line, borders.
+    let popup_h = (visible as u16 + 4)
+        .max(5)
         .min(area.height.saturating_sub(2));
     let popup_w = area.width.saturating_sub(6).max(30);
     let x = area.x + (area.width.saturating_sub(popup_w)) / 2;
@@ -339,7 +340,7 @@ pub(super) fn render_history_search(f: &mut Frame, app: &mut super::app::App, ar
     f.render_widget(Clear, popup_area);
 
     let block = Block::default()
-        .title(" History  (↑↓ navigate · Enter select · Esc cancel) ")
+        .title(" History ")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.accent.get()));
     let inner = block.inner(popup_area);
@@ -347,7 +348,11 @@ pub(super) fn render_history_search(f: &mut Frame, app: &mut super::app::App, ar
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(inner);
 
     f.render_widget(
@@ -384,6 +389,10 @@ pub(super) fn render_history_search(f: &mut Frame, app: &mut super::app::App, ar
         scroll,
         filtered.len(),
     );
+    const HINTS: &[super::ui::Hint] = &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "cancel")];
+    super::ui::render_hint_bar(f, chunks[2], HINTS, &app.theme);
+    // The query is being typed: only non-typing keys are clickable (all of these).
+    super::ui::record_hint_hits(&mut app.hits, chunks[2], HINTS, true);
 }
 
 #[cfg(test)]
