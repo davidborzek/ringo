@@ -1,8 +1,37 @@
 use super::app::RegStatus;
+use crate::config::HookEvent;
 use crate::event::AppEvent;
 
 impl super::app::App {
     pub fn handle_message(&mut self, event: AppEvent) {
+        let reg_before = self.reg_status.clone();
+        self.apply_event(event);
+        if self.reg_status != reg_before {
+            self.registration_changed();
+        }
+    }
+
+    /// `registration_changed` fires on every transition, not on each REGISTER
+    /// refresh: baresip re-reports `RegisterOk` every interval.
+    fn registration_changed(&self) {
+        let (status, reason) = match &self.reg_status {
+            RegStatus::Unknown => ("unknown", ""),
+            RegStatus::Registering => ("registering", ""),
+            RegStatus::Ok => ("registered", ""),
+            RegStatus::Unregistered => ("unregistered", ""),
+            RegStatus::Failed(reason) => ("failed", reason.as_str()),
+        };
+        self.run_hook(
+            HookEvent::RegistrationChanged,
+            serde_json::json!({
+                "status": status,
+                "reason": reason,
+                "account": self.account_aor,
+            }),
+        );
+    }
+
+    fn apply_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::Registering { account } => {
                 self.reg_status = RegStatus::Registering;
@@ -48,6 +77,12 @@ impl super::app::App {
                 self.mwi.new_messages = new_count;
                 if changed && waiting {
                     self.notify("Voicemail", &format!("{} new message(s)", new_count));
+                }
+                if changed {
+                    self.run_hook(
+                        HookEvent::Voicemail,
+                        serde_json::json!({ "waiting": waiting, "new_count": new_count }),
+                    );
                 }
             }
             // The remote party holds/resumes — mirror it into the call state.

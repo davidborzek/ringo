@@ -281,12 +281,40 @@ event = "call_incoming"
 command = "notify-send 'ringo' \"Call from $(echo $RINGO_EVENT_DATA | jq -r .number)\""
 ```
 
-| Event            | Trigger                         | Event data                                                           |
-| ---------------- | ------------------------------- | -------------------------------------------------------------------- |
-| `profile_loaded` | Profile loaded, baresip spawned | —                                                                    |
-| `call_incoming`  | Incoming call                   | `call_id`, `number`, `display_name`                                  |
-| `call_outgoing`  | Outgoing call initiated         | `call_id`, `number`                                                  |
-| `call_ended`     | Call closed                     | `call_id`, `number`, `direction`, `duration_secs`, `reason`, `error` |
+| Event                  | Trigger                                              | Event data                                                           |
+| ---------------------- | ---------------------------------------------------- | -------------------------------------------------------------------- |
+| `profile_loaded`       | Profile loaded, baresip spawned                      | —                                                                    |
+| `call_incoming`        | Incoming call                                        | `call_id`, `number`, `display_name`                                  |
+| `call_outgoing`        | Outgoing call initiated                              | `call_id`, `number`                                                  |
+| `call_established`     | A call was answered (either side), once per call     | `call_id`, `number`, `direction`                                     |
+| `call_ended`           | Call closed                                          | `call_id`, `number`, `direction`, `duration_secs`, `reason`, `error` |
+| `call_missed`          | An incoming call ended unanswered                    | `call_id`, `number`, `display_name`                                  |
+| `call_rejected`        | You rejected a ringing call                          | `call_id`, `number`, `display_name`                                  |
+| `call_deflected`       | A ringing call was deflected (302)                   | `call_id`, `number`, `display_name`, `target`                        |
+| `registration_changed` | The registration state changed                       | `status`, `reason`, `account`                                        |
+| `voicemail`            | The message-waiting state changed                    | `waiting`, `new_count`                                               |
+
+An incoming call that is never answered fires `call_ended` and then exactly one
+of `call_missed`, `call_rejected` or `call_deflected`. A call deflected by the
+profile's call deflection setting never becomes a call: it fires only
+`call_deflected`, with an empty `call_id`.
+
+`registration_changed` fires on transitions only, not on every REGISTER
+refresh; a failure with a different reason counts as one. `status` is one of `registering`, `registered`, `unregistered` or
+`failed` (then `reason` says why). A hook for an event name not listed here
+never runs and is reported as a config problem at startup.
+
+Keeping a status bar in sync, e.g. for waybar:
+
+```toml
+[[hooks]]
+event = "call_established"
+command = "echo on-call > $XDG_RUNTIME_DIR/ringo-status"
+
+[[hooks]]
+event = "call_ended"
+command = "echo idle > $XDG_RUNTIME_DIR/ringo-status"
+```
 
 Each hook receives `RINGO_EVENT`, `RINGO_PROFILE`, `RINGO_PROFILE_JSON` (no
 password) and `RINGO_EVENT_DATA` (JSON).

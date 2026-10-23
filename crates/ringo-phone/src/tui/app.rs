@@ -24,6 +24,15 @@ pub enum CallDirection {
     Incoming,
 }
 
+impl CallDirection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Outgoing => "outgoing",
+            Self::Incoming => "incoming",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CallState {
     Ringing,
@@ -485,6 +494,11 @@ impl App {
             .iter()
             .map(|(key, tpl)| (key.clone(), tpl.render(ctx)))
             .collect()
+    }
+
+    /// Run the configured hooks for `event` with this session's profile.
+    pub(super) fn run_hook(&self, event: crate::config::HookEvent, data: serde_json::Value) {
+        crate::hooks::run(&self.hooks, event, &self.profile_name, &self.profile, data);
     }
 
     pub fn notify(&self, summary: &str, body: &str) {

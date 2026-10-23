@@ -184,9 +184,10 @@ impl App {
                 }
             }
             "register" => {
+                // No optimistic status, like unregister: BEVENT_REGISTERING sets
+                // it, and the transition must happen there to fire its hook.
                 self.phone
                     .register(&self.account_aor.clone(), self.profile.regint.unwrap_or(0));
-                self.reg_status = super::app::RegStatus::Registering;
                 Ok("Registering".into())
             }
             "unregister" => {

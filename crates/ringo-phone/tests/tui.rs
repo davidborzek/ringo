@@ -177,6 +177,12 @@ fn register_signs_back_on() {
 
     assert!(app.dispatch("register", "").is_ok());
     assert_eq!(commands(&mut rx), vec!["uareg"]);
+
+    // baresip reports REGISTERING from ua_register; the status follows that
+    // event, not the command.
+    app.handle_message(AppEvent::Registering {
+        account: "sip:user@example.com".into(),
+    });
     assert_eq!(app.reg_status, RegStatus::Registering);
 
     app.handle_message(AppEvent::RegisterOk {

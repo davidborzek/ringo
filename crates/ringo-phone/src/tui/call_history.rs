@@ -29,10 +29,7 @@ impl super::app::App {
         };
 
         let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        let dir = match call.direction {
-            CallDirection::Outgoing => "outgoing",
-            CallDirection::Incoming => "incoming",
-        };
+        let dir = call.direction.as_str();
         let (duration, duration_secs) = match call.started_at {
             Some(start) => {
                 let s = start.elapsed().as_secs();
