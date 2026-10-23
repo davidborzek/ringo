@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.17.0...ringo-phone-v0.18.0) - 2026-10-23
+
+### Bug Fixes
+
+- *(ringo-phone)* register only once at startup ([#142](https://github.com/davidborzek/ringo/pull/142))
+
+### Features
+
+- *(ringo-phone)* hooks for answered, missed, rejected and deflected calls ([#149](https://github.com/davidborzek/ringo/pull/149))
+- *(ringo-phone)* deflect a ringing call on demand ([#148](https://github.com/davidborzek/ringo/pull/148))
+- *(ringo-phone)* configurable reject code for ringing calls ([#147](https://github.com/davidborzek/ringo/pull/147))
+- support cargo binstall and align install docs ([#137](https://github.com/davidborzek/ringo/pull/137))
+
 ## [0.17.0](https://github.com/davidborzek/ringo/compare/ringo-phone-v0.16.1...ringo-phone-v0.17.0) - 2026-10-15
 
 ### Refactor
