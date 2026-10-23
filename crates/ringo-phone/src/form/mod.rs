@@ -4,7 +4,7 @@ mod headers;
 mod popups;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
@@ -15,7 +15,11 @@ use ratatui::{
 };
 use std::path::Path;
 
-use crate::{config::Theme, profile::Profile};
+use crate::{
+    config::Theme,
+    mouse::{ClickAction, HitMap, Input, ListId, Pointed, Pointer, step_clamped},
+    profile::Profile,
+};
 use field::*;
 
 use popups::run_discard_confirm;
@@ -115,7 +119,7 @@ impl FormState {
         self.focused = 0;
     }
 
-    fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> Action {
+    fn handle_key(&mut self, key: KeyEvent) -> Action {
         self.error = None;
         let tab_len = self.tab_indices().len();
         // Focus positions: 0..tab_len are fields, then the Save and Cancel buttons.
@@ -176,6 +180,58 @@ impl FormState {
             _ => {}
         }
         Action::None
+    }
+
+    /// Act on a click or wheel notch the way the keys it stands for would.
+    fn handle_pointer(&mut self, pointed: Pointed) -> Action {
+        self.error = None;
+        match pointed {
+            // One field per notch: the lists here are short, three would skip past.
+            Pointed::Wheel {
+                list: ListId::FormFields,
+                down,
+            } => {
+                let positions = self.tab_indices().len() + 2;
+                self.focused = step_clamped(self.focused, positions, down, 1);
+                Action::None
+            }
+            Pointed::Click { action, .. } => match action {
+                ClickAction::Key(key) => self.handle_key(key),
+                ClickAction::Row {
+                    list: ListId::FormTabs,
+                    index,
+                } => {
+                    if Tab::ALL[index] != self.active_tab {
+                        self.active_tab = Tab::ALL[index];
+                        self.focused = 0;
+                    }
+                    Action::None
+                }
+                ClickAction::Row {
+                    list: ListId::FormFields,
+                    index,
+                } => self.click_field(index),
+                _ => Action::None,
+            },
+            Pointed::Wheel { .. } => Action::None,
+        }
+    }
+
+    /// Focus the field at `pos` of the active tab. Toggles and selects also change,
+    /// as Space would, and a submenu opens, as Enter would.
+    fn click_field(&mut self, pos: usize) -> Action {
+        self.focused = pos;
+        let idx = self.focused_index();
+        match self.fields[idx].kind {
+            FieldKind::Toggle { .. } | FieldKind::Select { .. } => {
+                self.fields[idx].handle_key(KeyCode::Char(' '));
+                Action::None
+            }
+            FieldKind::SubMenu { .. } => {
+                self.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            }
+            FieldKind::Text { .. } => Action::None,
+        }
     }
 
     fn update_header_count(&mut self) {
@@ -343,7 +399,7 @@ impl FormState {
         None
     }
 
-    fn render(&self, frame: &mut Frame, title: &str, theme: &Theme) {
+    fn render(&self, frame: &mut Frame, title: &str, theme: &Theme, hits: &mut HitMap) {
         let area = frame.area();
         // Box height covers the largest tab so it stays stable while switching.
         let max_tab_fields = Tab::ALL
@@ -388,22 +444,23 @@ impl FormState {
             );
         };
 
-        self.render_tab_bar(frame, chunks[0], theme);
+        self.render_tab_bar(frame, chunks[0], theme, hits);
         rule(frame, chunks[1]);
 
-        let cursor_pos = self.render_fields(frame, chunks[2], theme);
-        self.render_buttons(frame, chunks[4], theme);
+        let cursor_pos = self.render_fields(frame, chunks[2], theme, hits);
+        self.render_buttons(frame, chunks[4], theme, hits);
         rule(frame, chunks[5]);
-        self.render_footer(frame, chunks[6], chunks[7], theme);
+        self.render_footer(frame, chunks[6], chunks[7], theme, hits);
 
         if let Some((cx, cy)) = cursor_pos {
             frame.set_cursor_position((cx, cy));
         }
     }
 
-    fn render_tab_bar(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+    fn render_tab_bar(&self, frame: &mut Frame, area: Rect, theme: &Theme, hits: &mut HitMap) {
         let mut spans = vec![Span::raw(" ")];
-        for tab in Tab::ALL {
+        let mut x = area.x + 1;
+        for (index, tab) in Tab::ALL.iter().enumerate() {
             let style = if *tab == self.active_tab {
                 Style::default()
                     .fg(theme.attention.get())
@@ -411,14 +468,30 @@ impl FormState {
             } else {
                 Style::default().fg(theme.subtle.get())
             };
-            spans.push(Span::styled(format!(" {} ", tab.label()), style));
+            let label = Span::styled(format!(" {} ", tab.label()), style);
+            let label_w = label.width() as u16;
+            hits.push(
+                Rect::new(x, area.y, label_w, 1).intersection(area),
+                ClickAction::Row {
+                    list: ListId::FormTabs,
+                    index,
+                },
+            );
+            x += label_w + 1;
+            spans.push(label);
             spans.push(Span::raw(" "));
         }
         frame.render_widget(Paragraph::new(Line::from(spans)), area);
     }
 
     /// Render the active tab's fields; returns the text cursor position if any.
-    fn render_fields(&self, frame: &mut Frame, area: Rect, theme: &Theme) -> Option<(u16, u16)> {
+    fn render_fields(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        hits: &mut HitMap,
+    ) -> Option<(u16, u16)> {
         let indices = self.tab_indices();
         let visible = area.height as usize;
         // Focus may point past the last field (the Save/Cancel buttons live in their
@@ -429,6 +502,12 @@ impl FormState {
         let label_w = self.label_width(area.width);
         let value_x = area.x + label_w + SEP_W;
         let value_w = area.width.saturating_sub(label_w + SEP_W) as usize;
+        hits.push(
+            area,
+            ClickAction::Scroll {
+                list: ListId::FormFields,
+            },
+        );
         let mut cursor_pos = None;
 
         for (pos, &fi) in indices.iter().enumerate() {
@@ -437,6 +516,13 @@ impl FormState {
             }
             let field = &self.fields[fi];
             let y = area.y + (pos - scroll) as u16;
+            hits.push(
+                Rect::new(area.x, y, area.width, 1),
+                ClickAction::Row {
+                    list: ListId::FormFields,
+                    index: pos,
+                },
+            );
             let focused_here = pos == self.focused;
 
             let label_style = if focused_here {
@@ -481,7 +567,7 @@ impl FormState {
         widest.clamp(MIN_LABEL_W, max_label)
     }
 
-    fn render_buttons(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+    fn render_buttons(&self, frame: &mut Frame, area: Rect, theme: &Theme, hits: &mut HitMap) {
         let tab_len = self.tab_indices().len();
         // Both buttons are filled blocks (reversed) so they read as buttons at all
         // times; the focused one is the accent colour, the other a subtle grey.
@@ -497,15 +583,33 @@ impl FormState {
             }
             Span::styled(format!("  {}  ", label), style)
         };
-        let line = Line::from(vec![
-            button("Save", self.focused == tab_len),
-            Span::raw("   "),
-            button("Cancel", self.focused == tab_len + 1),
-        ]);
+        let save = button("Save", self.focused == tab_len);
+        let cancel = button("Cancel", self.focused == tab_len + 1);
+        let (save_w, cancel_w) = (save.width() as u16, cancel.width() as u16);
+        let line = Line::from(vec![save, Span::raw("   "), cancel]);
         frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+
+        // Same centring as the paragraph. Ctrl+S and Esc are what save and cancel
+        // mean whatever has focus.
+        let left = area.x + (area.width / 2).saturating_sub((save_w + 3 + cancel_w) / 2);
+        hits.push(
+            Rect::new(left, area.y, save_w, 1).intersection(area),
+            ClickAction::Key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL)),
+        );
+        hits.push(
+            Rect::new(left + save_w + 3, area.y, cancel_w, 1).intersection(area),
+            ClickAction::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        );
     }
 
-    fn render_footer(&self, frame: &mut Frame, desc_area: Rect, hint_area: Rect, theme: &Theme) {
+    fn render_footer(
+        &self,
+        frame: &mut Frame,
+        desc_area: Rect,
+        hint_area: Rect,
+        theme: &Theme,
+        hits: &mut HitMap,
+    ) {
         let tab_len = self.tab_indices().len();
         // Description line, or the validation error (takes over the line) in red.
         let desc = if let Some(err) = &self.error {
@@ -537,6 +641,9 @@ impl FormState {
             ("Esc", "cancel"),
         ];
         crate::tui::ui::render_hint_bar(frame, hint_area, hints, theme);
+        // A focused text field takes plain characters, so only the keys that are not
+        // typed text are offered.
+        crate::tui::ui::record_hint_hits(hits, hint_area, hints, true);
     }
 }
 
@@ -779,6 +886,7 @@ pub fn run_form(
     profile: &Profile,
     existing_names: &[String],
     theme: &Theme,
+    mouse: bool,
 ) -> Result<Option<(String, Profile)>> {
     let is_new = profile_name.is_none();
     let title = if is_new {
@@ -788,78 +896,80 @@ pub fn run_form(
     };
     let mut base_profile = profile.clone();
     let mut state = FormState::new(&base_profile, is_new);
+    let mut pointer = Pointer::new(mouse);
 
     loop {
-        terminal.draw(|frame| state.render(frame, title, theme))?;
+        pointer.draw(terminal, |frame, hits| {
+            hits.clear();
+            state.render(frame, title, theme, hits);
+        })?;
 
-        if let Event::Key(key) = event::read()? {
-            match state.handle_key(key) {
-                Action::Cancel => {
-                    // Warn before throwing away edits; a clean form cancels straight away.
-                    if !state.is_dirty(&base_profile) || run_discard_confirm(terminal, theme)? {
-                        return Ok(None);
-                    }
+        let action = match pointer.read()? {
+            Input::Key(key) => state.handle_key(key),
+            Input::Pointer(pointed) => state.handle_pointer(pointed),
+            Input::Redraw => continue,
+        };
+        match action {
+            Action::Cancel => {
+                // Warn before throwing away edits; a clean form cancels straight away.
+                if !state.is_dirty(&base_profile) || run_discard_confirm(terminal, theme, mouse)? {
+                    return Ok(None);
                 }
-                Action::OpenEditor => {
-                    if let Some(name) = profile_name {
-                        let path = crate::profile::profile_dir(name)?.join("profile.toml");
-                        open_editor(terminal, &path)?;
-                        base_profile = crate::profile::load(name)?;
-                        state = FormState::new(&base_profile, is_new);
-                    }
-                }
-                Action::OpenHeaders => {
-                    headers::run_headers_submenu(
-                        terminal,
-                        &mut state.custom_headers,
-                        theme,
-                        "SIP Headers",
-                    )?;
-                    state.update_header_count();
-                }
-                Action::OpenHeaderViews => {
-                    headers::run_headers_submenu(
-                        terminal,
-                        &mut state.header_display,
-                        theme,
-                        "Header views (label = template)",
-                    )?;
-                    state.update_header_views_count();
-                }
-                Action::OpenCodecs => {
-                    codecs::run_codecs_submenu(terminal, &mut state.audio_codecs, theme)?;
-                    state.update_codec_count();
-                }
-                Action::Save => {
-                    let (name, profile_out) = state.extract(&base_profile);
-                    if let Some(err) = state.validate(&name, &profile_out, existing_names) {
-                        state.error = Some(err);
-                        continue;
-                    }
-                    let final_name = if is_new {
-                        name
-                    } else {
-                        profile_name.unwrap().to_string()
-                    };
-                    return Ok(Some((final_name, profile_out)));
-                }
-                Action::None => {}
             }
+            Action::OpenEditor => {
+                if let Some(name) = profile_name {
+                    let path = crate::profile::profile_dir(name)?.join("profile.toml");
+                    open_editor(terminal, &path)?;
+                    base_profile = crate::profile::load(name)?;
+                    state = FormState::new(&base_profile, is_new);
+                }
+            }
+            Action::OpenHeaders => {
+                headers::run_headers_submenu(
+                    terminal,
+                    &mut state.custom_headers,
+                    theme,
+                    "SIP Headers",
+                    mouse,
+                )?;
+                state.update_header_count();
+            }
+            Action::OpenHeaderViews => {
+                headers::run_headers_submenu(
+                    terminal,
+                    &mut state.header_display,
+                    theme,
+                    "Header views (label = template)",
+                    mouse,
+                )?;
+                state.update_header_views_count();
+            }
+            Action::OpenCodecs => {
+                codecs::run_codecs_submenu(terminal, &mut state.audio_codecs, theme, mouse)?;
+                state.update_codec_count();
+            }
+            Action::Save => {
+                let (name, profile_out) = state.extract(&base_profile);
+                if let Some(err) = state.validate(&name, &profile_out, existing_names) {
+                    state.error = Some(err);
+                    continue;
+                }
+                let final_name = if is_new {
+                    name
+                } else {
+                    profile_name.unwrap().to_string()
+                };
+                return Ok(Some((final_name, profile_out)));
+            }
+            Action::None => {}
         }
     }
 }
 
 fn open_editor(terminal: &mut Term, path: &Path) -> Result<()> {
-    use crossterm::{
-        execute,
-        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-    };
     use std::process::Command;
 
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
-
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
     // Point the editor at the controlling terminal. When a session's TUI is
     // running, fd 1/2 are redirected to the profile log so baresip's raw stdout
@@ -877,11 +987,7 @@ fn open_editor(terminal: &mut Term, path: &Path) -> Result<()> {
             cmd.stdin(tty).stdout(out).stderr(err);
         }
     }
-    let status = cmd.status();
-
-    enable_raw_mode()?;
-    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-    crate::tui::clear_screen(terminal)?;
+    let status = crate::tui::with_screen_released(terminal, || cmd.status())?;
 
     status
         .map(|_| ())
@@ -891,6 +997,176 @@ fn open_editor(terminal: &mut Term, path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mouse::{HitMap, Pointer};
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::backend::TestBackend;
+
+    /// Draw the form on a 100×30 screen; returns the recorded regions and the
+    /// screen text row by row.
+    fn drawn(form: &FormState) -> (HitMap, Vec<String>) {
+        let theme = Theme::default();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        let mut hits = HitMap::default();
+        terminal
+            .draw(|frame| form.render(frame, " Edit Profile ", &theme, &mut hits))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let lines = (0..30u16)
+            .map(|y| {
+                (0..100u16)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect();
+        (hits, lines)
+    }
+
+    /// The cell of the first occurrence of `text` on screen.
+    fn find(lines: &[String], text: &str) -> (u16, u16) {
+        let y = lines.iter().position(|l| l.contains(text)).unwrap();
+        (lines[y].find(text).unwrap() as u16, y as u16)
+    }
+
+    fn left_button(kind: fn(MouseButton) -> MouseEventKind, col: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: kind(MouseButton::Left),
+            column: col,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    /// Press and release the left button on a cell the way the event loop sees a
+    /// click.
+    fn click(form: &mut FormState, hits: HitMap, (col, row): (u16, u16)) -> Action {
+        let mut pointer = Pointer::new(true);
+        pointer.hits = hits;
+        pointer.resolve(left_button(MouseEventKind::Down, col, row));
+        let input = pointer
+            .resolve(left_button(MouseEventKind::Up, col, row))
+            .expect("a region under the click");
+        let Input::Pointer(pointed) = input else {
+            panic!("{input:?} is not a click");
+        };
+        form.handle_pointer(pointed)
+    }
+
+    #[test]
+    fn a_click_on_a_tab_label_switches_the_tab() {
+        let mut form = FormState::new(&crate::profile::Profile::default(), false);
+        form.focused = 2;
+        let (hits, lines) = drawn(&form);
+        let at = find(&lines, "Features");
+        assert!(matches!(click(&mut form, hits, at), Action::None));
+        assert_eq!(form.active_tab, Tab::Features);
+        assert_eq!(form.focused, 0, "a new tab starts at its first field");
+    }
+
+    #[test]
+    fn a_click_on_a_toggle_flips_it_and_focuses_it() {
+        let profile = crate::profile::Profile {
+            mwi: true,
+            ..Default::default()
+        };
+        let mut form = FormState::new(&profile, false);
+        form.active_tab = Tab::Features;
+        let (hits, lines) = drawn(&form);
+        let at = find(&lines, "MWI");
+        click(&mut form, hits, at);
+        assert!(!get_toggle(form.field(FieldId::Mwi)));
+        assert_eq!(
+            form.focused_index(),
+            form.fields
+                .iter()
+                .position(|f| f.id == FieldId::Mwi)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_select_cycles_it() {
+        let mut form = FormState::new(&crate::profile::Profile::default(), false);
+        form.active_tab = Tab::Network;
+        let (hits, lines) = drawn(&form);
+        let at = find(&lines, "Transport");
+        click(&mut form, hits, at);
+        assert_eq!(get_select(form.field(FieldId::Transport)), 1);
+    }
+
+    #[test]
+    fn a_click_on_a_text_field_only_focuses_it() {
+        let mut form = FormState::new(&crate::profile::Profile::default(), false);
+        let (hits, lines) = drawn(&form);
+        let at = find(&lines, "Username");
+        assert!(matches!(click(&mut form, hits, at), Action::None));
+        assert_eq!(
+            form.focused_index(),
+            form.fields
+                .iter()
+                .position(|f| f.id == FieldId::Username)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn a_click_on_a_submenu_field_opens_it() {
+        let mut form = FormState::new(&crate::profile::Profile::default(), false);
+        form.active_tab = Tab::Audio;
+        let (hits, lines) = drawn(&form);
+        let at = find(&lines, "Audio codecs");
+        assert!(matches!(click(&mut form, hits, at), Action::OpenCodecs));
+    }
+
+    #[test]
+    fn a_click_on_save_saves_and_on_cancel_cancels() {
+        let mut form = FormState::new(&crate::profile::Profile::default(), false);
+        let (hits, lines) = drawn(&form);
+        let save = find(&lines, "Save");
+        let cancel = find(&lines, "Cancel");
+        assert!(matches!(click(&mut form, hits, save), Action::Save));
+        let (hits, _) = drawn(&form);
+        assert!(matches!(click(&mut form, hits, cancel), Action::Cancel));
+    }
+
+    #[test]
+    fn the_wheel_moves_the_focus_one_field_without_wrapping() {
+        let mut form = FormState::new(&crate::profile::Profile::default(), false);
+        let tab_len = form.tab_indices().len();
+        let down = Pointed::Wheel {
+            list: ListId::FormFields,
+            down: true,
+        };
+        let up = Pointed::Wheel {
+            list: ListId::FormFields,
+            down: false,
+        };
+        form.handle_pointer(down.clone());
+        assert_eq!(form.focused, 1);
+        form.handle_pointer(up.clone());
+        form.handle_pointer(up);
+        assert_eq!(form.focused, 0);
+        for _ in 0..tab_len + 5 {
+            form.handle_pointer(down.clone());
+        }
+        assert_eq!(form.focused, tab_len + 1, "stops on the Cancel button");
+    }
+
+    #[test]
+    fn a_click_with_the_mouse_off_hits_nothing() {
+        let form = FormState::new(&crate::profile::Profile::default(), false);
+        let (hits, lines) = drawn(&form);
+        let (col, row) = find(&lines, "Network");
+        let mut pointer = Pointer::new(false);
+        pointer.hits = hits;
+        assert_eq!(
+            pointer.resolve(left_button(MouseEventKind::Down, col, row)),
+            None
+        );
+        assert_eq!(
+            pointer.resolve(left_button(MouseEventKind::Up, col, row)),
+            None
+        );
+    }
 
     fn widest(form: &FormState) -> u16 {
         form.fields

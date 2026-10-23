@@ -9,6 +9,7 @@ pub mod form;
 pub mod header;
 pub mod history;
 pub mod hooks;
+pub mod mouse;
 pub mod notify;
 pub mod picker;
 pub mod profile;

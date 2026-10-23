@@ -8,6 +8,7 @@ use ratatui::{
 };
 
 use super::app::{Call, CallDirection, CallHistoryEntry, Declined};
+use crate::mouse::{ClickAction, ListId};
 
 /// Truncate `s` to `width` display columns (char-aware, appending `…` when it
 /// doesn't fit), otherwise left-pad it to `width` so the next column aligns.
@@ -282,13 +283,14 @@ impl super::app::App {
     }
 }
 
-pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
+pub(super) fn render(f: &mut Frame, app: &mut super::app::App, area: Rect) {
     let indices = app.call_history.filtered_indices(&app.contacts);
     let total = app.call_history.entries.len();
     let filtered_len = indices.len();
 
     if app.call_history.detail {
         render_history_detail(f, app, area, &indices);
+        app.hits.push(area, ClickAction::Inert);
         return;
     }
 
@@ -387,13 +389,20 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
 
     let list_area = Rect::new(inner.x, inner.y, inner.width, visible as u16);
     f.render_widget(List::new(items), list_area);
+    // Search typing owns the characters; the search footer has only Enter/Esc.
+    super::ui::record_list_hits(
+        &mut app.hits,
+        ListId::History,
+        area,
+        list_area,
+        scroll,
+        filtered_len,
+    );
     if footer_h > 0 {
-        super::ui::render_hint_bar(
-            f,
-            Rect::new(inner.x, inner.y + visible as u16, inner.width, footer_h),
-            footer,
-            &app.theme,
-        );
+        let footer_area = Rect::new(inner.x, inner.y + visible as u16, inner.width, footer_h);
+        super::ui::render_hint_bar(f, footer_area, footer, &app.theme);
+        let text_input = app.in_text_input();
+        super::ui::record_hint_hits(&mut app.hits, footer_area, footer, text_input);
     }
     super::ui::render_scrollbar(f, &app.theme, area, filtered_len, visible, scroll);
 }

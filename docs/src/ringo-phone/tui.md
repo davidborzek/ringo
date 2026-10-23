@@ -87,7 +87,6 @@ actually follows is up to your provider.
 | `Enter` | Select number (dial or transfer) |
 | `/` | Search |
 | `a` / `e` / `d` | Add / edit / delete contact |
-| `E` | Open contacts in `$EDITOR` |
 | `f` / `Esc` | Close |
 
 ## Command bar
@@ -96,7 +95,7 @@ Open with `:`. Tab-completes commands; `Enter` runs, `Esc` closes.
 
 Commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`,
 `dtmf <digits>`, `transfer <uri>`, `contacts`, `events`, `log`, `history`, `edit`,
-`switch`, `help`, `quit`.
+`switch`, `mouse`, `help`, `quit`.
 
 ## Call history / log views
 
@@ -108,3 +107,47 @@ Commands: `dial <n>`, `hangup`, `accept`, `hold`, `resume`, `mute`,
 | `d` / `D` | (history) delete entry / clear all |
 | `e` / `l` / `c` | Switch between event log / baresip log / call history |
 | `Esc` | Close |
+
+## Mouse
+
+Mouse support is off by default; enable it with `mouse = true` under `[ui]` (see
+[Configuration](configuration.md#mouse)) or toggle it with `:mouse`. A click does
+what the matching key would, so it behaves the same in every context — `b` still
+rejects a ringing call and hangs up an active one.
+
+| Where | Click | Wheel |
+|-------|-------|-------|
+| Phone, hint bar | Runs the hint (`d dial`, `b reject`, …) | — |
+| Phone, call list | Selects the call (as `Tab` does) | — |
+| Phone, status bar | Registration indicator re-registers when it is failed or unregistered | — |
+| Call history, contacts, dial-history search | Selects the row; double-click presses `Enter` | Scrolls |
+| Event log, baresip log | Hints only; rows are not selectable | Scrolls |
+| Confirmation popups | `Cancel` / confirm button | — |
+| Profile picker | Row selects, double-click starts it; hints run their key | Moves the selection |
+| Profile form | Tab labels switch the tab; fields take focus; toggles and selects change; submenus open; `Save` / `Cancel` | Moves the focus |
+| Form submenu: headers | Row (key or value half) takes focus; double-click does the same | Moves the focus |
+| Form submenu: codecs | Row takes focus; double-click toggles it on or off | Moves the focus |
+
+While a text input is open (dial, transfer, command bar) only the hints for
+`Enter`, `Esc`, `Tab` and `Ctrl+R` are clickable; clicking a character hint would
+otherwise type it.
+
+A click acts when the button is released, so dragging over a hint or row selects
+text instead of pressing it.
+
+Inside tmux, mouse events only reach ringo with `set -g mouse on` in `tmux.conf`.
+
+### Selecting and copying
+
+Drag with the left button to select text on ringo's screen (in the phone, the
+picker, the profile form and its popups). The selection runs from where you
+pressed to where you are, wrapping across lines like a terminal's. On release the
+text is copied to the system clipboard and stays highlighted until the next key,
+click or resize; the phone also shows `Copied N chars` in the bottom line.
+Trailing spaces are trimmed and at most 100 KB are copied.
+
+Copying uses the OSC 52 escape sequence, so it needs a terminal that supports it
+(most do; some VTE-based terminals ignore it and receive nothing). Inside tmux
+add `set -g set-clipboard on` to `tmux.conf`. Where OSC 52 is not available,
+hold `Shift` (usually `Option` on macOS terminals) while dragging to use the
+terminal's own selection instead.

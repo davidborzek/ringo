@@ -1,21 +1,26 @@
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
+    buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Margin, Rect},
+    style::Color,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState, Wrap,
+        ScrollbarState, Widget, Wrap,
     },
 };
 
 use crate::config::Theme;
+use crate::mouse::{ClickAction, HitMap, ListId};
 
 use super::app::InputMode;
 use super::{App, RegStatus, TransferMode};
 
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    app.hits.clear();
 
     let title_left = Line::from(vec![
         Span::raw(" "),
@@ -31,7 +36,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // The hint bar wraps onto extra rows on narrow terminals; size it to fit so
     // it doesn't overflow. The command bar / error line is always one row.
-    let cmd_h = if app.command.active || app.command.error.is_some() {
+    let cmd_h = if app.command.active || app.command.error.is_some() || app.command.notice.is_some()
+    {
         1
     } else {
         hint_rows(&app.hints(), inner.width)
@@ -101,7 +107,18 @@ pub fn render(f: &mut Frame, app: &mut App) {
         } else {
             &nav_footer
         };
-        let content = render_modal(f, &app.theme, 80, 80, &title, footer);
+        let text_input = app.in_text_input();
+        let content = render_modal(
+            f,
+            &app.theme,
+            &mut app.hits,
+            80,
+            80,
+            &title,
+            footer,
+            text_input,
+            Some(ListId::Logs),
+        );
         super::log::render_logs(f, app, content);
         let top = app
             .log
@@ -127,14 +144,30 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 super::app::HistoryDelete::One => "Delete the selected call?".to_string(),
                 super::app::HistoryDelete::All => "Clear the entire call history?".to_string(),
             };
-            render_confirm_popup(f, &app.theme, &q, "Delete", app.confirm_yes, true);
+            render_confirm_popup(
+                f,
+                &app.theme,
+                &mut app.hits,
+                &q,
+                "Delete",
+                app.confirm_yes,
+                true,
+            );
         }
     } else if app.contacts_state.show {
         super::contacts::render(f, app, centered_rect(area, 80, 80));
         if let Some(ci) = app.contacts_state.delete_confirm {
             let name = app.contacts.get(ci).map(|c| c.name.as_str()).unwrap_or("?");
             let q = format!("Delete \"{}\"?", name);
-            render_confirm_popup(f, &app.theme, &q, "Delete", app.confirm_yes, true);
+            render_confirm_popup(
+                f,
+                &app.theme,
+                &mut app.hits,
+                &q,
+                "Delete",
+                app.confirm_yes,
+                true,
+            );
         }
     }
 
@@ -144,11 +177,20 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // Confirmation popups sit on top of everything.
     if app.quit_confirm {
-        render_confirm_popup(f, &app.theme, "Quit ringo?", "Quit", app.confirm_yes, false);
+        render_confirm_popup(
+            f,
+            &app.theme,
+            &mut app.hits,
+            "Quit ringo?",
+            "Quit",
+            app.confirm_yes,
+            false,
+        );
     } else if app.switch_confirm {
         render_confirm_popup(
             f,
             &app.theme,
+            &mut app.hits,
             "Switch profile?",
             "Switch",
             app.confirm_yes,
@@ -199,16 +241,26 @@ fn centered_rect(area: Rect, w_pct: u16, h_pct: u16) -> Rect {
 /// `w_pct`×`h_pct` of the screen, with a subtle `footer` hint on the last inner
 /// row. Returns the content area above the footer for the caller to fill.
 /// Generic on purpose so Logs/Help (and later History/Contacts) share one frame.
+/// The frame is inert to clicks, so they do not reach what it covers; `scroll`
+/// names the list the wheel moves inside it, if any.
+#[allow(clippy::too_many_arguments)]
 fn render_modal(
     f: &mut Frame,
     theme: &Theme,
+    hits: &mut HitMap,
     w_pct: u16,
     h_pct: u16,
     title: &str,
     footer: &[Hint],
+    text_input: bool,
+    scroll: Option<ListId>,
 ) -> Rect {
     let rect = centered_rect(f.area(), w_pct, h_pct);
     f.render_widget(Clear, rect);
+    hits.push(rect, ClickAction::Inert);
+    if let Some(list) = scroll {
+        hits.push(rect, ClickAction::Scroll { list });
+    }
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -224,12 +276,11 @@ fn render_modal(
         let footer_h = hint_rows(footer, inner.width);
         if inner.height > footer_h {
             let fy = inner.y + inner.height - footer_h;
-            render_hint_bar(
-                f,
-                Rect::new(inner.x, fy, inner.width, footer_h),
-                footer,
-                theme,
-            );
+            let footer_area = Rect::new(inner.x, fy, inner.width, footer_h);
+            render_hint_bar(f, footer_area, footer, theme);
+            // `:` opens the command bar over an open overlay, so a plain-character
+            // footer hint would be typed into it.
+            record_hint_hits(hits, footer_area, footer, text_input);
             return Rect::new(inner.x, inner.y, inner.width, inner.height - footer_h);
         }
     }
@@ -242,6 +293,7 @@ fn render_modal(
 fn render_confirm_popup(
     f: &mut Frame,
     theme: &Theme,
+    hits: &mut HitMap,
     question: &str,
     confirm_label: &str,
     yes: bool,
@@ -266,6 +318,8 @@ fn render_confirm_popup(
         h,
     );
     f.render_widget(Clear, rect);
+    // Modal: nothing outside the buttons is clickable while it is up.
+    hits.push(area, ClickAction::Inert);
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -295,20 +349,39 @@ fn render_confirm_popup(
     } else {
         Style::default().fg(theme.subtle.get())
     };
-    let buttons = Line::from(vec![
-        Span::styled("  Cancel  ", cancel),
-        Span::raw("   "),
-        Span::styled(format!("  {confirm_label}  "), confirm),
-    ]);
-    f.render_widget(
-        Paragraph::new(buttons).alignment(Alignment::Center),
-        Rect::new(inner.x, inner.y + 2, inner.width, 1),
+    let cancel_span = Span::styled("  Cancel  ", cancel);
+    let confirm_span = Span::styled(format!("  {confirm_label}  "), confirm);
+    let (cancel_w, confirm_w) = (cancel_span.width() as u16, confirm_span.width() as u16);
+    let buttons = Line::from(vec![cancel_span, Span::raw("   "), confirm_span]);
+    let row = Rect::new(inner.x, inner.y + 2, inner.width, 1);
+    f.render_widget(Paragraph::new(buttons).alignment(Alignment::Center), row);
+
+    // Same centring as the paragraph above. Esc and `y` are what every confirm
+    // handler reads as cancel and confirm, whatever the button highlight says.
+    let left = row.x + (row.width / 2).saturating_sub((cancel_w + 3 + confirm_w) / 2);
+    hits.push(
+        Rect::new(left, row.y, cancel_w, 1).intersection(row),
+        ClickAction::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+    );
+    hits.push(
+        Rect::new(left + cancel_w + 3, row.y, confirm_w, 1).intersection(row),
+        ClickAction::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
     );
 }
 
 /// Static key/command reference shown in the Help modal.
-fn render_help(f: &mut Frame, app: &App) {
-    let content = render_modal(f, &app.theme, 60, 70, "Help", &[("Esc", "close")]);
+fn render_help(f: &mut Frame, app: &mut App) {
+    let content = render_modal(
+        f,
+        &app.theme,
+        &mut app.hits,
+        60,
+        70,
+        "Help",
+        &[("Esc", "close")],
+        false,
+        None,
+    );
     let accent = Style::default().fg(app.theme.accent.get());
     let subtle = Style::default().fg(app.theme.subtle.get());
     let row = |key: &str, desc: &str| {
@@ -347,7 +420,7 @@ fn render_help(f: &mut Frame, app: &App) {
             Style::default(),
         )),
         Line::from(Span::styled(
-            "  info  log  history  contacts  edit  switch  quit",
+            "  info  log  history  contacts  mouse  edit  switch  quit",
             Style::default(),
         )),
     ];
@@ -355,8 +428,18 @@ fn render_help(f: &mut Frame, app: &App) {
 }
 
 /// Call-details overlay: peer + the configured inbound-header views.
-fn render_details(f: &mut Frame, app: &App) {
-    let content = render_modal(f, &app.theme, 60, 60, "Call details", &[("Esc", "close")]);
+fn render_details(f: &mut Frame, app: &mut App) {
+    let content = render_modal(
+        f,
+        &app.theme,
+        &mut app.hits,
+        60,
+        60,
+        "Call details",
+        &[("Esc", "close")],
+        false,
+        None,
+    );
     let accent = Style::default().fg(app.theme.accent.get());
     let subtle = Style::default().fg(app.theme.subtle.get());
     let mut lines = Vec::new();
@@ -393,7 +476,7 @@ fn render_details(f: &mut Frame, app: &App) {
 
 // ─── Status Bar ──────────────────────────────────────────────────────────────
 
-fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn render_status_bar(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let sep = Span::styled(" │ ", Style::default().fg(app.theme.subtle.get()));
 
     let mut spans = vec![
@@ -423,7 +506,10 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Style::default().fg(app.theme.attention.get()),
         ),
     };
-    spans.push(Span::styled(reg_text, reg_style));
+    let reg_x = area.x + spans.iter().map(|s| s.width() as u16).sum::<u16>();
+    let reg_span = Span::styled(reg_text, reg_style);
+    let reg_w = reg_span.width() as u16;
+    spans.push(reg_span);
 
     // Call count
     if !app.calls.is_empty() {
@@ -494,11 +580,24 @@ fn render_status_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right),
         bar_chunks[1],
     );
+
+    // Starting a registration that is already running would only repeat it.
+    if !app.overlay_open()
+        && matches!(
+            app.reg_status,
+            RegStatus::Failed(_) | RegStatus::Unregistered
+        )
+    {
+        app.hits.push(
+            Rect::new(reg_x, area.y, reg_w, 1).intersection(bar_chunks[0]),
+            ClickAction::Command("register"),
+        );
+    }
 }
 
 // ─── Command / Hint Bar ──────────────────────────────────────────────────────
 
-fn render_command_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn render_command_bar(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     if app.command.active {
         let line = Line::from(vec![
             Span::styled(":", Style::default().fg(app.theme.accent.get())),
@@ -512,12 +611,30 @@ fn render_command_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             Paragraph::new(format!(" {}", err)).style(Style::default().fg(app.theme.danger.get())),
             area,
         );
+    } else if let Some(notice) = &app.command.notice {
+        f.render_widget(
+            Paragraph::new(format!(" {notice}")).style(Style::default().fg(app.theme.subtle.get())),
+            area,
+        );
     } else {
         render_hints(f, app, area);
     }
 }
 
 impl App {
+    /// Whether an overlay or popup covers the phone screen, whose own regions
+    /// are then not clickable.
+    pub(super) fn overlay_open(&self) -> bool {
+        self.log.show
+            || self.help_show
+            || self.details_show
+            || self.call_history.show
+            || self.contacts_state.show
+            || self.dial.mode == InputMode::HistorySearch
+            || self.quit_confirm
+            || self.switch_confirm
+    }
+
     /// The base hint line's keys for the current mode. Overlay-specific hints
     /// live in each modal's own footer; this is the always-visible call-action
     /// bar.
@@ -594,8 +711,14 @@ impl App {
     }
 }
 
-fn render_hints(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    render_hint_bar(f, area, &app.hints(), &app.theme);
+fn render_hints(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let hints = app.hints();
+    render_hint_bar(f, area, &hints, &app.theme);
+    // Under an overlay or popup the keys go to that, not to the bar's meaning.
+    if !app.overlay_open() {
+        let text_input = app.in_text_input();
+        record_hint_hits(&mut app.hits, area, &hints, text_input);
+    }
 }
 
 /// One keybind hint: the key (or chord) and what it does. Structured so the
@@ -614,21 +737,67 @@ pub(crate) fn styled_hints(hints: &[Hint], theme: &Theme) -> Line<'static> {
         .fg(theme.accent.get())
         .add_modifier(Modifier::BOLD);
     let lbl_style = Style::default().fg(theme.subtle.get());
+    hint_line(hints, |_| key_style, |_| lbl_style, lbl_style)
+}
+
+/// The hint line with a style per hint, so the same text can be drawn for real
+/// ([`styled_hints`]) and for measuring ([`hint_spans`]).
+fn hint_line(
+    hints: &[Hint],
+    key_style: impl Fn(usize) -> Style,
+    label_style: impl Fn(usize) -> Style,
+    separator_style: Style,
+) -> Line<'static> {
     let mut spans: Vec<Span> = Vec::new();
     for (i, (key, label)) in hints.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled("   ", lbl_style));
+            spans.push(Span::styled("   ", separator_style));
         }
         let key = match key.strip_prefix('^') {
             Some(c) => format!("C-{}", c.to_lowercase()),
             None => (*key).to_string(),
         };
-        spans.push(Span::styled(key, key_style));
+        spans.push(Span::styled(key, key_style(i)));
         if !label.is_empty() {
-            spans.push(Span::styled(format!(" {label}"), lbl_style));
+            spans.push(Span::styled(format!(" {label}"), label_style(i)));
         }
     }
     Line::from(spans)
+}
+
+/// Where each hint lands when the line wraps in a `width`×`height` area, as
+/// (hint index, row, first col, end col) — one entry per row a hint touches.
+/// Measured by drawing the line through the same `Paragraph` as
+/// [`render_hint_bar`], so it cannot drift from ratatui's word wrapping.
+fn hint_spans(hints: &[Hint], width: u16, height: u16) -> Vec<(usize, u16, u16, u16)> {
+    let area = Rect::new(0, 0, width, height);
+    if area.is_empty() {
+        return Vec::new();
+    }
+    // Each hint gets its own indexed colour; the separators keep the default.
+    let marker = |i: usize| Style::default().fg(Color::Indexed(i as u8));
+    let hints = &hints[..hints.len().min(usize::from(u8::MAX) + 1)];
+    let line = hint_line(hints, marker, marker, Style::default());
+    let mut buf = Buffer::empty(area);
+    Paragraph::new(line)
+        .wrap(Wrap { trim: false })
+        .render(area, &mut buf);
+
+    let mut spans: Vec<(usize, u16, u16, u16)> = Vec::new();
+    for row in 0..height {
+        for col in 0..width {
+            let cell = &buf[(col, row)];
+            let Color::Indexed(i) = cell.fg else { continue };
+            if cell.symbol() == " " {
+                continue;
+            }
+            match spans.last_mut() {
+                Some(last) if last.0 == usize::from(i) && last.1 == row => last.3 = col + 1,
+                _ => spans.push((usize::from(i), row, col, col + 1)),
+            }
+        }
+    }
+    spans
 }
 
 /// How many rows the hints need in an area of `width`, accounting for the shared
@@ -653,6 +822,94 @@ pub(crate) fn hint_rows(hints: &[Hint], width: u16) -> u16 {
     (w as u16).div_ceil(avail).max(1)
 }
 
+/// The key a click on the hint `key` stands for. Alternatives (`m/M`, `a/e/d`,
+/// `↑/↓`) give their first; `^X` is Ctrl+x; unknown names give `None`.
+pub(crate) fn key_for_hint(key: &str) -> Option<KeyEvent> {
+    let first = if key == "/" {
+        key
+    } else {
+        key.split('/').next()?
+    };
+    let plain = |code| Some(KeyEvent::new(code, KeyModifiers::NONE));
+    match first {
+        "Enter" => return plain(KeyCode::Enter),
+        "Esc" => return plain(KeyCode::Esc),
+        "Tab" | "⇥" => return plain(KeyCode::Tab),
+        "↑" => return plain(KeyCode::Up),
+        "↓" => return plain(KeyCode::Down),
+        _ => {}
+    }
+    if let Some(ctrl) = first.strip_prefix('^') {
+        let mut chars = ctrl.chars();
+        return match (chars.next(), chars.next()) {
+            (Some(c), None) => Some(KeyEvent::new(
+                KeyCode::Char(c.to_ascii_lowercase()),
+                KeyModifiers::CONTROL,
+            )),
+            _ => None,
+        };
+    }
+    let mut chars = first.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) => {
+            let modifiers = if c.is_uppercase() {
+                KeyModifiers::SHIFT
+            } else {
+                KeyModifiers::NONE
+            };
+            Some(KeyEvent::new(KeyCode::Char(c), modifiers))
+        }
+        _ => None,
+    }
+}
+
+/// Make each hint of a bar rendered by [`render_hint_bar`] into `area` clickable.
+/// While a text input is active, a plain character key would be typed into it
+/// instead of acting, so only Enter/Esc/Tab/arrows/Ctrl chords stay clickable.
+pub(crate) fn record_hint_hits(hits: &mut HitMap, area: Rect, hints: &[Hint], text_input: bool) {
+    let bar = Rect::new(
+        area.x + HINT_INDENT,
+        area.y,
+        area.width.saturating_sub(HINT_INDENT),
+        area.height,
+    );
+    for (hint, row, start, end) in hint_spans(hints, bar.width, bar.height) {
+        let Some(key) = key_for_hint(hints[hint].0) else {
+            continue;
+        };
+        let typed =
+            matches!(key.code, KeyCode::Char(_)) && !key.modifiers.contains(KeyModifiers::CONTROL);
+        if text_input && typed {
+            continue;
+        }
+        hits.push(
+            Rect::new(bar.x + start, bar.y + row, end - start, 1),
+            ClickAction::Key(key),
+        );
+    }
+}
+
+/// Record a list overlay: inert frame, wheel over the whole frame, and a row
+/// region per visible row. `offset` is the index of the first row shown in
+/// `list_area`, so the regions stay right in a scrolled list.
+pub(crate) fn record_list_hits(
+    hits: &mut HitMap,
+    list: ListId,
+    frame: Rect,
+    list_area: Rect,
+    offset: usize,
+    total: usize,
+) {
+    hits.push(frame, ClickAction::Inert);
+    hits.push(frame, ClickAction::Scroll { list });
+    for (i, index) in (offset..total).take(list_area.height as usize).enumerate() {
+        hits.push(
+            Rect::new(list_area.x, list_area.y + i as u16, list_area.width, 1),
+            ClickAction::Row { list, index },
+        );
+    }
+}
+
 /// Render a wrapping hint bar into `area`, indented so every (wrapped) row lines
 /// up. Pair with [`hint_rows`] to size the area's height.
 pub(crate) fn render_hint_bar(f: &mut Frame, area: Rect, hints: &[Hint], theme: &Theme) {
@@ -670,8 +927,122 @@ pub(crate) fn render_hint_bar(f: &mut Frame, area: Rect, hints: &[Hint], theme: 
 
 #[cfg(test)]
 mod tests {
-    use super::styled_hints;
+    use super::{Hint, key_for_hint, record_hint_hits, render_hint_bar, styled_hints};
     use crate::config::Theme;
+    use crate::mouse::{ClickAction, HitMap};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
+
+    fn plain(code: KeyCode) -> Option<KeyEvent> {
+        Some(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    #[test]
+    fn key_for_hint_maps_names_alternatives_and_chords() {
+        assert_eq!(key_for_hint("b"), plain(KeyCode::Char('b')));
+        assert_eq!(key_for_hint("Tab"), plain(KeyCode::Tab));
+        assert_eq!(key_for_hint("Esc"), plain(KeyCode::Esc));
+        assert_eq!(key_for_hint("Enter"), plain(KeyCode::Enter));
+        assert_eq!(key_for_hint("?"), plain(KeyCode::Char('?')));
+        assert_eq!(key_for_hint("/"), plain(KeyCode::Char('/')));
+        assert_eq!(key_for_hint("m/M"), plain(KeyCode::Char('m')));
+        assert_eq!(key_for_hint("t/T"), plain(KeyCode::Char('t')));
+        assert_eq!(key_for_hint("g/G"), plain(KeyCode::Char('g')));
+        assert_eq!(key_for_hint("↑/↓"), plain(KeyCode::Up));
+        assert_eq!(
+            key_for_hint("^R"),
+            Some(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))
+        );
+        assert_eq!(
+            key_for_hint("X"),
+            Some(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT))
+        );
+        assert_eq!(key_for_hint("Space/←→"), None);
+        assert_eq!(key_for_hint("⇥"), plain(KeyCode::Tab));
+        assert_eq!(key_for_hint(""), None);
+    }
+
+    /// The text under every recorded hint region, read back from the rendered
+    /// frame — what a click on it would hit.
+    fn region_texts(hints: &[Hint], width: u16, text_input: bool) -> Vec<String> {
+        let theme = Theme::default();
+        let area = Rect::new(0, 0, width, 8);
+        let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
+        terminal
+            .draw(|f| render_hint_bar(f, area, hints, &theme))
+            .unwrap();
+        let mut hits = HitMap::default();
+        record_hint_hits(&mut hits, area, hints, text_input);
+        let buf = terminal.backend().buffer();
+        let mut out = Vec::new();
+        for row in 0..8 {
+            for col in 0..width {
+                if let Some(ClickAction::Key(key)) = hits.hit(col, row) {
+                    let _ = key;
+                    out.push((col, row));
+                }
+            }
+        }
+        // Group the hit cells per row run into strings.
+        let mut texts: Vec<String> = Vec::new();
+        let mut prev: Option<(u16, u16)> = None;
+        for (col, row) in out {
+            let symbol = buf[(col, row)].symbol().to_string();
+            match prev {
+                Some((pc, pr)) if pr == row && pc + 1 == col => {
+                    texts.last_mut().unwrap().push_str(&symbol)
+                }
+                _ => texts.push(symbol),
+            }
+            prev = Some((col, row));
+        }
+        texts
+    }
+
+    #[test]
+    fn hint_regions_cover_the_key_and_label_on_one_row() {
+        let hints = [("d", "dial"), ("^R", "search"), ("Esc", "")];
+        assert_eq!(
+            region_texts(&hints, 60, false),
+            vec!["d dial", "C-r search", "Esc"]
+        );
+    }
+
+    #[test]
+    fn hint_regions_follow_the_wrapping_on_a_narrow_bar() {
+        let hints = [
+            ("a", "accept"),
+            ("b", "reject"),
+            ("t", "deflect"),
+            ("Tab", "switch"),
+        ];
+        let texts = region_texts(&hints, 18, false);
+        // Every word is still covered, wherever it wrapped to.
+        let joined = texts.join("|");
+        for word in [
+            "a", "accept", "b", "reject", "t", "deflect", "Tab", "switch",
+        ] {
+            assert!(joined.contains(word), "{word} missing in {joined}");
+        }
+        assert!(
+            texts.len() > hints.len(),
+            "a hint split across rows has a region per row"
+        );
+    }
+
+    #[test]
+    fn text_input_leaves_only_non_character_hints_clickable() {
+        let hints = [
+            ("d", "dial"),
+            ("Enter", "go"),
+            ("^R", "search"),
+            ("?", "more"),
+        ];
+        assert_eq!(
+            region_texts(&hints, 60, true),
+            vec!["Enter go", "C-r search"]
+        );
+    }
 
     #[test]
     fn hints_wrap_onto_more_rows_when_narrow() {

@@ -16,6 +16,7 @@ pub const COMMANDS: &[&str] = &[
     "hold",
     "info",
     "log",
+    "mouse",
     "mute",
     "quit",
     "register",
@@ -255,6 +256,19 @@ impl App {
                     self.send_dtmf(*c);
                 }
                 Ok(format!("Sent DTMF {}", digits.iter().collect::<String>()))
+            }
+            // UI-only, so not in `control::ALLOWED_COMMANDS`; the render loop
+            // applies the new state to the terminal.
+            "mouse" => {
+                self.mouse_enabled = !self.mouse_enabled;
+                self.selector.clear();
+                self.command.notice = None;
+                Ok(if self.mouse_enabled {
+                    "Mouse on"
+                } else {
+                    "Mouse off"
+                }
+                .into())
             }
             "status" => Ok(self.status_json()),
             "shutdown" => {

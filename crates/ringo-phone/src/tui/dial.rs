@@ -9,6 +9,7 @@ use ratatui::{
 use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::app::{InputMode, TransferMode};
+use crate::mouse::ListId;
 
 impl super::app::App {
     pub(super) fn handle_dial_key(&mut self, key: crossterm::event::KeyEvent) {
@@ -317,7 +318,7 @@ pub(super) fn render_dial(f: &mut Frame, app: &super::app::App, area: Rect) {
     f.render_widget(Paragraph::new(line), area);
 }
 
-pub(super) fn render_history_search(f: &mut Frame, app: &super::app::App, area: Rect) {
+pub(super) fn render_history_search(f: &mut Frame, app: &mut super::app::App, area: Rect) {
     let filtered = crate::history::fuzzy_filter(&app.dial.history, &app.dial.query);
 
     let max_visible: usize = 8;
@@ -375,6 +376,14 @@ pub(super) fn render_history_search(f: &mut Frame, app: &super::app::App, area: 
         .collect();
 
     f.render_widget(List::new(items), chunks[1]);
+    super::ui::record_list_hits(
+        &mut app.hits,
+        ListId::DialHistory,
+        popup_area,
+        chunks[1],
+        scroll,
+        filtered.len(),
+    );
 }
 
 #[cfg(test)]

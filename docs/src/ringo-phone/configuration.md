@@ -98,6 +98,21 @@ environment an account belongs to, the tenant it serves, the extension it
 answers on. A key that a profile does not set is simply left out, so profiles
 can carry different ones.
 
+## Mouse
+
+```toml
+[ui]
+# Click and scroll in the TUI. Default: off.
+mouse = false
+```
+
+Off by default because capturing the mouse takes text selection away from the
+terminal. With it on, ringo selects itself: drag to highlight text and release to
+copy it to the clipboard (see [Using the TUI](tui.md#selecting-and-copying)).
+`:mouse` in the command bar switches it on or off for the running session
+without touching the config. What can be clicked is listed in
+[Using the TUI](tui.md#mouse).
+
 ## Theme
 
 All UI colors are configurable — named values or `#rrggbb` hex.

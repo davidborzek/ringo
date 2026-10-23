@@ -2,7 +2,31 @@ use super::app::{InputMode, TransferMode};
 use crossterm::event::{KeyCode, KeyModifiers};
 
 impl super::app::App {
+    /// Whether typed characters currently go into an input (or a confirm popup
+    /// that swallows them), so single-key shortcuts must not fire.
+    pub(super) fn in_text_input(&self) -> bool {
+        self.command.active
+            || self.dial.mode == InputMode::Dial
+            || self.dial.mode == InputMode::HistoryNav
+            || self.dial.mode == InputMode::HistorySearch
+            || matches!(
+                self.transfer_mode,
+                TransferMode::BlindInput(_)
+                    | TransferMode::AttendedInput(_)
+                    | TransferMode::DeflectInput { .. }
+            )
+            || (self.contacts_state.show && self.contacts_state.search_mode)
+            || (self.contacts_state.show
+                && self.contacts_state.form.mode != super::app::ContactFormMode::None)
+            || (self.contacts_state.show && self.contacts_state.delete_confirm.is_some())
+            || (self.call_history.show && self.call_history.search_mode)
+            || (self.call_history.show && self.call_history.delete_confirm.is_some())
+            || (self.log.show && self.log.search_mode)
+    }
+
     pub fn handle_key(&mut self, key: crossterm::event::KeyEvent) {
+        self.command.notice = None;
+        self.selector.clear();
         // Ctrl+C → quit immediately (always, regardless of mode)
         if matches!(
             (key.code, key.modifiers),
@@ -59,24 +83,7 @@ impl super::app::App {
         }
 
         // Global: q → quit confirm, : → command bar (except during text input)
-        let in_text_input = self.command.active
-            || self.dial.mode == InputMode::Dial
-            || self.dial.mode == InputMode::HistoryNav
-            || self.dial.mode == InputMode::HistorySearch
-            || matches!(
-                self.transfer_mode,
-                TransferMode::BlindInput(_)
-                    | TransferMode::AttendedInput(_)
-                    | TransferMode::DeflectInput { .. }
-            )
-            || (self.contacts_state.show && self.contacts_state.search_mode)
-            || (self.contacts_state.show
-                && self.contacts_state.form.mode != super::app::ContactFormMode::None)
-            || (self.contacts_state.show && self.contacts_state.delete_confirm.is_some())
-            || (self.call_history.show && self.call_history.search_mode)
-            || (self.call_history.show && self.call_history.delete_confirm.is_some())
-            || (self.log.show && self.log.search_mode);
-        if !in_text_input {
+        if !self.in_text_input() {
             match key.code {
                 KeyCode::Char('q') if key.modifiers == KeyModifiers::NONE => {
                     self.quit_confirm = true;
