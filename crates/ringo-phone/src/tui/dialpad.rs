@@ -134,7 +134,14 @@ pub(super) fn render(f: &mut Frame, app: &mut App, screen: Rect, area: Rect) {
     }
 
     let x0 = inner.x + inner.width.saturating_sub(3 * BUTTON_W + 2 * BUTTON_GAP) / 2;
-    let style = Style::default().add_modifier(Modifier::REVERSED);
+    // Filled from the theme like the form's buttons; a bare REVERSED would be
+    // the terminal's own foreground, i.e. white on most dark themes.
+    let key_style = Style::default()
+        .fg(app.theme.subtle.get())
+        .add_modifier(Modifier::REVERSED);
+    let call_style = Style::default()
+        .fg(accent)
+        .add_modifier(Modifier::REVERSED | Modifier::BOLD);
     for (r, row) in buttons.into_iter().enumerate() {
         let y = inner.y + 2 + r as u16;
         if y >= inner.y + inner.height {
@@ -143,6 +150,11 @@ pub(super) fn render(f: &mut Frame, app: &mut App, screen: Rect, area: Rect) {
         for (c, (label, key)) in row.into_iter().enumerate() {
             let x = x0 + c as u16 * (BUTTON_W + BUTTON_GAP);
             let cell = Rect::new(x, y, BUTTON_W.min(inner.x + inner.width - x), 1);
+            let style = if key.code == KeyCode::Enter {
+                call_style
+            } else {
+                key_style
+            };
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(label, style)))
                     .alignment(Alignment::Center)
