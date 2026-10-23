@@ -3,6 +3,7 @@ mod call;
 mod call_history;
 mod contacts;
 mod dial;
+mod dialpad;
 mod handler;
 pub mod ui;
 

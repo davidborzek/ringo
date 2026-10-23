@@ -399,6 +399,100 @@ fn a_click_beside_an_overlay_closes_it_a_click_inside_does_not() {
     }
 }
 
+/// A cell of the dial line, which opens the pad; `None` if no cell does.
+fn dial_line(app: &App) -> Option<(u16, u16)> {
+    (0..30u16)
+        .flat_map(|row| (0..100u16).map(move |col| (col, row)))
+        .find(|&(col, row)| app.hits.hit(col, row) == Some(&ClickAction::OpenDialpad))
+}
+
+#[test]
+fn the_dial_line_opens_the_pad_and_its_buttons_dial() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    render_app(&mut app);
+
+    // Idle: the empty dial line opens the pad and the dial input together.
+    let line = dial_line(&app).expect("idle dial line is clickable");
+    assert!(left_click(&mut app, line));
+    assert!(app.dialpad_show);
+    assert_eq!(app.dial.mode, InputMode::Dial);
+
+    let terminal = render_app(&mut app);
+    for digit in ["4", "7", "1"] {
+        let at = find_on_screen(&terminal, &format!(" {digit} "));
+        assert!(left_click(&mut app, at), "{digit}");
+    }
+    assert_eq!(app.dial.input, "471");
+
+    let terminal = render_app(&mut app);
+    assert!(left_click(&mut app, find_on_screen(&terminal, "⌫")));
+    assert_eq!(app.dial.input, "47");
+
+    let terminal = render_app(&mut app);
+    let _ = commands(&mut rx);
+    assert!(left_click(&mut app, find_on_screen(&terminal, "Call")));
+    assert_eq!(commands(&mut rx), vec!["dial"]);
+    render_app(&mut app);
+    assert!(!app.dialpad_show, "the pad goes once the call is placed");
+}
+
+#[test]
+fn the_pad_sends_dtmf_during_a_call_and_closes_with_it() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    established(&mut app, "1");
+    let _ = commands(&mut rx);
+    render_app(&mut app);
+
+    let line = dial_line(&app).expect("DTMF line");
+    assert!(left_click(&mut app, line));
+    assert!(app.dialpad_show);
+    let terminal = render_app(&mut app);
+    assert!(left_click(&mut app, find_on_screen(&terminal, " # ")));
+    assert_eq!(commands(&mut rx), vec!["sndcode"]);
+    assert_eq!(app.dial.dtmf, "#");
+
+    app.handle_message(AppEvent::CallClosed {
+        call_id: "1".into(),
+        reason: "".into(),
+        error: false,
+    });
+    render_app(&mut app);
+    assert!(!app.dialpad_show);
+}
+
+#[test]
+fn esc_or_a_click_beside_closes_the_pad_and_keeps_the_number() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    render_app(&mut app);
+    let line = dial_line(&app).unwrap();
+    left_click(&mut app, line);
+    app.handle_key(key('5'));
+
+    app.handle_key(esc());
+    assert!(!app.dialpad_show);
+    assert_eq!(app.dial.mode, InputMode::Dial);
+    assert_eq!(app.dial.input, "5");
+
+    render_app(&mut app);
+    let line = dial_line(&app).unwrap();
+    left_click(&mut app, line);
+    assert!(app.dialpad_show);
+    render_app(&mut app);
+    assert!(left_click(&mut app, (0, 0)));
+    assert!(!app.dialpad_show);
+    assert_eq!(app.dial.input, "5");
+}
+
+#[test]
+fn without_the_mouse_there_is_no_pad() {
+    let (mut app, _rx) = test_app();
+    render_app(&mut app);
+    assert_eq!(dial_line(&app), None);
+}
+
 #[test]
 fn a_click_outside_the_command_bar_leaves_it_and_does_nothing_else() {
     let (mut app, mut rx) = test_app();

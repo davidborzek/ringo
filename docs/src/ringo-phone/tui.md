@@ -120,6 +120,7 @@ rejects a ringing call and hangs up an active one.
 | Phone, hint bar | Runs the hint (`d dial`, `b reject`, …) | — |
 | Phone, call list | Selects the call (as `Tab` does) | — |
 | Phone, status bar | Registration indicator re-registers when it is failed or unregistered | — |
+| Phone, dial / DTMF line | Opens the dial pad (see below) | — |
 | Call history, contacts, dial-history search | Selects the row; double-click presses `Enter` | Scrolls |
 | Event log, baresip log | Hints only; rows are not selectable | Scrolls |
 | Confirmation popups | `Cancel` / confirm button | — |
@@ -127,6 +128,12 @@ rejects a ringing call and hangs up an active one.
 | Profile form | Tab labels switch the tab; fields take focus; toggles and selects change; submenus open; `Save` / `Cancel` | Moves the focus |
 | Form submenu: headers | Row (key or value half) takes focus; double-click does the same | Moves the focus |
 | Form submenu: codecs | Row takes focus; double-click toggles it on or off | Moves the focus |
+
+The dial pad is mouse-only. Click the dial line: while idle it opens the dial
+input and the pad together, while dialling it adds the pad to the number typed so
+far, and during a call it sends DTMF (the line shows the digits sent). The pad
+adds `+`, `⌫` and `Call` while dialling. It closes with `Esc` or a click beside it,
+keeping the number, and on its own once the call is placed or ends.
 
 A click beside an overlay (help, logs, call history, contacts, call details,
 dial-history search) or a form submenu (headers, codecs, rename) closes it, as

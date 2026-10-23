@@ -339,6 +339,8 @@ pub struct App {
     /// Whether mouse capture is wanted. Starts from `[ui] mouse`; `:mouse`
     /// flips it and the render loop brings the terminal in line.
     pub mouse_enabled: bool,
+    /// The mouse dial pad is open over the dial input / the call's DTMF.
+    pub dialpad_show: bool,
     /// Clickable regions of the last rendered frame.
     pub hits: crate::mouse::HitMap,
     /// Drag-selection over the last rendered frame.
@@ -453,6 +455,7 @@ impl App {
             pending_outbound_headers: Vec::new(),
             deflected: None,
             mouse_enabled: false,
+            dialpad_show: false,
             hits: crate::mouse::HitMap::default(),
             selector: Selector::default(),
             double_click: DoubleClick::default(),
@@ -506,6 +509,7 @@ impl App {
                 return self.click_row(list, index, double);
             }
             ClickAction::Dismiss => self.dismiss_modal(),
+            ClickAction::OpenDialpad => self.open_dialpad(),
             ClickAction::Scroll { .. } | ClickAction::Inert => return false,
         }
         true
@@ -514,6 +518,10 @@ impl App {
     /// A click away from a modal closes it as Esc would, all the way: a search
     /// typed into the overlay goes with it. Confirmations never get here.
     fn dismiss_modal(&mut self) {
+        if self.dialpad_show {
+            self.dialpad_show = false;
+            return;
+        }
         if self.dial.mode == InputMode::HistorySearch {
             self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
             return;

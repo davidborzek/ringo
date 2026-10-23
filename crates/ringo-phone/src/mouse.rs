@@ -59,6 +59,8 @@ pub enum ClickAction {
     /// Outside a modal that a click away closes (not confirmations): lies under
     /// the modal, so only clicks that miss it land here.
     Dismiss,
+    /// The phone's dial / DTMF line: opens the dial pad.
+    OpenDialpad,
 }
 
 /// Clickable regions of the last rendered frame.

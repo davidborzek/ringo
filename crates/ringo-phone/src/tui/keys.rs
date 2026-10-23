@@ -153,6 +153,13 @@ impl super::app::App {
             return;
         }
 
+        // Dial pad: Esc only closes it, keeping what was dialled; every other key
+        // goes on to the dial input or the call as usual.
+        if self.dialpad_show && key.code == KeyCode::Esc {
+            self.dialpad_show = false;
+            return;
+        }
+
         // History search popup
         if self.dial.mode == InputMode::HistorySearch {
             self.handle_history_search(key);

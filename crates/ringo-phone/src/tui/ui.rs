@@ -21,6 +21,7 @@ use super::{App, RegStatus, TransferMode};
 pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.area();
     app.hits.clear();
+    app.sync_dialpad();
 
     let title_left = Line::from(vec![
         Span::raw(" "),
@@ -59,6 +60,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     super::call::render_calls(f, app, chunks[0]);
     super::dial::render_dial(f, app, chunks[2]);
+    super::dialpad::record_dial_line(app, chunks[2]);
     if let Some(reason) = &app.last_call_reason {
         f.render_widget(
             Paragraph::new(format!("  ✗ {}", reason))
@@ -186,6 +188,8 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     if app.dial.mode == InputMode::HistorySearch {
         super::dial::render_history_search(f, app, inner);
+    } else if app.dialpad_show && !app.overlay_open() {
+        super::dialpad::render(f, app, area, inner);
     }
 
     // An open command bar: a click anywhere else leaves it, as Esc does, and is
