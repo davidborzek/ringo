@@ -384,47 +384,102 @@ fn render_help(f: &mut Frame, app: &mut App) {
     );
     let accent = Style::default().fg(app.theme.accent.get());
     let subtle = Style::default().fg(app.theme.subtle.get());
-    let row = |key: &str, desc: &str| {
-        Line::from(vec![
-            Span::styled(format!("  {key:<10}"), accent),
-            Span::styled("→ ", subtle),
-            Span::styled(desc.to_string(), Style::default()),
-        ])
-    };
-    let lines = vec![
-        Line::from(Span::styled("  Keys", subtle)),
-        row("d", "dial"),
-        row("a", "accept incoming"),
-        row("s", "silence the ringtone"),
-        row("b / Del", "hang up (reject if ringing)"),
-        row("h", "hold / resume (toggle)"),
-        row("m", "mute the microphone"),
-        row("M", "deafen (microphone and speaker)"),
-        row("t / T", "blind / attended transfer (t: deflect if ringing)"),
-        row("Tab", "switch active call"),
-        row("i", "call details"),
-        row("l", "logs"),
-        row("c", "call history"),
-        row("f", "contacts"),
-        row("?", "this help"),
-        row(":", "command"),
-        row("q", "quit"),
-        Line::from(""),
-        Line::from(Span::styled("  Commands (:)", subtle)),
-        Line::from(Span::styled(
-            "  dial <n>  hangup  accept  reject [code]  hold  resume  mute  deafen  silence",
-            Style::default(),
-        )),
-        Line::from(Span::styled(
-            "  dtmf <digits>  transfer <uri>  deflect <uri>  register  unregister",
-            Style::default(),
-        )),
-        Line::from(Span::styled(
-            "  info  log  history  contacts  mouse  edit  switch  quit",
-            Style::default(),
-        )),
-    ];
+    let width = content.width as usize;
+    let mut lines = vec![Line::from(Span::styled("  Keys", subtle))];
+    for (key, desc) in HELP_KEYS {
+        let words: Vec<&str> = desc.split(' ').collect();
+        let wrapped = wrap_units(&words, " ", width.saturating_sub(HELP_DESC_COL));
+        for (i, part) in wrapped.into_iter().enumerate() {
+            // Continuation lines hang under the description column.
+            let mut spans = if i == 0 {
+                vec![
+                    Span::styled(format!("  {key:<10}"), accent),
+                    Span::styled("→ ", subtle),
+                ]
+            } else {
+                vec![Span::raw(" ".repeat(HELP_DESC_COL))]
+            };
+            spans.push(Span::raw(part));
+            lines.push(Line::from(spans));
+        }
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled("  Commands (:)", subtle)));
+    for part in wrap_units(HELP_COMMANDS, "  ", width.saturating_sub(2)) {
+        lines.push(Line::from(format!("  {part}")));
+    }
     f.render_widget(Paragraph::new(lines), content);
+}
+
+/// Where a help description starts: two spaces, the 10-wide key, "→ ".
+const HELP_DESC_COL: usize = 14;
+
+const HELP_KEYS: &[(&str, &str)] = &[
+    ("d", "dial"),
+    ("a", "accept incoming"),
+    ("s", "silence the ringtone"),
+    ("b / Del", "hang up (reject if ringing)"),
+    ("h", "hold / resume (toggle)"),
+    ("m", "mute the microphone"),
+    ("M", "deafen (microphone and speaker)"),
+    ("t / T", "blind / attended transfer (t: deflect if ringing)"),
+    ("Tab", "switch active call"),
+    ("i", "call details"),
+    ("l", "logs"),
+    ("c", "call history"),
+    ("f", "contacts"),
+    ("?", "this help"),
+    (":", "command"),
+    ("q", "quit"),
+];
+
+/// Command-bar commands; wrapped between entries, never inside one.
+const HELP_COMMANDS: &[&str] = &[
+    "dial <n>",
+    "hangup",
+    "accept",
+    "reject [code]",
+    "hold",
+    "resume",
+    "mute",
+    "deafen",
+    "silence",
+    "dtmf <digits>",
+    "transfer <uri>",
+    "deflect <uri>",
+    "register",
+    "unregister",
+    "info",
+    "log",
+    "history",
+    "contacts",
+    "mouse",
+    "edit",
+    "switch",
+    "quit",
+];
+
+/// Greedy wrap of `units` joined by `sep` into lines at most `width` columns
+/// wide, breaking only between units. A unit wider than `width` gets a line of
+/// its own and is cut by the widget.
+fn wrap_units(units: &[&str], sep: &str, width: usize) -> Vec<String> {
+    let cols = |s: &str| Span::raw(s).width();
+    let width = width.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for unit in units.iter().filter(|u| !u.is_empty()) {
+        if !cur.is_empty() && cols(&cur) + cols(sep) + cols(unit) > width {
+            lines.push(std::mem::take(&mut cur));
+        }
+        if !cur.is_empty() {
+            cur.push_str(sep);
+        }
+        cur.push_str(unit);
+    }
+    if !cur.is_empty() || lines.is_empty() {
+        lines.push(cur);
+    }
+    lines
 }
 
 /// Call-details overlay: peer + the configured inbound-header views.
@@ -927,7 +982,28 @@ pub(crate) fn render_hint_bar(f: &mut Frame, area: Rect, hints: &[Hint], theme: 
 
 #[cfg(test)]
 mod tests {
-    use super::{Hint, key_for_hint, record_hint_hits, render_hint_bar, styled_hints};
+    use super::{
+        HELP_COMMANDS, Hint, key_for_hint, record_hint_hits, render_hint_bar, styled_hints,
+        wrap_units,
+    };
+
+    #[test]
+    fn help_text_wraps_between_units_instead_of_being_cut() {
+        let lines = wrap_units(HELP_COMMANDS, "  ", 30);
+        assert!(lines.len() > 3, "{lines:?}");
+        assert!(lines.iter().all(|l| l.chars().count() <= 30), "{lines:?}");
+        // Nothing is lost, and "dial <n>" is never split.
+        assert_eq!(lines.join("  "), HELP_COMMANDS.join("  "));
+        assert!(lines.iter().any(|l| l.contains("dial <n>")));
+
+        let words = ["blind", "/", "attended", "transfer"];
+        assert_eq!(
+            wrap_units(&words, " ", 14),
+            vec!["blind /", "attended", "transfer"]
+        );
+        // A unit wider than the line stays whole on a line of its own.
+        assert_eq!(wrap_units(&["verylongword"], " ", 4), vec!["verylongword"]);
+    }
     use crate::config::Theme;
     use crate::mouse::{ClickAction, HitMap};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
