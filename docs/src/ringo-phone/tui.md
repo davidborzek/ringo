@@ -131,7 +131,8 @@ rejects a ringing call and hangs up an active one.
 A click beside an overlay (help, logs, call history, contacts, call details,
 dial-history search) or a form submenu (headers, codecs, rename) closes it, as
 `Esc` would. Confirmations and the contact form only close through their own
-buttons or keys.
+buttons or keys. A click anywhere outside the open command bar leaves it, without
+also acting on what was clicked.
 
 While a text input is open (dial, transfer, command bar) only the hints for
 `Enter`, `Esc`, `Tab` and `Ctrl+R` are clickable; clicking a character hint would

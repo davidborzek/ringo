@@ -400,6 +400,32 @@ fn a_click_beside_an_overlay_closes_it_a_click_inside_does_not() {
 }
 
 #[test]
+fn a_click_outside_the_command_bar_leaves_it_and_does_nothing_else() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    ring(&mut app, "1");
+    let _ = commands(&mut rx);
+    app.handle_key(key(':'));
+    app.handle_key(key('x'));
+    assert!(app.command.active);
+
+    // A click on the call row closes the bar instead of acting on the call.
+    let terminal = render_app(&mut app);
+    assert!(left_click(&mut app, find_on_screen(&terminal, "[1]")));
+    assert!(!app.command.active);
+    assert!(app.command.input.is_empty());
+    assert!(commands(&mut rx).is_empty());
+
+    // Over an overlay only the bar goes; the overlay stays.
+    app.handle_key(key('l'));
+    app.handle_key(key(':'));
+    render_app(&mut app);
+    assert!(left_click(&mut app, (0, 0)));
+    assert!(!app.command.active);
+    assert!(app.log.show);
+}
+
+#[test]
 fn a_click_beside_the_dial_history_search_leaves_it() {
     let (mut app, _rx) = test_app();
     app.mouse_enabled = true;

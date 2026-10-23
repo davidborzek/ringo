@@ -188,6 +188,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
         super::dial::render_history_search(f, app, inner);
     }
 
+    // An open command bar: a click anywhere else leaves it, as Esc does, and is
+    // not also a click on what lies there. The bar itself stays inert.
+    if app.command.active {
+        app.hits.push(area, ClickAction::Key(esc()));
+        app.hits.push(chunks[5], ClickAction::Inert);
+    }
+
     // Confirmation popups sit on top of everything.
     if app.quit_confirm {
         render_confirm_popup(
@@ -664,6 +671,10 @@ fn render_status_bar(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) 
 }
 
 // ─── Command / Hint Bar ──────────────────────────────────────────────────────
+
+fn esc() -> KeyEvent {
+    KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)
+}
 
 fn render_command_bar(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     if app.command.active {
