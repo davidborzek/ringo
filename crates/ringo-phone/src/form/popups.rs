@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Rect},
     style::{Modifier, Style},
@@ -9,14 +9,30 @@ use ratatui::{
 
 use super::Term;
 use crate::config::Theme;
+use crate::mouse::{ClickAction, HitMap, Pointer};
+
+/// Make a popup's two buttons clickable. The left one cancels and the right one
+/// confirms, which is what Esc and `y` already mean in every popup here.
+fn record_buttons(hits: &mut HitMap, cancel: Rect, confirm: Rect) {
+    hits.push(
+        cancel,
+        ClickAction::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+    );
+    hits.push(
+        confirm,
+        ClickAction::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)),
+    );
+}
 
 // ─── Restart confirm popup ───────────────────────────────────────────────────
 
-pub fn run_restart_confirm(terminal: &mut Term, theme: &Theme) -> Result<bool> {
+pub fn run_restart_confirm(terminal: &mut Term, theme: &Theme, mouse: bool) -> Result<bool> {
     let mut confirm_yes = true;
+    let mut pointer = Pointer::new(mouse);
 
     loop {
-        terminal.draw(|frame| {
+        pointer.draw(terminal, |frame, hits| {
+            hits.clear();
             let area = frame.area();
             let w = 50u16.min(area.width);
             let h = 7u16.min(area.height);
@@ -65,9 +81,14 @@ pub fn run_restart_confirm(terminal: &mut Term, theme: &Theme) -> Result<bool> {
                 Paragraph::new(Span::styled("  Restart  ", restart_style)),
                 Rect::new(btn_x + 11, btn_y, 10, 1),
             );
+            record_buttons(
+                hits,
+                Rect::new(btn_x, btn_y, 7, 1),
+                Rect::new(btn_x + 11, btn_y, 10, 1),
+            );
         })?;
 
-        if let Event::Key(key) = event::read()? {
+        if let Some(key) = pointer.read_key()? {
             match key.code {
                 KeyCode::Esc => return Ok(false),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -92,13 +113,16 @@ pub fn run_rename(
     old_name: &str,
     existing: &[String],
     theme: &Theme,
+    mouse: bool,
 ) -> Result<Option<String>> {
+    let mut pointer = Pointer::new(mouse);
     let mut input = old_name.to_string();
     let mut cursor = input.len();
     let mut error: Option<String> = None;
 
     loop {
-        terminal.draw(|frame| {
+        pointer.draw(terminal, |frame, hits| {
+            hits.clear();
             let area = frame.area();
             let w = 50u16.min(area.width);
             let h = if error.is_some() { 9 } else { 7 };
@@ -109,6 +133,9 @@ pub fn run_rename(
                 w,
                 h,
             );
+            // A click beside the rename box cancels it, as Esc does (read_key).
+            hits.push(area, ClickAction::Dismiss);
+            hits.push(popup, ClickAction::Inert);
             frame.render_widget(Clear, popup);
 
             let block = Block::default()
@@ -149,15 +176,13 @@ pub fn run_rename(
             // Hint
             let hint_y = inner.y + inner.height.saturating_sub(1);
             let hints: &[crate::tui::ui::Hint] = &[("Enter", "confirm"), ("Esc", "cancel")];
-            crate::tui::ui::render_hint_bar(
-                frame,
-                Rect::new(inner.x, hint_y, inner.width, 1),
-                hints,
-                theme,
-            );
+            let hint_area = Rect::new(inner.x, hint_y, inner.width, 1);
+            crate::tui::ui::render_hint_bar(frame, hint_area, hints, theme);
+            // The name is being typed, so only Enter and Esc are clickable.
+            crate::tui::ui::record_hint_hits(hits, hint_area, hints, true);
         })?;
 
-        if let Event::Key(key) = event::read()? {
+        if let Some(key) = pointer.read_key()? {
             error = None;
             match key.code {
                 KeyCode::Esc => return Ok(None),
@@ -213,11 +238,13 @@ pub fn run_rename(
 
 /// Ask whether to discard unsaved form edits. Returns `true` to discard (leave
 /// the form), `false` to keep editing. Defaults to "keep editing".
-pub fn run_discard_confirm(terminal: &mut Term, theme: &Theme) -> Result<bool> {
+pub fn run_discard_confirm(terminal: &mut Term, theme: &Theme, mouse: bool) -> Result<bool> {
     let mut discard = false;
+    let mut pointer = Pointer::new(mouse);
 
     loop {
-        terminal.draw(|frame| {
+        pointer.draw(terminal, |frame, hits| {
+            hits.clear();
             let area = frame.area();
             let w = 52u16.min(area.width);
             let h = 7u16.min(area.height);
@@ -275,9 +302,19 @@ pub fn run_discard_confirm(terminal: &mut Term, theme: &Theme) -> Result<bool> {
                     1,
                 ),
             );
+            record_buttons(
+                hits,
+                Rect::new(btn_x, btn_y, keep_label.len() as u16, 1),
+                Rect::new(
+                    btn_x + keep_label.len() as u16 + gap,
+                    btn_y,
+                    discard_label.len() as u16,
+                    1,
+                ),
+            );
         })?;
 
-        if let Event::Key(key) = event::read()? {
+        if let Some(key) = pointer.read_key()? {
             match key.code {
                 KeyCode::Esc => return Ok(false),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -297,11 +334,13 @@ pub fn run_discard_confirm(terminal: &mut Term, theme: &Theme) -> Result<bool> {
 
 // ─── Delete confirm popup ────────────────────────────────────────────────────
 
-pub fn run_confirm(terminal: &mut Term, name: &str, theme: &Theme) -> Result<bool> {
+pub fn run_confirm(terminal: &mut Term, name: &str, theme: &Theme, mouse: bool) -> Result<bool> {
     let mut confirm_yes = false;
+    let mut pointer = Pointer::new(mouse);
 
     loop {
-        terminal.draw(|frame| {
+        pointer.draw(terminal, |frame, hits| {
+            hits.clear();
             let area = frame.area();
             let w = 44u16.min(area.width);
             let h = 7u16.min(area.height);
@@ -350,9 +389,14 @@ pub fn run_confirm(terminal: &mut Term, name: &str, theme: &Theme) -> Result<boo
                 Paragraph::new(Span::styled("  Yes  ", yes_style)),
                 Rect::new(btn_x + 11, btn_y, 7, 1),
             );
+            record_buttons(
+                hits,
+                Rect::new(btn_x, btn_y, 6, 1),
+                Rect::new(btn_x + 11, btn_y, 7, 1),
+            );
         })?;
 
-        if let Event::Key(key) = event::read()? {
+        if let Some(key) = pointer.read_key()? {
             match key.code {
                 KeyCode::Esc => return Ok(false),
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {

@@ -1,7 +1,14 @@
 use crate::{
-    config::Hook, config::Theme, contacts::Contact, header::HeaderContext, header::HeaderTemplate,
-    phone::Phone, profile::Profile,
+    config::Hook,
+    config::Theme,
+    contacts::Contact,
+    header::HeaderContext,
+    header::HeaderTemplate,
+    mouse::{ClickAction, DoubleClick, ListId, Release, Selector, WHEEL_ROWS},
+    phone::Phone,
+    profile::Profile,
 };
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use std::{collections::VecDeque, path::PathBuf, time::Instant};
 
 // ─── State types ──────────────────────────────────────────────────────────────
@@ -213,6 +220,9 @@ pub struct CommandState {
     pub active: bool,
     pub input: String,
     pub error: Option<String>,
+    /// A neutral one-line result such as "Copied 5 chars"; drawn like the error
+    /// line, but not in the danger colour, and gone with the next key or click.
+    pub notice: Option<String>,
     /// Prefix typed before Tab was first pressed (for cycling through matches).
     pub tab_prefix: Option<String>,
     pub tab_index: usize,
@@ -326,6 +336,16 @@ pub struct App {
     /// call-details view can show what was actually sent.
     pub pending_outbound_headers: Vec<(String, String)>,
     pub deflected: Option<DeflectedInfo>,
+    /// Whether mouse capture is wanted. Starts from `[ui] mouse`; `:mouse`
+    /// flips it and the render loop brings the terminal in line.
+    pub mouse_enabled: bool,
+    /// The mouse dial pad is open over the dial input / the call's DTMF.
+    pub dialpad_show: bool,
+    /// Clickable regions of the last rendered frame.
+    pub hits: crate::mouse::HitMap,
+    /// Drag-selection over the last rendered frame.
+    pub selector: Selector,
+    double_click: DoubleClick,
 }
 
 impl App {
@@ -407,6 +427,7 @@ impl App {
                 active: false,
                 input: String::new(),
                 error: None,
+                notice: None,
                 tab_prefix: None,
                 tab_index: 0,
             },
@@ -433,7 +454,116 @@ impl App {
             custom_headers,
             pending_outbound_headers: Vec::new(),
             deflected: None,
+            mouse_enabled: false,
+            dialpad_show: false,
+            hits: crate::mouse::HitMap::default(),
+            selector: Selector::default(),
+            double_click: DoubleClick::default(),
         }
+    }
+
+    /// Act on a mouse event against the regions of the last frame. Returns
+    /// whether the screen changed, so moves and drags that change nothing cost no
+    /// redraw. A click acts on release, which a drag turns into a selection.
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> bool {
+        if !self.mouse_enabled {
+            return false;
+        }
+        let (col, row) = (mouse.column, mouse.row);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                let notice_shown = self.command.notice.take().is_some();
+                self.selector.press(col, row) || notice_shown
+            }
+            MouseEventKind::Drag(MouseButton::Left) => self.selector.drag(col, row),
+            MouseEventKind::Up(MouseButton::Left) => match self.selector.release(col, row) {
+                Release::Nothing => false,
+                Release::Click { col, row } => {
+                    self.command.notice = None;
+                    self.handle_click(col, row)
+                }
+                Release::Selected { chars } => {
+                    self.command.notice = (chars > 0).then(|| format!("Copied {chars} chars"));
+                    true
+                }
+            },
+            MouseEventKind::ScrollUp => self.handle_wheel(col, row, KeyCode::Up),
+            MouseEventKind::ScrollDown => self.handle_wheel(col, row, KeyCode::Down),
+            _ => false,
+        }
+    }
+
+    fn handle_click(&mut self, col: u16, row: u16) -> bool {
+        let Some(action) = self.hits.hit(col, row).cloned() else {
+            return false;
+        };
+        match action {
+            ClickAction::Key(key) => self.handle_key(key),
+            ClickAction::Command(cmd) => {
+                if let Err(e) = self.dispatch(cmd, "") {
+                    self.command.error = Some(e);
+                }
+            }
+            ClickAction::Row { list, index } => {
+                let double = self.double_click.register(col, row, Instant::now());
+                return self.click_row(list, index, double);
+            }
+            ClickAction::Dismiss => self.dismiss_modal(),
+            ClickAction::OpenDialpad => self.open_dialpad(),
+            ClickAction::Scroll { .. } | ClickAction::Inert => return false,
+        }
+        true
+    }
+
+    /// A click away from a modal closes it as Esc would, all the way: a search
+    /// typed into the overlay goes with it. Confirmations never get here.
+    fn dismiss_modal(&mut self) {
+        if self.dialpad_show {
+            self.dialpad_show = false;
+            return;
+        }
+        if self.dial.mode == InputMode::HistorySearch {
+            self.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+            return;
+        }
+        if self.call_history.show && self.call_history.detail {
+            self.call_history.detail = false;
+        }
+        self.close_overlays();
+    }
+
+    /// Select a row; a double click on an overlay row presses Enter on it.
+    fn click_row(&mut self, list: ListId, index: usize, double: bool) -> bool {
+        if list == ListId::Calls {
+            self.select_call_index(index);
+            return true;
+        }
+        // The first click already selected the row. The list may have scrolled
+        // to keep it in view, so the cell can map to another index by now.
+        if double {
+            self.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            return true;
+        }
+        match list {
+            ListId::History => self.call_history.selected = index,
+            ListId::Contacts => self.contacts_state.selected = index,
+            ListId::DialHistory => self.dial.selected = index,
+            // Rows of the picker and the profile form are theirs to handle.
+            _ => return false,
+        }
+        true
+    }
+
+    /// The wheel moves whichever list is under the pointer, as the arrow keys would.
+    fn handle_wheel(&mut self, col: u16, row: u16, code: KeyCode) -> bool {
+        let cleared = self.selector.clear();
+        if self.hits.scroll_at(col, row).is_none() {
+            return cleared;
+        }
+        for _ in 0..WHEEL_ROWS {
+            self.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+        }
+        true
     }
 
     /// Place an outbound call, re-rendering dynamic custom headers so each

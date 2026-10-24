@@ -8,6 +8,7 @@ use ratatui::{
 };
 
 use super::app::{ContactFormField, ContactFormMode};
+use crate::mouse::ListId;
 
 /// Minimum width of the contact-name column.
 const NAME_COL_MIN: usize = 12;
@@ -325,7 +326,7 @@ fn form_buf_and_cursor(form: &mut super::app::ContactFormState) -> (&mut String,
 
 // ─── List rendering ──────────────────────────────────────────────────────────
 
-pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
+pub(super) fn render(f: &mut Frame, app: &mut super::app::App, area: Rect) {
     let entries = app.contacts_display_entries();
     let total_contacts = app.contacts.len();
     let filtered_len = entries.len();
@@ -476,9 +477,19 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
 
     let list_area = Rect::new(inner.x, inner.y, inner.width, visible as u16);
     f.render_widget(List::new(items), list_area);
+    super::ui::record_list_hits(
+        &mut app.hits,
+        ListId::Contacts,
+        area,
+        list_area,
+        scroll,
+        filtered_len,
+    );
     if footer_h > 0 {
         let footer_area = Rect::new(inner.x, inner.y + visible as u16, inner.width, footer_h);
         super::ui::render_hint_bar(f, footer_area, footer, &app.theme);
+        let text_input = app.in_text_input();
+        super::ui::record_hint_hits(&mut app.hits, footer_area, footer, text_input);
     }
     super::ui::render_scrollbar(f, &app.theme, area, filtered_len, visible, scroll);
 
@@ -490,7 +501,7 @@ pub(super) fn render(f: &mut Frame, app: &super::app::App, area: Rect) {
 
 // ─── Form rendering ──────────────────────────────────────────────────────────
 
-fn render_contact_form(f: &mut Frame, app: &super::app::App, area: Rect) {
+fn render_contact_form(f: &mut Frame, app: &mut super::app::App, area: Rect) {
     let form = &app.contacts_state.form;
 
     let popup_h: u16 = 7;
@@ -505,6 +516,8 @@ fn render_contact_form(f: &mut Frame, app: &super::app::App, area: Rect) {
     };
 
     f.render_widget(Clear, popup_area);
+    // The form is keyboard-only; keep clicks from reaching the list under it.
+    app.hits.push(area, crate::mouse::ClickAction::Inert);
 
     let title = match form.mode {
         ContactFormMode::Add => " New Contact ",

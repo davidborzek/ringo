@@ -9,6 +9,7 @@ mod form;
 mod header;
 mod history;
 mod hooks;
+mod mouse;
 mod notify;
 mod picker;
 mod profile;

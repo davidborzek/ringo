@@ -1,5 +1,7 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::{Terminal, backend::TestBackend, layout::Rect};
 use ringo::config::Theme;
+use ringo::mouse::ClickAction;
 use ringo::phone::MockPhone;
 use ringo::tui::{App, AppEvent, CallDirection, CallState, InputMode, RegStatus, TransferMode};
 use serde_json::Value;
@@ -166,6 +168,484 @@ fn unregister_signs_off_without_looking_like_a_failure() {
     });
     assert_eq!(app.reg_status, RegStatus::Unregistered);
     assert!(!matches!(app.reg_status, RegStatus::Failed(_)));
+}
+
+fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+/// A left click: press and release on one cell. Whether the release did anything.
+fn left_click(app: &mut App, (col, row): (u16, u16)) -> bool {
+    app.handle_mouse(mouse_event(
+        MouseEventKind::Down(MouseButton::Left),
+        col,
+        row,
+    ));
+    app.handle_mouse(mouse_event(MouseEventKind::Up(MouseButton::Left), col, row))
+}
+
+#[test]
+fn mouse_command_toggles_and_is_offered_by_completion() {
+    let (mut app, _rx) = test_app();
+    assert!(!app.mouse_enabled, "off until config or :mouse says so");
+
+    assert_eq!(app.dispatch("mouse", ""), Ok("Mouse on".to_string()));
+    assert!(app.mouse_enabled);
+    assert_eq!(app.dispatch("mouse", ""), Ok("Mouse off".to_string()));
+    assert!(!app.mouse_enabled);
+
+    app.command.input = "mou".into();
+    app.cycle_completion();
+    assert_eq!(app.command.input.trim(), "mouse");
+}
+
+#[test]
+fn mouse_events_are_ignored_while_mouse_is_off() {
+    let (mut app, _rx) = test_app();
+    app.hits.push(
+        Rect::new(0, 0, 10, 1),
+        ClickAction::Key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE)),
+    );
+
+    let handled = left_click(&mut app, (1, 0));
+
+    assert!(!handled);
+    assert_eq!(app.dial.mode, InputMode::Normal);
+}
+
+#[test]
+fn only_a_left_click_and_the_wheel_count_as_handled() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.hits.push(
+        Rect::new(0, 0, 10, 1),
+        ClickAction::Key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE)),
+    );
+
+    for kind in [
+        MouseEventKind::Moved,
+        MouseEventKind::Drag(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+        MouseEventKind::Down(MouseButton::Right),
+    ] {
+        assert!(!app.handle_mouse(mouse_event(kind, 1, 0)), "{kind:?}");
+    }
+    assert_eq!(app.dial.mode, InputMode::Normal);
+
+    assert!(!left_click(&mut app, (20, 5)));
+    assert!(left_click(&mut app, (1, 0)));
+    assert_eq!(
+        app.dial.mode,
+        InputMode::Dial,
+        "a Key region is a key press"
+    );
+}
+
+// ─── Mouse regions ────────────────────────────────────────────────────────────
+
+fn render_app(app: &mut App) -> Terminal<TestBackend> {
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    // The same steps as the render loop: highlight, then keep the frame.
+    let completed = terminal
+        .draw(|f| {
+            ringo::tui::ui::render(f, app);
+            app.selector.highlight(f.buffer_mut());
+        })
+        .unwrap();
+    if app.mouse_enabled {
+        app.selector.set_frame(completed.buffer.clone());
+    }
+    terminal
+}
+
+/// Where `text` starts on the rendered screen, as (col, row).
+fn find_on_screen(terminal: &Terminal<TestBackend>, text: &str) -> (u16, u16) {
+    let buf = terminal.backend().buffer();
+    let width = buf.area.width;
+    for row in 0..buf.area.height {
+        let line: String = (0..width).map(|col| buf[(col, row)].symbol()).collect();
+        // Borders and bullets are multi-byte, so count columns, not bytes.
+        if let Some(byte) = line.find(text) {
+            return (line[..byte].chars().count() as u16, row);
+        }
+    }
+    panic!("{text:?} is not on the screen");
+}
+
+fn wheel(app: &mut App, (col, row): (u16, u16), kind: MouseEventKind) -> bool {
+    app.handle_mouse(mouse_event(kind, col, row))
+}
+
+#[test]
+fn clicking_the_reject_hint_of_a_ringing_call_rejects_it() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    ring(&mut app, "1");
+    let _ = commands(&mut rx);
+    let terminal = render_app(&mut app);
+
+    assert!(left_click(&mut app, find_on_screen(&terminal, "b reject")));
+
+    assert_eq!(commands(&mut rx), vec!["reject"]);
+}
+
+#[test]
+fn clicking_a_call_row_selects_that_call() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    established(&mut app, "1");
+    established(&mut app, "2");
+    app.selected_call = 0;
+    let _ = commands(&mut rx);
+    let terminal = render_app(&mut app);
+
+    assert!(left_click(&mut app, find_on_screen(&terminal, "[2]")));
+
+    assert_eq!(app.selected_call, 1);
+    assert_eq!(
+        app.calls[0].state,
+        CallState::OnHold,
+        "same auto-hold as Tab"
+    );
+}
+
+#[test]
+fn the_wheel_scrolls_the_log_overlay() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.log.lines = (0..200).map(|i| format!("line {i}")).collect();
+    app.handle_key(key('l'));
+    app.log.lines = (0..200).map(|i| format!("line {i}")).collect();
+    let terminal = render_app(&mut app);
+    assert_eq!(app.log.scroll, 0);
+    let inside = find_on_screen(&terminal, "line 19");
+
+    assert!(wheel(&mut app, inside, MouseEventKind::ScrollUp));
+    assert_eq!(app.log.scroll, 3);
+    assert!(wheel(&mut app, inside, MouseEventKind::ScrollDown));
+    assert_eq!(app.log.scroll, 0);
+    assert!(
+        !wheel(&mut app, (0, 0), MouseEventKind::ScrollUp),
+        "outside the overlay"
+    );
+}
+
+#[test]
+fn clicking_quit_in_the_quit_confirm_quits() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    app.handle_key(key('q'));
+    assert!(app.quit_confirm);
+    app.confirm_yes = false;
+    let _ = commands(&mut rx);
+    let terminal = render_app(&mut app);
+
+    assert!(left_click(&mut app, find_on_screen(&terminal, "Quit  ")));
+
+    assert!(app.quit);
+}
+
+#[test]
+fn clicking_cancel_in_the_quit_confirm_closes_it() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.handle_key(key('q'));
+    let terminal = render_app(&mut app);
+
+    assert!(left_click(&mut app, find_on_screen(&terminal, "Cancel")));
+
+    assert!(!app.quit_confirm);
+    assert!(!app.quit);
+}
+
+#[test]
+fn nothing_behind_a_confirm_popup_is_clickable() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.handle_key(key('q'));
+    let terminal = render_app(&mut app);
+    let (col, row) = find_on_screen(&terminal, "Quit ringo?");
+
+    // The popup body outside its buttons, and the screen outside the popup.
+    assert!(!left_click(&mut app, (col, row)));
+    assert!(!left_click(&mut app, (0, 29)));
+    assert!(app.quit_confirm);
+}
+
+#[test]
+fn a_click_beside_an_overlay_closes_it_a_click_inside_does_not() {
+    // Each overlay key, and whether it is open afterwards.
+    let open = |app: &App| app.help_show || app.log.show || app.call_history.show;
+    for overlay in ['?', 'l', 'c'] {
+        let (mut app, _rx) = test_app();
+        app.mouse_enabled = true;
+        app.handle_key(key(overlay));
+        assert!(open(&app), "{overlay}");
+
+        // Inside: the overlay is centred, so the screen centre is in it.
+        render_app(&mut app);
+        left_click(&mut app, (50, 15));
+        assert!(open(&app), "{overlay}: a click inside keeps it");
+
+        // Beside: the top-left corner is outside every centred overlay.
+        render_app(&mut app);
+        assert!(left_click(&mut app, (0, 0)), "{overlay}");
+        assert!(!open(&app), "{overlay}: a click beside closes it");
+    }
+}
+
+/// A cell of the dial line, which opens the pad; `None` if no cell does.
+fn dial_line(app: &App) -> Option<(u16, u16)> {
+    (0..30u16)
+        .flat_map(|row| (0..100u16).map(move |col| (col, row)))
+        .find(|&(col, row)| app.hits.hit(col, row) == Some(&ClickAction::OpenDialpad))
+}
+
+#[test]
+fn the_dial_line_opens_the_pad_and_its_buttons_dial() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    render_app(&mut app);
+
+    // Idle: the empty dial line opens the pad and the dial input together.
+    let line = dial_line(&app).expect("idle dial line is clickable");
+    assert!(left_click(&mut app, line));
+    assert!(app.dialpad_show);
+    assert_eq!(app.dial.mode, InputMode::Dial);
+
+    let terminal = render_app(&mut app);
+    for digit in ["4", "7", "1"] {
+        let at = find_on_screen(&terminal, &format!(" {digit} "));
+        assert!(left_click(&mut app, at), "{digit}");
+    }
+    assert_eq!(app.dial.input, "471");
+
+    let terminal = render_app(&mut app);
+    assert!(left_click(&mut app, find_on_screen(&terminal, "⌫")));
+    assert_eq!(app.dial.input, "47");
+
+    let terminal = render_app(&mut app);
+    let _ = commands(&mut rx);
+    assert!(left_click(&mut app, find_on_screen(&terminal, "Call")));
+    assert_eq!(commands(&mut rx), vec!["dial"]);
+    render_app(&mut app);
+    assert!(!app.dialpad_show, "the pad goes once the call is placed");
+}
+
+#[test]
+fn the_pad_sends_dtmf_during_a_call_and_closes_with_it() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    established(&mut app, "1");
+    let _ = commands(&mut rx);
+    render_app(&mut app);
+
+    let line = dial_line(&app).expect("DTMF line");
+    assert!(left_click(&mut app, line));
+    assert!(app.dialpad_show);
+    let terminal = render_app(&mut app);
+    assert!(left_click(&mut app, find_on_screen(&terminal, " # ")));
+    assert_eq!(commands(&mut rx), vec!["sndcode"]);
+    assert_eq!(app.dial.dtmf, "#");
+
+    app.handle_message(AppEvent::CallClosed {
+        call_id: "1".into(),
+        reason: "".into(),
+        error: false,
+    });
+    render_app(&mut app);
+    assert!(!app.dialpad_show);
+}
+
+#[test]
+fn esc_or_a_click_beside_closes_the_pad_and_keeps_the_number() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    render_app(&mut app);
+    let line = dial_line(&app).unwrap();
+    left_click(&mut app, line);
+    app.handle_key(key('5'));
+
+    app.handle_key(esc());
+    assert!(!app.dialpad_show);
+    assert_eq!(app.dial.mode, InputMode::Dial);
+    assert_eq!(app.dial.input, "5");
+
+    render_app(&mut app);
+    let line = dial_line(&app).unwrap();
+    left_click(&mut app, line);
+    assert!(app.dialpad_show);
+    render_app(&mut app);
+    assert!(left_click(&mut app, (0, 0)));
+    assert!(!app.dialpad_show);
+    assert_eq!(app.dial.input, "5");
+}
+
+#[test]
+fn without_the_mouse_there_is_no_pad() {
+    let (mut app, _rx) = test_app();
+    render_app(&mut app);
+    assert_eq!(dial_line(&app), None);
+}
+
+#[test]
+fn a_click_outside_the_command_bar_leaves_it_and_does_nothing_else() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    ring(&mut app, "1");
+    let _ = commands(&mut rx);
+    app.handle_key(key(':'));
+    app.handle_key(key('x'));
+    assert!(app.command.active);
+
+    // A click on the call row closes the bar instead of acting on the call.
+    let terminal = render_app(&mut app);
+    assert!(left_click(&mut app, find_on_screen(&terminal, "[1]")));
+    assert!(!app.command.active);
+    assert!(app.command.input.is_empty());
+    assert!(commands(&mut rx).is_empty());
+
+    // Over an overlay only the bar goes; the overlay stays.
+    app.handle_key(key('l'));
+    app.handle_key(key(':'));
+    render_app(&mut app);
+    assert!(left_click(&mut app, (0, 0)));
+    assert!(!app.command.active);
+    assert!(app.log.show);
+}
+
+#[test]
+fn a_click_beside_the_dial_history_search_leaves_it() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.dial.history = ["100".to_string()].into();
+    app.handle_key(key('d'));
+    app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    assert_eq!(app.dial.mode, InputMode::HistorySearch);
+
+    render_app(&mut app);
+    assert!(left_click(&mut app, (0, 0)));
+    assert_ne!(app.dial.mode, InputMode::HistorySearch);
+}
+
+#[test]
+fn a_click_beside_a_confirmation_does_not_dismiss_it() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.contacts = vec![ringo::contacts::Contact {
+        name: "Alice".into(),
+        numbers: vec!["100".into()],
+    }];
+    app.handle_key(key('f'));
+    app.handle_key(key('d'));
+    assert!(app.contacts_state.delete_confirm.is_some());
+
+    render_app(&mut app);
+    assert!(!left_click(&mut app, (0, 0)));
+    assert!(app.contacts_state.delete_confirm.is_some());
+    assert!(app.contacts_state.show);
+}
+
+#[test]
+fn clicking_a_character_hint_while_dialing_does_not_type_it() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.handle_key(key('d'));
+    assert_eq!(app.dial.mode, InputMode::Dial);
+    let terminal = render_app(&mut app);
+
+    // `Tab contacts` is a non-character hint and stays clickable.
+    assert!(left_click(
+        &mut app,
+        find_on_screen(&terminal, "Esc cancel")
+    ));
+    assert_eq!(app.dial.mode, InputMode::Normal);
+
+    app.handle_key(key('d'));
+    let terminal = render_app(&mut app);
+    // No region records a plain character while a text input is active.
+    for col in 0..100 {
+        for row in 0..30 {
+            if let Some(ClickAction::Key(k)) = app.hits.hit(col, row) {
+                assert!(
+                    !matches!(k.code, KeyCode::Char(_))
+                        || k.modifiers.contains(KeyModifiers::CONTROL),
+                    "{k:?} at ({col},{row})"
+                );
+            }
+        }
+    }
+    let _ = terminal;
+    assert!(app.dial.input.is_empty());
+}
+
+#[test]
+fn clicking_an_overlay_hint_while_the_command_bar_is_open_does_not_type_it() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.handle_key(key('l'));
+    assert!(app.log.show);
+    app.handle_key(key(':'));
+    assert!(app.command.active, "`:` opens the command bar over the log");
+    let terminal = render_app(&mut app);
+
+    left_click(&mut app, find_on_screen(&terminal, "w wrap"));
+
+    assert!(app.command.input.is_empty(), "{:?}", app.command.input);
+}
+
+#[test]
+fn clicking_the_failed_registration_registers_again() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    app.handle_message(AppEvent::RegisterFailed {
+        reason: "401".into(),
+    });
+    let _ = commands(&mut rx);
+    let terminal = render_app(&mut app);
+
+    assert!(left_click(&mut app, find_on_screen(&terminal, "Failed")));
+
+    assert_eq!(commands(&mut rx), vec!["uareg"]);
+}
+
+#[test]
+fn a_registered_account_has_no_register_click() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    app.handle_message(AppEvent::RegisterOk {
+        account: "sip:user@example.com".into(),
+    });
+    let terminal = render_app(&mut app);
+
+    assert!(!left_click(
+        &mut app,
+        find_on_screen(&terminal, "Registered")
+    ));
+    assert!(commands(&mut rx).is_empty());
+}
+
+#[test]
+fn a_double_click_on_a_history_row_dials_it() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    app.dial.history = ["one", "two", "three"].map(String::from).into();
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
+    app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    assert_eq!(app.dial.mode, InputMode::HistorySearch);
+    let terminal = render_app(&mut app);
+    let row = find_on_screen(&terminal, " two");
+
+    assert!(left_click(&mut app, row));
+    assert_eq!(app.dial.selected, 1);
+    assert!(left_click(&mut app, row));
+    assert_eq!(app.dial.mode, InputMode::Dial);
+    assert_eq!(app.dial.input, "two");
 }
 
 #[test]
@@ -982,4 +1462,209 @@ fn shutdown_hangs_up_and_sets_quit() {
         .map(|(c, _)| c)
         .collect();
     assert!(cmds.contains(&"hangupall".to_string()));
+}
+
+// ─── Mouse selection ──────────────────────────────────────────────────────────
+
+fn mouse_at(app: &mut App, kind: MouseEventKind, (col, row): (u16, u16)) -> bool {
+    app.handle_mouse(mouse_event(kind, col, row))
+}
+
+/// Drag from `from` to `to` with the left button and let go.
+fn drag_select(app: &mut App, from: (u16, u16), to: (u16, u16)) {
+    mouse_at(app, MouseEventKind::Down(MouseButton::Left), from);
+    mouse_at(app, MouseEventKind::Drag(MouseButton::Left), to);
+    mouse_at(app, MouseEventKind::Up(MouseButton::Left), to);
+}
+
+/// What the render loop would write to the terminal after this frame.
+fn pending_copy(app: &mut App) -> Vec<u8> {
+    let mut out = Vec::new();
+    app.selector.flush_copy(&mut out).unwrap();
+    out
+}
+
+fn reversed_cells(terminal: &Terminal<TestBackend>) -> usize {
+    let buf = terminal.backend().buffer();
+    buf.content()
+        .iter()
+        .filter(|cell| cell.modifier.contains(ratatui::style::Modifier::REVERSED))
+        .count()
+}
+
+#[test]
+fn dragging_across_the_call_view_copies_exactly_the_selected_text() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    established(&mut app, "1");
+    let terminal = render_app(&mut app);
+    let (col, row) = find_on_screen(&terminal, "hangup");
+
+    drag_select(&mut app, (col, row), (col + 5, row));
+
+    assert_eq!(app.command.notice.as_deref(), Some("Copied 6 chars"));
+    let written = String::from_utf8(pending_copy(&mut app)).unwrap();
+    // "hangup" in base64; under tmux the wrapper only surrounds it.
+    assert!(written.contains("]52;c;aGFuZ3Vw\x07"), "{written:?}");
+    let terminal = render_app(&mut app);
+    assert_eq!(
+        reversed_cells(&terminal),
+        6,
+        "the highlight stays after the release"
+    );
+}
+
+#[test]
+fn a_drag_over_a_hint_does_not_press_it() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    ring(&mut app, "1");
+    let _ = commands(&mut rx);
+    let terminal = render_app(&mut app);
+    let (col, row) = find_on_screen(&terminal, "b reject");
+
+    drag_select(&mut app, (col, row), (col + 6, row));
+
+    assert!(commands(&mut rx).is_empty(), "a drag is not a click");
+}
+
+#[test]
+fn pressing_a_hint_alone_does_nothing_until_the_release() {
+    let (mut app, mut rx) = test_app();
+    app.mouse_enabled = true;
+    ring(&mut app, "1");
+    let _ = commands(&mut rx);
+    let terminal = render_app(&mut app);
+    let at = find_on_screen(&terminal, "b reject");
+
+    assert!(!mouse_at(
+        &mut app,
+        MouseEventKind::Down(MouseButton::Left),
+        at
+    ));
+    assert!(commands(&mut rx).is_empty());
+    assert!(mouse_at(
+        &mut app,
+        MouseEventKind::Up(MouseButton::Left),
+        at
+    ));
+    assert_eq!(commands(&mut rx), vec!["reject"]);
+}
+
+#[test]
+fn dragging_within_one_cell_or_to_an_unchanged_range_needs_no_redraw() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    established(&mut app, "1");
+    let terminal = render_app(&mut app);
+    let (col, row) = find_on_screen(&terminal, "hangup");
+
+    mouse_at(
+        &mut app,
+        MouseEventKind::Down(MouseButton::Left),
+        (col, row),
+    );
+    assert!(!mouse_at(
+        &mut app,
+        MouseEventKind::Drag(MouseButton::Left),
+        (col, row)
+    ));
+    assert!(mouse_at(
+        &mut app,
+        MouseEventKind::Drag(MouseButton::Left),
+        (col + 3, row)
+    ));
+    assert!(!mouse_at(
+        &mut app,
+        MouseEventKind::Drag(MouseButton::Left),
+        (col + 3, row)
+    ));
+}
+
+#[test]
+fn a_selection_is_dropped_by_the_next_key_click_or_resize_not_by_a_move() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    established(&mut app, "1");
+    let terminal = render_app(&mut app);
+    let (col, row) = find_on_screen(&terminal, "hangup");
+
+    drag_select(&mut app, (col, row), (col + 5, row));
+    assert!(!mouse_at(&mut app, MouseEventKind::Moved, (0, 0)));
+    assert_eq!(reversed_cells(&render_app(&mut app)), 6);
+
+    app.handle_key(key('x'));
+    assert_eq!(reversed_cells(&render_app(&mut app)), 0, "a key");
+    assert_eq!(app.command.notice, None);
+
+    drag_select(&mut app, (col, row), (col + 5, row));
+    assert!(mouse_at(
+        &mut app,
+        MouseEventKind::Down(MouseButton::Left),
+        (0, 0)
+    ));
+    assert_eq!(reversed_cells(&render_app(&mut app)), 0, "a press");
+
+    drag_select(&mut app, (col, row), (col + 5, row));
+    app.selector.clear();
+    assert_eq!(reversed_cells(&render_app(&mut app)), 0, "a resize");
+}
+
+#[test]
+fn the_copied_notice_is_not_drawn_as_an_error() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    established(&mut app, "1");
+    let terminal = render_app(&mut app);
+    let (col, row) = find_on_screen(&terminal, "hangup");
+
+    drag_select(&mut app, (col, row), (col + 5, row));
+    let terminal = render_app(&mut app);
+
+    let (notice_col, notice_row) = find_on_screen(&terminal, "Copied 6 chars");
+    let fg = terminal.backend().buffer()[(notice_col, notice_row)].fg;
+    let theme = Theme::default();
+    assert_eq!(fg, theme.subtle.get());
+    assert_ne!(fg, theme.danger.get());
+}
+
+#[test]
+fn nothing_is_selected_or_written_while_mouse_is_off() {
+    let (mut app, _rx) = test_app();
+    established(&mut app, "1");
+    let terminal = render_app(&mut app);
+    let (col, row) = find_on_screen(&terminal, "hangup");
+
+    mouse_at(
+        &mut app,
+        MouseEventKind::Down(MouseButton::Left),
+        (col, row),
+    );
+    assert!(!mouse_at(
+        &mut app,
+        MouseEventKind::Drag(MouseButton::Left),
+        (col + 5, row)
+    ));
+    assert!(!mouse_at(
+        &mut app,
+        MouseEventKind::Up(MouseButton::Left),
+        (col + 5, row)
+    ));
+
+    assert!(pending_copy(&mut app).is_empty());
+    assert_eq!(app.command.notice, None);
+    assert_eq!(reversed_cells(&render_app(&mut app)), 0);
+}
+
+#[test]
+fn selecting_only_blanks_copies_nothing_and_shows_no_notice() {
+    let (mut app, _rx) = test_app();
+    app.mouse_enabled = true;
+    render_app(&mut app);
+
+    // Row 26, the call-error line, is blank while there is no reason to show.
+    drag_select(&mut app, (5, 26), (20, 26));
+
+    assert!(pending_copy(&mut app).is_empty());
+    assert_eq!(app.command.notice, None);
 }
