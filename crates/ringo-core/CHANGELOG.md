@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.17.0...ringo-core-v0.18.0) - 2026-10-30
+
+### Bug Fixes
+
+- *(ringo-core)* wait for re_main before using the RE thread ([#140](https://github.com/davidborzek/ringo/pull/140))
+
+### Features
+
+- *(ringo-phone)* deflect a ringing call on demand ([#148](https://github.com/davidborzek/ringo/pull/148))
+- *(ringo-phone)* configurable reject code for ringing calls ([#147](https://github.com/davidborzek/ringo/pull/147))
+
 ## [0.17.0](https://github.com/davidborzek/ringo/compare/ringo-core-v0.16.1...ringo-core-v0.17.0) - 2026-10-15
 
 ## [0.16.1](https://github.com/davidborzek/ringo/compare/ringo-core-v0.16.0...ringo-core-v0.16.1) - 2026-09-13
