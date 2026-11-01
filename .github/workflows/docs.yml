@@ -45,7 +45,7 @@ jobs:
       # here would mean a full baresip build just to publish docs).
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
       # No committed package-lock.json (it's gitignored), so no `cache: npm` / `npm ci`.
       - run: npm install --no-save
       - run: npm run docs:js
