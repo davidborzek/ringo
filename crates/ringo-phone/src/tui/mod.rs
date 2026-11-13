@@ -3,6 +3,7 @@ mod call;
 mod call_history;
 mod contacts;
 mod dial;
+mod dialpad;
 mod handler;
 pub mod ui;
 
@@ -50,6 +51,41 @@ pub(crate) fn clear_screen(terminal: &mut Term) -> io::Result<()> {
     terminal.swap_buffers();
     terminal.swap_buffers();
     Ok(())
+}
+
+/// Hand the terminal back to the shell: mouse capture off, raw mode off,
+/// alternate screen left. Every path that ends the full-screen UI goes through
+/// here, so none of them can leave capture on for the shell to receive reports.
+pub(crate) fn leave_screen(terminal: &mut Term) {
+    let _ = crate::mouse::set_capture(terminal.backend_mut(), false);
+    let _ = crossterm::terminal::disable_raw_mode();
+    let _ = crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::LeaveAlternateScreen
+    );
+}
+
+/// Run `f` (a child process that owns the terminal, e.g. `$EDITOR`) with the
+/// full-screen UI suspended, then restore it, mouse capture included.
+pub(crate) fn with_screen_released<T>(terminal: &mut Term, f: impl FnOnce() -> T) -> Result<T> {
+    let capture = crate::mouse::capture_active();
+    crate::mouse::set_capture(terminal.backend_mut(), false)?;
+    crossterm::terminal::disable_raw_mode()?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::LeaveAlternateScreen
+    )?;
+
+    let out = f();
+
+    crossterm::terminal::enable_raw_mode()?;
+    crossterm::execute!(
+        terminal.backend_mut(),
+        crossterm::terminal::EnterAlternateScreen
+    )?;
+    crate::mouse::set_capture(terminal.backend_mut(), capture)?;
+    clear_screen(terminal)?;
+    Ok(out)
 }
 
 /// Renders the TUI on a private handle to the original stdout terminal while
@@ -137,6 +173,8 @@ pub struct SessionParams {
     pub hooks: Vec<crate::config::Hook>,
     pub profile: crate::profile::Profile,
     pub contacts: Vec<crate::contacts::Contact>,
+    /// `[ui] mouse` from ringo.toml: the initial state of the `:mouse` toggle.
+    pub mouse: bool,
     /// Anything wrong with ringo.toml, so the session can say so. Starting a
     /// profile by name skips the picker, which is where this is otherwise
     /// shown — without this the phone would just quietly ignore its config.
@@ -215,6 +253,7 @@ fn setup(rt: tokio::runtime::Runtime, p: SessionParams) -> Result<SetupParts> {
     // user has to dismiss, not a log entry they will never look for. Cleared by
     // Esc or by opening the command bar, like any other error there.
     let mut app = app;
+    app.mouse_enabled = p.mouse;
     if let Some(first) = config_problems.first() {
         let more = config_problems.len() - 1;
         let extra = if more > 0 {
@@ -282,35 +321,13 @@ pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<
     )?;
     clear_screen(&mut terminal)?;
 
-    let mut do_restart = false;
-    loop {
-        render_loop(&mut terminal, &mut app, &msg_rx, &remote_rx)?;
-
-        if !app.edit_profile {
-            break;
+    let do_restart = match run_screens(&mut terminal, &mut app, &msg_rx, &remote_rx) {
+        Ok(do_restart) => do_restart,
+        Err(e) => {
+            leave_screen(&mut terminal);
+            return Err(e);
         }
-
-        // Open edit form over the still-running TUI terminal
-        app.edit_profile = false;
-        app.quit = false;
-
-        let profile = crate::profile::load(&app.profile_name)?;
-        let result = crate::form::run_form(
-            &mut terminal,
-            Some(&app.profile_name),
-            &profile,
-            &[],
-            &app.theme,
-        )?;
-        if let Some((_, new_profile)) = result {
-            crate::profile::save(&app.profile_name, &new_profile)?;
-            if crate::form::run_restart_confirm(&mut terminal, &app.theme)? {
-                do_restart = true;
-                break;
-            }
-        }
-        // Form cancelled or "Later" → resume TUI
-    }
+    };
 
     // Tear down the session: dropping the backend handle fires ua_unregister, so
     // libre sends the final de-REGISTER and the registrar drops our binding.
@@ -354,12 +371,46 @@ pub fn run(rt: tokio::runtime::Runtime, params: SessionParams) -> Result<Option<
     // of onto the shell after we quit. The parent shell keeps its own fds, so
     // it's unaffected.
     std::mem::forget(redirect);
-    let _ = crossterm::terminal::disable_raw_mode();
-    let _ = crossterm::execute!(
-        terminal.backend_mut(),
-        crossterm::terminal::LeaveAlternateScreen
-    );
+    leave_screen(&mut terminal);
     Ok(None)
+}
+
+/// The phone, and the profile form it opens over itself on `:edit`. Returns
+/// whether a saved edit asked for an in-place restart.
+fn run_screens(
+    terminal: &mut Term,
+    app: &mut App,
+    msg_rx: &mpsc::Receiver<AppEvent>,
+    remote_rx: &mpsc::Receiver<crate::control::RemoteRequest>,
+) -> Result<bool> {
+    loop {
+        render_loop(terminal, app, msg_rx, remote_rx)?;
+
+        if !app.edit_profile {
+            return Ok(false);
+        }
+
+        // Open edit form over the still-running TUI terminal
+        app.edit_profile = false;
+        app.quit = false;
+
+        let profile = crate::profile::load(&app.profile_name)?;
+        let result = crate::form::run_form(
+            terminal,
+            Some(&app.profile_name),
+            &profile,
+            &[],
+            &app.theme,
+            app.mouse_enabled,
+        )?;
+        if let Some((_, new_profile)) = result {
+            crate::profile::save(&app.profile_name, &new_profile)?;
+            if crate::form::run_restart_confirm(terminal, &app.theme, app.mouse_enabled)? {
+                return Ok(true);
+            }
+        }
+        // Form cancelled or "Later" → resume TUI
+    }
 }
 
 /// Run a session without a TUI: process events and remote-control
@@ -430,6 +481,9 @@ fn render_loop(
     // frames — that's what stops the constant repaint/flicker.
     let mut dirty = true;
     loop {
+        // The one place that applies the `:mouse` toggle (and the config value at
+        // start-up) to the terminal; a no-op while the two already agree.
+        crate::mouse::set_capture(terminal.backend_mut(), app.mouse_enabled)?;
         app.tick = app.tick.wrapping_add(1);
         // Auto-clear deflected indicator after 10 s.
         if let Some(d) = &app.deflected {
@@ -473,11 +527,18 @@ fn render_loop(
                 terminal.backend_mut(),
                 crossterm::terminal::BeginSynchronizedUpdate
             );
-            terminal.draw(|frame| ui::render(frame, app))?;
+            let completed = terminal.draw(|frame| {
+                ui::render(frame, app);
+                app.selector.highlight(frame.buffer_mut());
+            })?;
+            if app.mouse_enabled {
+                app.selector.set_frame(completed.buffer.clone());
+            }
             let _ = crossterm::execute!(
                 terminal.backend_mut(),
                 crossterm::terminal::EndSynchronizedUpdate
             );
+            app.selector.flush_copy(terminal.backend_mut())?;
             dirty = false;
         }
 
@@ -491,7 +552,21 @@ fn render_loop(
                         break;
                     }
                 }
-                Event::Resize(_, _) => dirty = true,
+                // Moves and drags are never handled, so they cost no redraw.
+                Event::Mouse(mouse) => {
+                    if app.handle_mouse(mouse) {
+                        app.deflected = None;
+                        dirty = true;
+                        if app.quit {
+                            break;
+                        }
+                    }
+                }
+                Event::Resize(_, _) => {
+                    app.selector.clear();
+                    app.command.notice = None;
+                    dirty = true;
+                }
                 _ => {}
             }
         }

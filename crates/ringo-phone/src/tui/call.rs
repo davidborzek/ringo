@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use super::app::{Call, CallDirection, CallState, Declined};
+use crate::mouse::{ClickAction, ListId};
 
 impl super::app::App {
     pub(super) fn handle_call_incoming(
@@ -377,6 +378,15 @@ impl super::app::App {
         if self.calls.len() < 2 {
             return;
         }
+        self.select_call_index((self.selected_call + 1) % self.calls.len());
+    }
+
+    /// Make call `next` the selected one, with the hold/resume handling of
+    /// `switch_line`. A no-op for the call that is already selected.
+    pub(super) fn select_call_index(&mut self, next: usize) {
+        if next >= self.calls.len() || next == self.selected_call {
+            return;
+        }
         let cur = self.selected_call;
         // Hold the current call — make it baresip's current first, then hold()
         // targets it.
@@ -391,7 +401,6 @@ impl super::app::App {
             self.phone.hold();
             self.calls[cur].state = CallState::OnHold;
         }
-        let next = (cur + 1) % self.calls.len();
         self.selected_call = next;
         // stale: re-polled for the newly-active call next tick
         self.media = None;
@@ -547,7 +556,7 @@ fn reject_reason(code: u16) -> &'static str {
         .map_or("Rejected", |(_, reason)| reason)
 }
 
-pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
+pub(super) fn render_calls(f: &mut Frame, app: &mut super::app::App, area: Rect) {
     let mut items: Vec<ListItem> = app
         .calls
         .iter()
@@ -651,6 +660,35 @@ pub(super) fn render_calls(f: &mut Frame, app: &super::app::App, area: Rect) {
             ListItem::new(lines)
         })
         .collect();
+
+    // One region per call, as tall as its (possibly metrics-expanded) item. The
+    // list is not scrolled; the title takes the first row.
+    let list_area = Rect::new(
+        area.x,
+        area.y + 1,
+        area.width,
+        area.height.saturating_sub(1),
+    );
+    let mut y = list_area.y;
+    // Not under an overlay or popup: those own the pointer, and a click must not
+    // quietly switch calls (and hold one) behind them.
+    let clickable = !app.overlay_open();
+    for (index, item) in items
+        .iter()
+        .enumerate()
+        .take(if clickable { app.calls.len() } else { 0 })
+    {
+        let h = item.height() as u16;
+        let row = Rect::new(list_area.x, y, list_area.width, h).intersection(list_area);
+        app.hits.push(
+            row,
+            ClickAction::Row {
+                list: ListId::Calls,
+                index,
+            },
+        );
+        y = y.saturating_add(h);
+    }
 
     // Transient deflected-call entry (302). Shown alongside active calls or
     // alone when the call list is empty; auto-cleared after 10 s by the

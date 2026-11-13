@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 use crossterm::{
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{EnterAlternateScreen, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{fs, io};
@@ -12,7 +12,28 @@ use crate::profile;
 pub fn run(name: Option<String>, notify: bool, headless: bool) -> Result<()> {
     // Clean up registry entries from sessions that are no longer reachable.
     crate::control::reap_stale();
+    if !headless {
+        crate::mouse::install_panic_hook();
+    }
 
+    // A picked profile keeps the picker's screen up for the session to take over,
+    // so any error between the pick and the session's own teardown (a failing
+    // `password_cmd`, a missing backend) would leave raw mode and mouse capture
+    // on for the shell.
+    restore_terminal_on_error(
+        run_profiles(name, notify, headless),
+        crate::mouse::restore_terminal,
+    )
+}
+
+fn restore_terminal_on_error<T>(result: Result<T>, restore: impl FnOnce()) -> Result<T> {
+    if result.is_err() {
+        restore();
+    }
+    result
+}
+
+fn run_profiles(name: Option<String>, notify: bool, headless: bool) -> Result<()> {
     let mut current = match name {
         Some(n) => n,
         None if headless => bail!("--headless requires a profile name"),
@@ -68,6 +89,7 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
         &prof,
         serde_json::json!({}),
     );
+    let mouse = config.ui.mouse;
     let theme = config.theme;
     let hooks = config.hooks;
     let config_problems = config.problems;
@@ -84,6 +106,7 @@ fn run_one(name: &str, notify: bool, headless: bool) -> Result<Option<String>> {
         hooks,
         profile: prof,
         contacts,
+        mouse,
         config_problems,
     };
 
@@ -157,8 +180,7 @@ pub fn pick_profile(focus: Option<&str>) -> Result<Option<String>> {
     // On success (Start) we intentionally stay in the alternate screen so the TUI
     // takes over seamlessly; restore the terminal on error or a clean quit.
     if !matches!(result, Ok(Some(_))) {
-        let _ = disable_raw_mode();
-        let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+        crate::tui::leave_screen(&mut terminal);
     }
 
     result
@@ -177,6 +199,10 @@ fn pick_profile_loop(
     loop {
         let config = crate::config::load();
         let theme = &config.theme;
+        let mouse = config.ui.mouse;
+        // Every pass: the picker may follow a session whose `:mouse` toggle differs
+        // from the config, and Settings may have changed it.
+        crate::mouse::set_capture(terminal.backend_mut(), mouse)?;
         let names = match config.picker.order {
             crate::config::PickerOrder::Recent => profile::order_by_recent(
                 profile::list_names().unwrap_or_default(),
@@ -223,6 +249,7 @@ fn pick_profile_loop(
             config.picker.logo,
             &notices,
             focus.as_deref(),
+            mouse,
         )? {
             PickerAction::Start(name) => {
                 // Starting it would fail in run_one and take the process with
@@ -246,6 +273,7 @@ fn pick_profile_loop(
                     &profile::Profile::default(),
                     &names,
                     theme,
+                    mouse,
                 )? {
                     profile::save(&name, &p)?;
                     focus = Some(name);
@@ -254,7 +282,7 @@ fn pick_profile_loop(
             PickerAction::Clone(source) => match profile::load(&source) {
                 Ok(current) => {
                     if let Some((name, p)) =
-                        crate::form::run_form(terminal, None, &current, &names, theme)?
+                        crate::form::run_form(terminal, None, &current, &names, theme, mouse)?
                     {
                         profile::save(&name, &p)?;
                         focus = Some(name);
@@ -268,9 +296,14 @@ fn pick_profile_loop(
             PickerAction::Edit(name) => {
                 match profile::load(&name) {
                     Ok(current) => {
-                        if let Some((_, p)) =
-                            crate::form::run_form(terminal, Some(&name), &current, &[], theme)?
-                        {
+                        if let Some((_, p)) = crate::form::run_form(
+                            terminal,
+                            Some(&name),
+                            &current,
+                            &[],
+                            theme,
+                            mouse,
+                        )? {
                             profile::save(&name, &p)?;
                         }
                     }
@@ -289,7 +322,9 @@ fn pick_profile_loop(
                 open_settings(terminal)?;
             }
             PickerAction::Rename(name) => {
-                if let Some(new_name) = crate::form::run_rename(terminal, &name, &names, theme)? {
+                if let Some(new_name) =
+                    crate::form::run_rename(terminal, &name, &names, theme, mouse)?
+                {
                     profile::rename(&name, &new_name)?;
                     focus = Some(new_name);
                 } else {
@@ -297,7 +332,7 @@ fn pick_profile_loop(
                 }
             }
             PickerAction::Delete(name) => {
-                if crate::form::run_confirm(terminal, &name, theme)? {
+                if crate::form::run_confirm(terminal, &name, theme, mouse)? {
                     fs::remove_dir_all(profile::profile_dir(&name)?)?;
                 }
             }
@@ -323,21 +358,12 @@ fn open_settings(terminal: &mut crate::tui::Term) -> Result<()> {
 /// Hand a file to `$EDITOR`, giving the terminal back for the duration and
 /// taking it again afterwards.
 fn open_in_editor(terminal: &mut crate::tui::Term, path: &std::path::Path) -> Result<()> {
-    use crossterm::terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-    };
     use std::process::Command;
 
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-
-    let status = Command::new(&editor).arg(path).status();
-
-    enable_raw_mode()?;
-    execute!(terminal.backend_mut(), EnterAlternateScreen)?;
-    crate::tui::clear_screen(terminal)?;
+    let status =
+        crate::tui::with_screen_released(terminal, || Command::new(&editor).arg(path).status())?;
 
     status
         .map(|_| ())
@@ -379,8 +405,9 @@ fn build_subtitle(profile: &profile::Profile, fields: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::build_subtitle;
+    use super::{build_subtitle, restore_terminal_on_error};
     use crate::profile::Profile;
+    use anyhow::{Result, bail};
 
     fn profile_with_metadata(pairs: &[(&str, &str)]) -> Profile {
         let mut p = Profile {
@@ -436,5 +463,28 @@ mod tests {
         // Bare `metadata` names no key and must resolve to nothing.
         let p = profile_with_metadata(&[("reachable_at", "11")]);
         assert_eq!(build_subtitle(&p, &fields(&["metadata"])), "");
+    }
+
+    #[test]
+    fn an_error_restores_the_terminal_and_is_passed_on() {
+        let mut restored = 0;
+        let result: Result<()> =
+            restore_terminal_on_error(bail_with("password_cmd failed"), || {
+                restored += 1;
+            });
+        assert_eq!(result.unwrap_err().to_string(), "password_cmd failed");
+        assert_eq!(restored, 1);
+    }
+
+    #[test]
+    fn success_leaves_the_terminal_alone() {
+        let mut restored = 0;
+        let result = restore_terminal_on_error(Ok(7), || restored += 1);
+        assert_eq!(result.unwrap(), 7);
+        assert_eq!(restored, 0);
+    }
+
+    fn bail_with(msg: &str) -> Result<()> {
+        bail!("{msg}")
     }
 }

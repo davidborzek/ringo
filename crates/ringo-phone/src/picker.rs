@@ -1,13 +1,17 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Padding, Paragraph},
 };
 
 use crate::config::{LogoMode, Theme};
+use crate::mouse::{
+    ClickAction, HitMap, Input, ListId, Pointed, Pointer, WHEEL_ROWS, step_clamped,
+};
 
 pub enum PickerAction {
     Start(String),
@@ -166,7 +170,9 @@ pub(crate) fn run(
     // profile that could not be started or cloned.
     notices: &[String],
     focus: Option<&str>,
+    mouse: bool,
 ) -> Result<PickerAction> {
+    let mut pointer = Pointer::new(mouse);
     let mut query = String::new();
     let mut selected: usize = focus
         .and_then(|name| items.iter().position(|i| i.name == name))
@@ -185,261 +191,326 @@ pub(crate) fn run(
             selected = filtered.len() - 1;
         }
 
-        terminal.draw(|frame| {
-            let area = frame.area();
-            let hint_h = crate::tui::ui::hint_rows(PICKER_HINTS, area.width);
-            let logo = logo_for(logo_mode, area.width, area.height, hint_h);
-            let header_height = header_height(logo);
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(header_height), // [0] logo
-                    Constraint::Length(3),             // [1] search box
-                    Constraint::Length(1),             // [2] gap
-                    Constraint::Min(1),                // [3] list box
-                    Constraint::Length(hint_h),        // [4] hint
-                ])
-                .split(area);
-
-            // ASCII logo + version — vertically centered in the header area.
-            let version_line = Line::from(Span::styled(
-                format!("v{}", env!("CARGO_PKG_VERSION")),
-                Style::default().fg(theme.subtle.get()),
-            ));
-            let logo_height = logo.len() as u16 + 1;
-            let top_pad = chunks[0].height.saturating_sub(logo_height) / 2;
-            let mut logo_lines: Vec<Line> = std::iter::repeat_n(Line::from(""), top_pad as usize)
-                .chain(logo.iter().map(|l| Line::from(*l)))
-                .chain(std::iter::once(version_line))
-                .collect();
-            while logo_lines.len() < chunks[0].height as usize {
-                logo_lines.push(Line::from(""));
-            }
-            frame.render_widget(
-                Paragraph::new(logo_lines)
-                    .alignment(Alignment::Center)
-                    .style(Style::default().fg(theme.accent.get())),
-                chunks[0],
-            );
-
-            // The row between the search box and the list is a gap unless there
-            // is something to say. Saying it here matters more than anywhere
-            // else: the picker runs before the log file is opened, so a warning
-            // has nowhere else to go, and a phone that silently ignores its
-            // config looks broken rather than misconfigured.
-            if let Some(first) = notices.first() {
-                let more = notices.len() - 1;
-                let extra = if more > 0 {
-                    format!(" (+{more} more)")
-                } else {
-                    String::new()
-                };
-                frame.render_widget(
-                    Paragraph::new(format!(" ⚠ {first}{extra}"))
-                        .style(Style::default().fg(theme.danger.get())),
-                    chunks[2],
-                );
-            }
-
-            // Search box
-            frame.render_widget(
-                Paragraph::new(query.as_str()).block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_type(BorderType::Rounded)
-                        .padding(Padding::horizontal(1))
-                        // No emoji in the title: terminals disagree on whether
-                        // one is single- or double-width, and the border shifts
-                        // with them.
-                        .title(" search "),
-                ),
-                chunks[1],
-            );
-            // Cursor after the border (1) + left padding (1) + typed query.
-            frame.set_cursor_position((
-                chunks[1].x + 2 + query.chars().count() as u16,
-                chunks[1].y + 1,
-            ));
-
-            // Count in the title: with a filter active there is otherwise no way
-            // to tell whether the list is short or merely cut down.
-            let title = if filtered.len() == items.len() {
-                format!(" profiles ({}) ", items.len())
-            } else {
-                format!(" profiles ({}/{}) ", filtered.len(), items.len())
+        pointer.draw(terminal, |frame, hits| {
+            let view = PickerView {
+                items,
+                filtered: &filtered,
+                query: &query,
+                selected,
+                theme,
+                logo_mode,
+                notices,
             };
-            let list_block = Block::default()
+            render_picker(frame, hits, view, &mut page);
+        })?;
+
+        let key = match pointer.read()? {
+            Input::Key(key) => key,
+            Input::Redraw => continue,
+            Input::Pointer(Pointed::Wheel { list, down }) => {
+                if list == ListId::Picker {
+                    selected = step_clamped(selected, filtered.len(), down, WHEEL_ROWS);
+                }
+                continue;
+            }
+            Input::Pointer(Pointed::Click { action, double, .. }) => match action {
+                ClickAction::Key(key) => key,
+                ClickAction::Row {
+                    list: ListId::Picker,
+                    index,
+                } => {
+                    if !double {
+                        selected = index;
+                        continue;
+                    }
+                    // The first click already selected the row, and the list may
+                    // have scrolled since, so this cell can name another one.
+                    KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+                }
+                _ => continue,
+            },
+        };
+        if let Some(action) = handle_picker_key(key, &mut query, &mut selected, &filtered, page) {
+            return Ok(action);
+        }
+    }
+}
+
+/// Everything one frame of the picker is drawn from.
+#[derive(Clone, Copy)]
+struct PickerView<'a> {
+    items: &'a [PickerItem],
+    filtered: &'a [&'a PickerItem],
+    query: &'a str,
+    selected: usize,
+    theme: &'a Theme,
+    logo_mode: LogoMode,
+    notices: &'a [String],
+}
+
+/// Draw the picker and record what a click on it would hit. `page` is set to the
+/// rows the list shows.
+fn render_picker(frame: &mut Frame, hits: &mut HitMap, view: PickerView, page: &mut usize) {
+    let PickerView {
+        items,
+        filtered,
+        query,
+        selected,
+        theme,
+        logo_mode,
+        notices,
+    } = view;
+    hits.clear();
+    let area = frame.area();
+    let hint_h = crate::tui::ui::hint_rows(PICKER_HINTS, area.width);
+    let logo = logo_for(logo_mode, area.width, area.height, hint_h);
+    let header_height = header_height(logo);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(header_height), // [0] logo
+            Constraint::Length(3),             // [1] search box
+            Constraint::Length(1),             // [2] gap
+            Constraint::Min(1),                // [3] list box
+            Constraint::Length(hint_h),        // [4] hint
+        ])
+        .split(area);
+
+    // ASCII logo + version — vertically centered in the header area.
+    let version_line = Line::from(Span::styled(
+        format!("v{}", env!("CARGO_PKG_VERSION")),
+        Style::default().fg(theme.subtle.get()),
+    ));
+    let logo_height = logo.len() as u16 + 1;
+    let top_pad = chunks[0].height.saturating_sub(logo_height) / 2;
+    let mut logo_lines: Vec<Line> = std::iter::repeat_n(Line::from(""), top_pad as usize)
+        .chain(logo.iter().map(|l| Line::from(*l)))
+        .chain(std::iter::once(version_line))
+        .collect();
+    while logo_lines.len() < chunks[0].height as usize {
+        logo_lines.push(Line::from(""));
+    }
+    frame.render_widget(
+        Paragraph::new(logo_lines)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(theme.accent.get())),
+        chunks[0],
+    );
+
+    // The row between the search box and the list is a gap unless there
+    // is something to say. Saying it here matters more than anywhere
+    // else: the picker runs before the log file is opened, so a warning
+    // has nowhere else to go, and a phone that silently ignores its
+    // config looks broken rather than misconfigured.
+    if let Some(first) = notices.first() {
+        let more = notices.len() - 1;
+        let extra = if more > 0 {
+            format!(" (+{more} more)")
+        } else {
+            String::new()
+        };
+        frame.render_widget(
+            Paragraph::new(format!(" ⚠ {first}{extra}"))
+                .style(Style::default().fg(theme.danger.get())),
+            chunks[2],
+        );
+    }
+
+    // Search box
+    frame.render_widget(
+        Paragraph::new(query).block(
+            Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .padding(Padding::horizontal(1))
-                .title(title)
-                .title_style(Style::default().fg(theme.accent.get()));
-            // What PgUp/PgDn move by, taken from the window actually drawn.
-            page = list_block.inner(chunks[3]).height.max(1) as usize;
+                // No emoji in the title: terminals disagree on whether
+                // one is single- or double-width, and the border shifts
+                // with them.
+                .title(" search "),
+        ),
+        chunks[1],
+    );
+    // Cursor after the border (1) + left padding (1) + typed query.
+    frame.set_cursor_position((
+        chunks[1].x + 2 + query.chars().count() as u16,
+        chunks[1].y + 1,
+    ));
 
-            // Measured over every profile, not the filtered ones: taken from the
-            // filtered set the column would move on each keystroke as the
-            // longest name drops out of the results, and the whole list twitches
-            // while you type.
-            let name_w = items
-                .iter()
-                .map(|i| i.name.chars().count())
-                .max()
-                .unwrap_or(0);
+    // Count in the title: with a filter active there is otherwise no way
+    // to tell whether the list is short or merely cut down.
+    let title = if filtered.len() == items.len() {
+        format!(" profiles ({}) ", items.len())
+    } else {
+        format!(" profiles ({}/{}) ", filtered.len(), items.len())
+    };
+    let list_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .padding(Padding::horizontal(1))
+        .title(title)
+        .title_style(Style::default().fg(theme.accent.get()));
+    // What PgUp/PgDn move by, taken from the window actually drawn.
+    let list_inner = list_block.inner(chunks[3]);
+    *page = list_inner.height.max(1) as usize;
 
-            // Split the row: two columns of gutter, then the name, then what is
-            // left for the subtitle. A name too long for the row wins over its
-            // subtitle — it is what identifies the profile.
-            // highlight_symbol indents every row by its own width on top of the
-            // gutter, so both come off the budget.
-            let row_w = list_block.inner(chunks[3]).width as usize;
-            let used = HIGHLIGHT_W + GUTTER_W;
-            let name_col = name_w.min(row_w.saturating_sub(used));
-            let sub_w = row_w.saturating_sub(used + name_col + 2);
+    // Measured over every profile, not the filtered ones: taken from the
+    // filtered set the column would move on each keystroke as the
+    // longest name drops out of the results, and the whole list twitches
+    // while you type.
+    let name_w = items
+        .iter()
+        .map(|i| i.name.chars().count())
+        .max()
+        .unwrap_or(0);
 
-            // Profile list — selection styling handled by the List widget
-            let list_items: Vec<ListItem> = filtered
-                .iter()
-                .map(|item| {
-                    // A dot for a live session, a blank otherwise, so the names
-                    // stay in one column either way.
-                    let mark = Span::styled(
-                        if item.running { "● " } else { "  " },
-                        Style::default().fg(theme.success.get()),
-                    );
-                    let name = Span::raw(format!("{:<name_col$}", truncate(&item.name, name_col)));
-                    let trailing = if item.broken {
-                        Span::styled(
-                            format!("  {}", truncate("⚠ unreadable", sub_w)),
-                            Style::default().fg(theme.danger.get()),
-                        )
-                    } else {
-                        Span::styled(
-                            format!("  {}", truncate(&item.subtitle, sub_w)),
-                            Style::default().fg(theme.subtle.get()),
-                        )
-                    };
-                    ListItem::new(Line::from(vec![mark, name, trailing]))
-                })
-                .collect();
+    // Split the row: two columns of gutter, then the name, then what is
+    // left for the subtitle. A name too long for the row wins over its
+    // subtitle — it is what identifies the profile.
+    // highlight_symbol indents every row by its own width on top of the
+    // gutter, so both come off the budget.
+    let row_w = list_block.inner(chunks[3]).width as usize;
+    let used = HIGHLIGHT_W + GUTTER_W;
+    let name_col = name_w.min(row_w.saturating_sub(used));
+    let sub_w = row_w.saturating_sub(used + name_col + 2);
 
-            if filtered.is_empty() {
-                // Empty state: no profiles at all, or none matching the query.
-                let inner = list_block.inner(chunks[3]);
-                frame.render_widget(list_block, chunks[3]);
-                let msg = if query.trim().is_empty() {
-                    "no profiles yet — press Ctrl+N to create one".to_string()
-                } else {
-                    format!("no profiles match \"{}\"", query)
-                };
-                // Centred, so it reads as a message about the box rather than
-                // as a first entry that got cut off.
-                let top_pad = inner.height.saturating_sub(1) / 2;
-                let lines: Vec<Line> = std::iter::repeat_n(Line::from(""), top_pad as usize)
-                    .chain(std::iter::once(Line::from(msg)))
-                    .collect();
-                frame.render_widget(
-                    Paragraph::new(lines)
-                        .alignment(Alignment::Center)
-                        .style(Style::default().fg(theme.subtle.get())),
-                    inner,
-                );
-            } else {
-                // Inner height before the block is moved into the List: that is
-                // the viewport the scrollbar has to describe.
-                let visible = list_block.inner(chunks[3]).height as usize;
-                let mut list_state = ListState::default();
-                list_state.select(Some(selected));
-                frame.render_stateful_widget(
-                    List::new(list_items)
-                        .block(list_block)
-                        // Not REVERSED: that inverts each span on its own, so
-                        // the session dot, the name and the subtitle each turn
-                        // into a differently coloured block and the row reads as
-                        // a patchwork. An arrow plus accent leaves the colours
-                        // alone.
-                        .highlight_style(
-                            Style::default()
-                                .fg(theme.accent.get())
-                                .add_modifier(Modifier::BOLD),
-                        )
-                        .highlight_symbol("▶ "),
-                    chunks[3],
-                    &mut list_state,
-                );
-                // After rendering, because the List is what decides how far it
-                // had to scroll to keep the selection in view. No-ops when
-                // everything fits.
-                crate::tui::ui::render_scrollbar(
-                    frame,
-                    theme,
-                    chunks[3],
-                    filtered.len(),
-                    visible,
-                    list_state.offset(),
-                );
-            }
-
-            // Hint line (wraps onto extra rows on narrow terminals)
-            frame.render_widget(
-                Paragraph::new(crate::tui::ui::styled_hints(PICKER_HINTS, theme))
-                    .wrap(Wrap { trim: false }),
-                chunks[4],
+    // Profile list — selection styling handled by the List widget
+    let list_items: Vec<ListItem> = filtered
+        .iter()
+        .map(|item| {
+            // A dot for a live session, a blank otherwise, so the names
+            // stay in one column either way.
+            let mark = Span::styled(
+                if item.running { "● " } else { "  " },
+                Style::default().fg(theme.success.get()),
             );
-        })?;
+            let name = Span::raw(format!("{:<name_col$}", truncate(&item.name, name_col)));
+            let trailing = if item.broken {
+                Span::styled(
+                    format!("  {}", truncate("⚠ unreadable", sub_w)),
+                    Style::default().fg(theme.danger.get()),
+                )
+            } else {
+                Span::styled(
+                    format!("  {}", truncate(&item.subtitle, sub_w)),
+                    Style::default().fg(theme.subtle.get()),
+                )
+            };
+            ListItem::new(Line::from(vec![mark, name, trailing]))
+        })
+        .collect();
 
-        if let Event::Key(key) = event::read()? {
-            let ctrl = key.modifiers == KeyModifiers::CONTROL;
-            match key.code {
-                KeyCode::Esc => return Ok(PickerAction::Quit),
-                KeyCode::Char('c') if ctrl => return Ok(PickerAction::Quit),
-                KeyCode::Char('n') if ctrl => return Ok(PickerAction::New),
-                KeyCode::Char('s') if ctrl => return Ok(PickerAction::Settings),
-                KeyCode::Char('e') if ctrl => {
-                    if let Some(item) = filtered.get(selected) {
-                        return Ok(PickerAction::Edit(item.name.clone()));
-                    }
-                }
-                KeyCode::Char('y') if ctrl => {
-                    if let Some(item) = filtered.get(selected) {
-                        return Ok(PickerAction::Clone(item.name.clone()));
-                    }
-                }
-                KeyCode::Char('r') if ctrl => {
-                    if let Some(item) = filtered.get(selected) {
-                        return Ok(PickerAction::Rename(item.name.clone()));
-                    }
-                }
-                KeyCode::Char('d') if ctrl => {
-                    if let Some(item) = filtered.get(selected) {
-                        return Ok(PickerAction::Delete(item.name.clone()));
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(item) = filtered.get(selected) {
-                        return Ok(PickerAction::Start(item.name.clone()));
-                    }
-                }
-                KeyCode::Up
-                | KeyCode::Down
-                | KeyCode::PageUp
-                | KeyCode::PageDown
-                | KeyCode::Home
-                | KeyCode::End => {
-                    selected = move_selection(key.code, selected, filtered.len(), page);
-                }
-                KeyCode::Backspace => {
-                    query.pop();
-                    selected = 0;
-                }
-                KeyCode::Char(c) => {
-                    query.push(c);
-                    selected = 0;
-                }
-                _ => {}
-            }
-        }
+    if filtered.is_empty() {
+        // Empty state: no profiles at all, or none matching the query.
+        let inner = list_block.inner(chunks[3]);
+        frame.render_widget(list_block, chunks[3]);
+        let msg = if query.trim().is_empty() {
+            "no profiles yet — press Ctrl+N to create one".to_string()
+        } else {
+            format!("no profiles match \"{}\"", query)
+        };
+        // Centred, so it reads as a message about the box rather than
+        // as a first entry that got cut off.
+        let top_pad = inner.height.saturating_sub(1) / 2;
+        let lines: Vec<Line> = std::iter::repeat_n(Line::from(""), top_pad as usize)
+            .chain(std::iter::once(Line::from(msg)))
+            .collect();
+        frame.render_widget(
+            Paragraph::new(lines)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(theme.subtle.get())),
+            inner,
+        );
+    } else {
+        // Inner height before the block is moved into the List: that is
+        // the viewport the scrollbar has to describe.
+        let visible = list_block.inner(chunks[3]).height as usize;
+        let mut list_state = ListState::default();
+        list_state.select(Some(selected));
+        frame.render_stateful_widget(
+            List::new(list_items)
+                .block(list_block)
+                // Not REVERSED: that inverts each span on its own, so
+                // the session dot, the name and the subtitle each turn
+                // into a differently coloured block and the row reads as
+                // a patchwork. An arrow plus accent leaves the colours
+                // alone.
+                .highlight_style(
+                    Style::default()
+                        .fg(theme.accent.get())
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol("▶ "),
+            chunks[3],
+            &mut list_state,
+        );
+        // After rendering, because the List is what decides how far it
+        // had to scroll to keep the selection in view. No-ops when
+        // everything fits.
+        crate::tui::ui::render_scrollbar(
+            frame,
+            theme,
+            chunks[3],
+            filtered.len(),
+            visible,
+            list_state.offset(),
+        );
+        crate::tui::ui::record_list_hits(
+            hits,
+            ListId::Picker,
+            chunks[3],
+            list_inner,
+            list_state.offset(),
+            filtered.len(),
+        );
     }
+
+    // Hint line (wraps onto extra rows on narrow terminals)
+    crate::tui::ui::render_hint_bar(frame, chunks[4], PICKER_HINTS, theme);
+    // The query box is always taking text, so only the chords are clickable.
+    crate::tui::ui::record_hint_hits(hits, chunks[4], PICKER_HINTS, true);
+}
+
+/// Apply one key to the picker: an action to return to the caller, or `None`
+/// after the query or the selection changed. Mouse clicks on hints and rows
+/// arrive here as the key they stand for.
+fn handle_picker_key(
+    key: KeyEvent,
+    query: &mut String,
+    selected: &mut usize,
+    filtered: &[&PickerItem],
+    page: usize,
+) -> Option<PickerAction> {
+    let ctrl = key.modifiers == KeyModifiers::CONTROL;
+    let current = filtered.get(*selected).map(|item| item.name.clone());
+    match key.code {
+        KeyCode::Esc => return Some(PickerAction::Quit),
+        KeyCode::Char('c') if ctrl => return Some(PickerAction::Quit),
+        KeyCode::Char('n') if ctrl => return Some(PickerAction::New),
+        KeyCode::Char('s') if ctrl => return Some(PickerAction::Settings),
+        KeyCode::Char('e') if ctrl => return current.map(PickerAction::Edit),
+        KeyCode::Char('y') if ctrl => return current.map(PickerAction::Clone),
+        KeyCode::Char('r') if ctrl => return current.map(PickerAction::Rename),
+        KeyCode::Char('d') if ctrl => return current.map(PickerAction::Delete),
+        KeyCode::Enter => return current.map(PickerAction::Start),
+        KeyCode::Up
+        | KeyCode::Down
+        | KeyCode::PageUp
+        | KeyCode::PageDown
+        | KeyCode::Home
+        | KeyCode::End => {
+            *selected = move_selection(key.code, *selected, filtered.len(), page);
+        }
+        KeyCode::Backspace => {
+            query.pop();
+            *selected = 0;
+        }
+        KeyCode::Char(c) => {
+            query.push(c);
+            *selected = 0;
+        }
+        _ => {}
+    }
+    None
 }
 
 /// Whether a row answers `query`: every whitespace-separated token has to
@@ -465,9 +536,13 @@ fn row_matches(query: &str, name: &str, subtitle: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        KeyCode, LOGO, LOGO_SMALL, LogoMode, PickerItem, logo_for, move_selection, row_matches,
-        truncate,
+        KeyCode, LOGO, LOGO_SMALL, LogoMode, PickerAction, PickerItem, PickerView,
+        handle_picker_key, logo_for, move_selection, render_picker, row_matches, truncate,
     };
+    use crate::config::Theme;
+    use crate::mouse::{ClickAction, HitMap, ListId};
+    use crossterm::event::{KeyEvent, KeyModifiers};
+    use ratatui::{Terminal, backend::TestBackend};
 
     /// The shortest terminal the block letters are allowed on, by the rule in
     /// logo_for, with a one-row hint bar.
@@ -597,6 +672,143 @@ mod tests {
         assert!(matching("sipe", &items).is_empty());
         assert!(matching("lb", &items).is_empty());
         assert_eq!(matching("lab", &items), ["Lab"]);
+    }
+
+    fn items(n: usize) -> Vec<PickerItem> {
+        (0..n)
+            .map(|i| item(&format!("profile-{i:02}"), "sip"))
+            .collect()
+    }
+
+    /// Draw the picker at `width`×`height` and return the regions it recorded and
+    /// the screen text, row by row.
+    fn drawn(
+        all: &[PickerItem],
+        selected: usize,
+        width: u16,
+        height: u16,
+    ) -> (HitMap, Vec<String>) {
+        let theme = Theme::default();
+        let filtered: Vec<&PickerItem> = all.iter().collect();
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        let mut hits = HitMap::default();
+        let mut page = 0;
+        terminal
+            .draw(|frame| {
+                let view = PickerView {
+                    items: all,
+                    filtered: &filtered,
+                    query: "",
+                    selected,
+                    theme: &theme,
+                    logo_mode: LogoMode::Off,
+                    notices: &[],
+                };
+                render_picker(frame, &mut hits, view, &mut page);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let lines = (0..height)
+            .map(|y| (0..width).map(|x| buf[(x, y)].symbol()).collect::<String>())
+            .collect();
+        (hits, lines)
+    }
+
+    fn row_of(lines: &[String], text: &str) -> u16 {
+        lines.iter().position(|l| l.contains(text)).unwrap() as u16
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn a_click_on_a_row_selects_that_profile() {
+        let all = items(5);
+        let (hits, lines) = drawn(&all, 0, 80, 24);
+        let y = row_of(&lines, "profile-03");
+        assert_eq!(
+            hits.hit(10, y),
+            Some(&ClickAction::Row {
+                list: ListId::Picker,
+                index: 3
+            })
+        );
+    }
+
+    #[test]
+    fn rows_of_a_scrolled_list_map_to_their_real_index() {
+        // Selecting the last of many rows scrolls the list; the first visible row
+        // is then not index 0 and a click must still name what is under it.
+        let all = items(40);
+        let (hits, lines) = drawn(&all, 39, 80, 20);
+        for index in [39, 30] {
+            let y = row_of(&lines, &format!("profile-{index:02}"));
+            assert_eq!(
+                hits.hit(10, y),
+                Some(&ClickAction::Row {
+                    list: ListId::Picker,
+                    index
+                })
+            );
+        }
+        assert!(!lines.iter().any(|l| l.contains("profile-00")));
+    }
+
+    #[test]
+    fn a_click_on_a_hint_is_its_key() {
+        let all = items(2);
+        let (hits, lines) = drawn(&all, 0, 80, 24);
+        let y = row_of(&lines, "settings");
+        let x = lines[y as usize].find("C-s").unwrap() as u16;
+        assert_eq!(hits.hit(x, y), Some(&ClickAction::Key(ctrl('s'))));
+        let quit = lines[y as usize].find("Esc").unwrap() as u16;
+        assert_eq!(
+            hits.hit(quit, y),
+            Some(&ClickAction::Key(KeyEvent::new(
+                KeyCode::Esc,
+                KeyModifiers::NONE
+            )))
+        );
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_list_but_not_the_search_box() {
+        let all = items(5);
+        let (hits, lines) = drawn(&all, 0, 80, 24);
+        let y = row_of(&lines, "profile-01");
+        assert_eq!(hits.scroll_at(10, y), Some(ListId::Picker));
+        assert_eq!(hits.scroll_at(10, row_of(&lines, "search")), None);
+    }
+
+    #[test]
+    fn keys_from_clicks_act_on_the_selected_profile() {
+        let all = items(3);
+        let filtered: Vec<&PickerItem> = all.iter().collect();
+        let mut query = String::new();
+        let mut selected = 1;
+        let mut press = |key| handle_picker_key(key, &mut query, &mut selected, &filtered, 10);
+        assert!(matches!(press(ctrl('e')), Some(PickerAction::Edit(n)) if n == "profile-01"));
+        assert!(matches!(press(ctrl('n')), Some(PickerAction::New)));
+        assert!(matches!(
+            press(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            Some(PickerAction::Start(n)) if n == "profile-01"
+        ));
+        assert!(matches!(
+            press(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            Some(PickerAction::Quit)
+        ));
+    }
+
+    #[test]
+    fn typing_resets_the_selection_and_extends_the_query() {
+        let all = items(3);
+        let filtered: Vec<&PickerItem> = all.iter().collect();
+        let mut query = String::new();
+        let mut selected = 2;
+        let typed = KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE);
+        assert!(handle_picker_key(typed, &mut query, &mut selected, &filtered, 10).is_none());
+        assert_eq!((query.as_str(), selected), ("p", 0));
     }
 
     #[test]

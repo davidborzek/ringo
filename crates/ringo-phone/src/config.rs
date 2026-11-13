@@ -20,6 +20,7 @@ pub struct RingoConfig {
     /// of the file naming them, and a leading `~/` expands to $HOME.
     pub include: Vec<String>,
     pub picker: PickerConfig,
+    pub ui: UiConfig,
     pub theme: Theme,
     pub baresip: BaresipConfig,
     pub sounds: SoundsConfig,
@@ -301,6 +302,15 @@ impl Default for PickerConfig {
             order: PickerOrder::Recent,
         }
     }
+}
+
+/// Terminal behaviour that applies to every profile.
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct UiConfig {
+    /// Click and scroll support. Off by default: capturing the mouse takes
+    /// text selection away from the terminal.
+    pub mouse: bool,
 }
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
@@ -587,6 +597,18 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn mouse_is_off_unless_the_config_turns_it_on() {
+        assert!(!RingoConfig::default().ui.mouse);
+        let cfg = load_files(&[("ringo.toml", "[ui]\n")]);
+        assert!(!cfg.ui.mouse);
+        assert!(cfg.problems.is_empty(), "{:?}", cfg.problems);
+
+        let cfg = load_files(&[("ringo.toml", "[ui]\nmouse = true\n")]);
+        assert!(cfg.ui.mouse);
+        assert!(cfg.problems.is_empty(), "{:?}", cfg.problems);
     }
 
     #[test]
