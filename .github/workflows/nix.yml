@@ -58,7 +58,7 @@ jobs:
 
       # Upstream Nix. DeterminateSystems/nix-installer-action only installs
       # Determinate Nix since 2026-01-01.
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
 
       # Renovate bumps `branch` in .gitmodules, the gitlink, and the tags in the
       # flake.nix input URLs, but it cannot regenerate flake.lock. Not for lack
@@ -162,7 +162,7 @@ jobs:
         with:
           ref: ${{ needs.check.outputs.sha }}
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
 
       # Read-only: nothing here pushes. A fork PR has no token, and the cache is
       # filled from main by nix-cache.yml. It is here so an unchanged derivation

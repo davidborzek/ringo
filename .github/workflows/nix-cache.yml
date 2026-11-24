@@ -62,7 +62,7 @@ jobs:
 
       # Upstream Nix. DeterminateSystems/nix-installer-action only installs
       # Determinate Nix since 2026-01-01.
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@v32
 
       - uses: cachix/cachix-action@v17
         with:
